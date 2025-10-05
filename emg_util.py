@@ -30,46 +30,121 @@ DO_EXPORT_CSV = True
 CSV_OUT = "emg_features.csv"
 # --------------------------------------------------- #
 
+from scipy.signal import filtfilt
+
+from scipy.signal import welch
+
+def mnf_mdf_feature(x, fs):
+    x = np.asarray(x, dtype=float)
+    n = x.size
+    if n < 2 or not np.isfinite(x).any():
+        return np.nan, np.nan
+
+    nperseg = min(n, 256)
+    noverlap = nperseg // 2 if nperseg >= 16 else 0
+
+    f, Pxx = welch(x, fs=fs, nperseg=nperseg, noverlap=noverlap,
+                   window='hann', scaling='density')
+    if Pxx.size == 0 or not np.isfinite(Pxx).any():
+        return np.nan, np.nan
+
+    Pxx = np.maximum(Pxx, 1e-20)
+    psd_sum = float(np.sum(Pxx))
+    mnf = float(np.sum(f * Pxx) / psd_sum)
+
+    cdf = np.cumsum(Pxx)
+    mdf = float(f[min(np.searchsorted(cdf, 0.5 * psd_sum), len(f) - 1)])
+    return mnf, mdf
+
+def filtfilt_safe(b, a, x):
+    n = x.size
+    default_padlen = 3 * (max(len(a), len(b)) - 1)
+    if n <= default_padlen:
+        try:
+            return filtfilt(b, a, x, method='gust')
+        except Exception:
+            padlen = max(1, min(default_padlen, n - 2))
+            return filtfilt(b, a, x, padlen=padlen)
+    return filtfilt(b, a, x)
+
+from pathlib import Path
+import re
+import numpy as np
+import pandas as pd
+
 def read_emg_file(filepath: str, channel_index=0):
     """
-    Tries to read a text file with auto-detected delimiter and optional header.
+    Robust reader: tries multiple delimiters; falls back to extracting all numbers by regex.
     Returns a 1D numpy array (selected channel).
     """
     fp = Path(filepath)
     if not fp.exists():
         raise FileNotFoundError(f"File not found: {fp}")
 
-    # Try pandas with auto-sep; drop non-numeric columns
-    df = pd.read_csv(fp, sep=None, engine='python', comment='#', header=None, dtype=str)
-    # Convert to numeric and drop columns that are fully NaN
-    df = df.apply(pd.to_numeric, errors='coerce')
-    df = df.dropna(axis=1, how='all')
+    # --- Try structured parsing with pandas using several delimiters ---
+    candidate_reads = []
+    # (label, kwargs)
+    attempts = [
+        ("sep=None", dict(sep=None, engine="python", comment="#", header=None, dtype=str)),
+        (",", dict(sep=",", engine="python", comment="#", header=None, dtype=str)),
+        ("\\t", dict(sep="\t", engine="python", comment="#", header=None, dtype=str)),
+        (";", dict(sep=";", engine="python", comment="#", header=None, dtype=str)),
+        ("whitespace", dict(delim_whitespace=True, engine="python", comment="#", header=None, dtype=str)),
+        ("|", dict(sep="|", engine="python", comment="#", header=None, dtype=str)),
+    ]
 
-    if df.shape[1] == 0:
-        raise ValueError("No numeric data found in file.")
-    if channel_index >= df.shape[1]:
-        raise ValueError(f"Requested channel_index={channel_index}, but file has only {df.shape[1]} columns.")
+    for label, kw in attempts:
+        try:
+            df = pd.read_csv(fp, **kw)
+            df = df.apply(pd.to_numeric, errors="coerce")
+            df = df.dropna(axis=1, how="all")
+            if df.shape[1] > 0 and df.shape[0] > 0:
+                arr = df.values.astype(float)
+                candidate_reads.append((label, arr))
+        except Exception:
+            pass
 
-    x = df.iloc[:, channel_index].dropna().values.astype(float)
+    # Choose the parse with the most rows
+    if candidate_reads:
+        label_best, arr_best = max(candidate_reads, key=lambda t: t[1].shape[0])
+        # If multiple columns, honor channel_index
+        if arr_best.ndim == 2:
+            if channel_index >= arr_best.shape[1]:
+                raise ValueError(f"Requested channel_index={channel_index}, but file has only {arr_best.shape[1]} columns (best parse='{label_best}').")
+            x = arr_best[:, channel_index]
+        else:
+            x = arr_best
+        x = x[np.isfinite(x)]
+        if x.size >= 10:  # reasonable lower bound
+            return x
+
+    # --- Fallback: extract every number in the file (robust to weird formats) ---
+    text = fp.read_text(errors="ignore")
+    # float regex: handles ints, floats, scientific notation, +/- signs
+    nums = re.findall(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?", text)
+    x = np.array([float(v) for v in nums], dtype=float)
+    if x.size == 0:
+        raise ValueError("No numeric data found in file (even with regex fallback). "
+                         "Please check the file contents and delimiter.")
     return x
 
 def bandpass_filter(x, fs, low=20.0, high=450.0, order=4):
     nyq = 0.5 * fs
     lown, highn = low/nyq, high/nyq
     b, a = butter(order, [lown, highn], btype='bandpass')
-    return filtfilt(b, a, x)
+    return filtfilt_safe(b, a, x)
 
 def notch_filter(x, fs, f0=60.0, q=30.0, harmonics=(2,)):  # 60Hz and (optionally) 120Hz, etc.
     y = x.copy()
     # Fundamental
     b, a = iirnotch(w0=f0/(fs/2), Q=q)
-    y = filtfilt(b, a, y)
+    y = filtfilt_safe(b, a, y)
     # Harmonics
     for h in harmonics:
         f = f0 * h
         if f < fs/2 - 1:
             b, a = iirnotch(w0=f/(fs/2), Q=q)
-            y = filtfilt(b, a, y)
+            y = filtfilt_safe(b, a, y)
     return y
 
 def windowed_view(x, win_samples, step_samples):
@@ -105,24 +180,39 @@ def mnf_mdf_feature(x, fs):
     mdf = f[min(mdf_idx, len(f)-1)]
     return mnf, mdf
 
+import numpy as np
+import pywt
+
 def wavelet_entropy_feature(x, wavelet='db4', level=None):
     """
-    Wavelet entropy from the normalized energy of detail+approx coefficients.
-    Higher entropy ~ more spread energy (often ↑ with noise/fatigue), but interpret with care.
+    Wavelet entropy from normalized energies of wavedec coefficients.
+    Robust to short segments: returns NaN if no decomposition is possible.
     """
-    # Choose max level if not specified
-    if level is None:
-        level = pywt.dwtn_max_level(len(x), wavelet)
-    coeffs = pywt.wavedec(x, wavelet, level=level)
-    # Energy across all coeff arrays
-    energies = np.array([np.sum(c**2) for c in coeffs])
-    total = np.sum(energies)
-    if total <= 0:
-        return 0.0
+    x = np.asarray(x, dtype=float)
+    n = x.size
+    if n == 0 or not np.isfinite(x).any():
+        return np.nan
+
+    w = pywt.Wavelet(wavelet)
+    # Max allowed level for 1-D data of length n
+    max_level = pywt.dwt_max_level(data_len=n, filter_len=w.dec_len)
+    # Choose level (auto if None)
+    lvl = max_level if level is None else max(0, min(level, max_level))
+
+    if lvl == 0:
+        # No valid decomposition for this length & wavelet
+        return np.nan
+
+    # Do the decomposition (mode can be 'symmetric' or 'periodization')
+    coeffs = pywt.wavedec(x, wavelet=w, level=lvl, mode='symmetric')
+
+    energies = np.array([np.sum(c * c) for c in coeffs], dtype=float)
+    total = float(np.sum(energies))
+    if not np.isfinite(total) or total <= 0.0:
+        return np.nan
+
     p = energies / total
-    # Shannon entropy (base e)
-    ent = -np.sum(p * np.log(p + 1e-20))
-    return float(ent)
+    return float(-np.sum(p * np.log(p + 1e-20)))
 
 def sample_entropy_feature(x, m=2, r=None):
     """
@@ -157,28 +247,34 @@ def sample_entropy_feature(x, m=2, r=None):
     return -np.log(phi_m1 / phi_m)
 
 def compute_features_over_time(x, fs, win_sec=1.0, step_sec=0.25):
-    """
-    Slide a window and compute features per window.
-    Returns: t_centers (s), dict of feature arrays
-    """
+    n = len(x)
+    if n == 0:
+        return np.asarray([]), {'RMS': np.asarray([]), 'MNF': np.asarray([]), 'MDF': np.asarray([]),
+                                'WaveletEntropy': np.asarray([]), 'SampleEntropy': np.asarray([])}
+
     win_samples = int(round(win_sec * fs))
     step_samples = int(round(step_sec * fs))
+
+    # If the signal is shorter than the requested window, shrink the window
+    if n < win_samples:
+        win_samples = n
+        step_samples = max(1, win_samples // 4)
+
     windows = windowed_view(x, win_samples, step_samples)
+    if not windows:
+        windows = [(0, n)]
 
     t_centers = []
     rms_vals, mnf_vals, mdf_vals, went_vals, sampen_vals = [], [], [], [], []
-
     for (i0, i1) in windows:
         seg = x[i0:i1]
         t_centers.append((i0 + i1) / 2 / fs)
-
-        # Features
         rms_vals.append(rms_feature(seg))
         mnf, mdf = mnf_mdf_feature(seg, fs)
         mnf_vals.append(mnf)
         mdf_vals.append(mdf)
         went_vals.append(wavelet_entropy_feature(seg, wavelet='db4'))
-        sampen_vals.append(sample_entropy_feature(seg, m=2, r=None))  # r defaults to 0.2*std
+        sampen_vals.append(sample_entropy_feature(seg, m=2, r=None))
 
     feats = {
         'RMS': np.asarray(rms_vals),
@@ -188,7 +284,6 @@ def compute_features_over_time(x, fs, win_sec=1.0, step_sec=0.25):
         'SampleEntropy': np.asarray(sampen_vals),
     }
     return np.asarray(t_centers), feats
-
 def preprocess_pipeline(x, fs):
     """
     Detrend -> Band-pass (20–450 Hz) -> Notch (60 Hz + 120 Hz)
@@ -234,14 +329,25 @@ def main():
     # 1) Load
     emg = read_emg_file(FILE_PATH, channel_index=CHANNEL_INDEX)
 
+    print(f"[DEBUG] raw: N={emg.size}, finite%={np.isfinite(emg).mean() * 100:.1f}%")
+
     # 2) Preprocess
     emg_proc = preprocess_pipeline(emg, FS_HZ)
+
+    print(f"[DEBUG] proc: N={emg_proc.size}, finite%={np.isfinite(emg_proc).mean() * 100:.1f}%")
+
+    win_samples = int(round(WINDOW_SEC * FS_HZ))
+    step_samples = int(round(STEP_SEC * FS_HZ))
+    print(f"[DEBUG] win/sec={WINDOW_SEC}, step/sec={STEP_SEC}, win_samples={win_samples}, step_samples={step_samples}")
 
     # 3) Time axis for signal
     t = np.arange(len(emg_proc)) / FS_HZ
 
     # 4) Features over time (sliding windows)
     t_feat, feats = compute_features_over_time(emg_proc, FS_HZ, win_sec=WINDOW_SEC, step_sec=STEP_SEC)
+
+    print(f"[DEBUG] windows={t_feat.size}  | feats lens: " +
+         ", ".join(f"{k}:{len(v)}" for k, v in feats.items()))
 
     # 5) Plot
     plot_all(t, emg_proc, t_feat, feats, FS_HZ)
