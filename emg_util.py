@@ -327,7 +327,8 @@ def plot_all(t_signal, signal, t_feat, feats, fs):
 
 def main():
     # 1) Load
-    emg = read_emg_file(FILE_PATH, channel_index=CHANNEL_INDEX)
+    #emg = read_emg_file(FILE_PATH, channel_index=CHANNEL_INDEX)
+    emg = pd.read_csv('emg_example.csv')['emg'].values.astype(np.float32)  # one column: 'emg'
 
     print(f"[DEBUG] raw: N={emg.size}, finite%={np.isfinite(emg).mean() * 100:.1f}%")
 
