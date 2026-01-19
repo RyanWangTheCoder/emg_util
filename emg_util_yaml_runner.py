@@ -398,6 +398,11 @@ def main():
     out_dir = cfg.get('session', {}).get('out_dir', 'out')
     os.makedirs(out_dir, exist_ok=True)
 
+    # If plots are enabled, cache loaded DataFrames to avoid re-reading CSVs.
+    plots_enabled = bool((cfg.get('plots', {}) or {}).get('enable', False))
+    all_dfs = [] if plots_enabled else None
+
+
     # Save effective config for reproducibility
     with open(os.path.join(out_dir, 'effective_config.json'), 'w', encoding='utf-8') as f:
         json.dump(cfg, f, indent=2)
@@ -407,6 +412,7 @@ def main():
     session_min_ts = None
     for p in paths:
         df = pd.read_csv(p, engine='python')
+        if all_dfs is not None: all_dfs.append(df)
         # coerce numeric
         for c in ['ts_ms','ax','ay','az','gx','gy','gz','raw']:
             if c in df.columns:
@@ -428,8 +434,10 @@ def main():
 
     mode = cfg.get('features', {}).get('mode', 'both')
 
-    # Build file time index for selective EMG reads
-    idx = file_time_index(paths)
+    idx = None
+    if mode in ('swing', 'both'):
+        # Build file time index for selective EMG reads
+        idx = file_time_index(paths)
 
     swing_feat_df = None
     if mode in ('swing', 'both'):
@@ -467,6 +475,49 @@ def main():
                 bout_out = bout_df.merge(bout_extra, on='bout_id', how='left')
                 bout_out.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
 
+
+    # Optional plots (windowed features + figures) using emg_util.py helpers
+    pl = cfg.get('plots', {}) or {}
+    if bool(pl.get('enable', False)):
+        # Load full EMG+IMU dataframe for plotting pipeline (one-pass compute)
+        if all_dfs is not None and len(all_dfs):
+            emg_imu = pd.concat(all_dfs, ignore_index=True)
+        else:
+            emg_imu = pd.concat([pd.read_csv(pp, engine='python') for pp in paths], ignore_index=True)
+        for c in ['ts_ms','ax','ay','az','gx','gy','gz','raw']:
+            if c in emg_imu.columns:
+                emg_imu[c] = pd.to_numeric(emg_imu[c], errors='coerce')
+
+        win_sec = float(pl.get('win_sec', 1.0))
+        step_sec = float(pl.get('step_sec', 0.25))
+        res = core.compute(emg_imu, emg_fs_hz=float(cfg['session']['emg_fs_hz']), win_sec=win_sec, step_sec=step_sec)
+
+        core.plot_all(
+            res,
+            emg_fs_hz=float(cfg['session']['emg_fs_hz']),
+            title='EMG/IMU summary',
+            full_duration=bool(pl.get('full_duration', True)),
+            emg_max_points=int(pl.get('emg_max_points', 300000)),
+            save_dir=out_dir,
+            silent=True,
+        )
+
+        paged = pl.get('paged', {}) or {}
+        if bool(paged.get('enable', False)):
+            core.plot_paged(
+                res,
+                emg_fs_hz=float(cfg['session']['emg_fs_hz']),
+                page_sec=float(paged.get('page_sec', 5.0)),
+                page_start_sec=float(paged.get('page_start_sec', 0.0)),
+                page_count=int(paged.get('page_count', 0)),
+                page_step_sec=paged.get('page_step_sec', None),
+                title='EMG/IMU paged',
+                save_dir=out_dir,
+                silent=True,
+            )
+
+        if bool(pl.get('do_fatigue', False)):
+            core.analyze_fatigue(res.feats, save_dir=out_dir)
     # Session summary
     session_summary = {
         'num_files': len(paths),
