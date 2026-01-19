@@ -30,8 +30,8 @@ features:
   # Default mode (your choice):
   #   - swing: per-swing features only
   #   - bout : bout summaries only (fast)
-  #   - both : per-swing features + bout summaries
-  mode: "bout"  # FAST: bout summaries only
+  #   - both : per-swing features + bout summaries (default)
+  mode: "bout"
 
   # Full-session windowed features can be expensive for multi-hour 2kHz EMG.
   # Keep false by default for scalability.
@@ -106,10 +106,10 @@ bout:
   min_bout_swings: 3
 
 plots:
-  enable: true
+  enable: false
   full_duration: true
   emg_max_points: 300000
-  do_fatigue: false
+  do_fatigue: true
   win_sec: 1.0
   step_sec: 0.25
   paged:

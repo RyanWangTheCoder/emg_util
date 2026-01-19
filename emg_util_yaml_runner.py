@@ -17,6 +17,7 @@ import argparse
 import glob
 import json
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -283,7 +284,7 @@ def read_emg_segment(paths_index: List[Tuple[str, float, float]], t0_ms: float, 
         if mx < t0_ms or mn > t1_ms:
             continue
         # chunk read to reduce memory
-        for chunk in pd.read_csv(p, usecols=['ts_ms', 'raw'], chunksize=500000, engine='python'):
+        for chunk in pd.read_csv(p, usecols=['ts_ms', 'raw'], chunksize=500000):
             chunk['ts_ms'] = pd.to_numeric(chunk['ts_ms'], errors='coerce')
             chunk['raw'] = pd.to_numeric(chunk['raw'], errors='coerce')
             sub = chunk[(chunk['ts_ms'] >= t0_ms) & (chunk['ts_ms'] <= t1_ms) & chunk['raw'].notna()]
