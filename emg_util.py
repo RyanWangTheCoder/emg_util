@@ -141,6 +141,35 @@ def mnf_mdf(x: np.ndarray, fs: float) -> Tuple[float, float]:
     mdf_val = float(f[min(np.searchsorted(cdf, 0.5 * s), len(f) - 1)])
     return mnf_val, mdf_val
 
+
+# -----------------------------
+# Classic EMG features (time + spectral proxies)
+# Inspired by feature_ml.py: MAV, RMS, WL, ZC, SSC
+# -----------------------------
+
+def feat_mav(sig: np.ndarray) -> float:
+    return float(np.nanmean(np.abs(sig)))
+
+
+def feat_rms(sig: np.ndarray) -> float:
+    return float(np.sqrt(np.nanmean(sig * sig)))
+
+
+def feat_wl(sig: np.ndarray) -> float:
+    return float(np.nansum(np.abs(np.diff(sig))))
+
+
+def feat_zc(sig: np.ndarray, thr: float = 0.01) -> float:
+    s = sig - np.nanmean(sig)
+    return float(np.nansum(((s[:-1] * s[1:]) < 0) & (np.abs(s[:-1] - s[1:]) > thr)))
+
+
+def feat_ssc(sig: np.ndarray, thr: float = 0.01) -> float:
+    s = sig - np.nanmean(sig)
+    a = s[1:-1] - s[:-2]
+    b = s[1:-1] - s[2:]
+    return float(np.nansum((a * b > 0) & (np.abs(a) > thr) & (np.abs(b) > thr)))
+
 def imu_mags(imu_df: pd.DataFrame) -> pd.DataFrame:
     out = imu_df.copy()
     out["acc_mag"] = np.sqrt(out["ax"]**2 + out["ay"]**2 + out["az"]**2)
@@ -218,63 +247,127 @@ def compute(emg_imu: pd.DataFrame, emg_fs_hz: float, win_sec: float = 1.0, step_
 # -----------------------------
 # Fatigue Analysis
 # -----------------------------
+
 def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
-    if len(feats) < 10:
+    """Fatigue trend analysis.
+
+    Backward/forward compatible with different feature column naming schemes.
+
+    Expected (preferred) columns:
+      - time: t_center_s
+      - MDF : EMG_MDF_Hz
+      - MNF : EMG_MNF_Hz
+
+    Also supports:
+      - time: t_center / time_s
+      - MDF : mdf / MDF
+      - MNF : mnf / MNF
+    """
+
+    if feats is None or len(feats) < 10:
         print("Not enough data for fatigue analysis.")
         return
-    total_sec = feats["t_center_s"].iloc[-1]
-    baseline_idx = int(len(feats) * 0.1)
-    baseline_MDF = np.nanmean(feats["EMG_MDF_Hz"].iloc[:baseline_idx])
-    baseline_MNF = np.nanmean(feats["EMG_MNF_Hz"].iloc[:baseline_idx])
-    final_MDF = np.nanmean(feats["EMG_MDF_Hz"].iloc[-baseline_idx:])
-    final_MNF = np.nanmean(feats["EMG_MNF_Hz"].iloc[-baseline_idx:])
-    MDF_drop_pct = 100 * (baseline_MDF - final_MDF) / baseline_MDF
-    MNF_drop_pct = 100 * (baseline_MNF - final_MNF) / baseline_MNF
-    slope_MDF = np.polyfit(feats["t_center_s"], feats["EMG_MDF_Hz"], 1)[0]
-    slope_MNF = np.polyfit(feats["t_center_s"], feats["EMG_MNF_Hz"], 1)[0]
+
+    def pick_col(cands):
+        for c in cands:
+            if c in feats.columns:
+                return c
+        return None
+
+    t_col = pick_col(["t_center_s", "t_center", "time_s", "time"])
+    mdf_col = pick_col(["EMG_MDF_Hz", "mdf", "MDF", "emg_mdf_hz", "EMG_MDF"])
+    mnf_col = pick_col(["EMG_MNF_Hz", "mnf", "MNF", "emg_mnf_hz", "EMG_MNF"])
+
+    if t_col is None or mdf_col is None or mnf_col is None:
+        raise KeyError(
+            f"Fatigue analysis requires time+MDF+MNF columns. "
+            f"Found columns: {list(feats.columns)}. "
+            f"Looked for time in [t_center_s,t_center,time_s,time], "
+            f"MDF in [EMG_MDF_Hz,mdf,MDF,...], MNF in [EMG_MNF_Hz,mnf,MNF,...]."
+        )
+
+    # Ensure numeric arrays
+    t = pd.to_numeric(feats[t_col], errors='coerce').to_numpy(dtype=float)
+    mdf = pd.to_numeric(feats[mdf_col], errors='coerce').to_numpy(dtype=float)
+    mnf = pd.to_numeric(feats[mnf_col], errors='coerce').to_numpy(dtype=float)
+
+    total_sec = float(np.nanmax(t))
+    baseline_idx = max(1, int(len(feats) * 0.1))
+
+    baseline_MDF = float(np.nanmean(mdf[:baseline_idx]))
+    baseline_MNF = float(np.nanmean(mnf[:baseline_idx]))
+    final_MDF = float(np.nanmean(mdf[-baseline_idx:]))
+    final_MNF = float(np.nanmean(mnf[-baseline_idx:]))
+
+    MDF_drop_pct = 100.0 * (baseline_MDF - final_MDF) / baseline_MDF if baseline_MDF else np.nan
+    MNF_drop_pct = 100.0 * (baseline_MNF - final_MNF) / baseline_MNF if baseline_MNF else np.nan
+
+    # Slopes (ignore NaNs)
+    def safe_polyfit(x, y):
+        m = np.isfinite(x) & np.isfinite(y)
+        if m.sum() < 5:
+            return np.nan
+        return float(np.polyfit(x[m], y[m], 1)[0])
+
+    slope_MDF = safe_polyfit(t, mdf)
+    slope_MNF = safe_polyfit(t, mnf)
+
+    # Onset detection: after 20% of capture, rolling average crosses threshold
     onset_time = np.nan
-    threshold = baseline_MDF * 0.85
-    # Improved onset detection: after 20% of capture, rolling average
-    min_time = total_sec * 0.2
-    rolling = feats["EMG_MDF_Hz"].rolling(window=20, min_periods=5).mean()
-    onset_candidates = feats[(feats["t_center_s"] >= min_time) & (rolling <= threshold)]
-    if len(onset_candidates):
-        onset_time = onset_candidates["t_center_s"].iloc[0]
-    print(f"Fatigue Analysis:")
-    print(f"Baseline MDF: {baseline_MDF:.2f} Hz, Final MDF: {final_MDF:.2f} Hz, Drop: {MDF_drop_pct:.1f}%")
-    print(f"Baseline MNF: {baseline_MNF:.2f} Hz, Final MNF: {final_MNF:.2f} Hz, Drop: {MNF_drop_pct:.1f}%")
-    print(f"MDF slope: {slope_MDF:.4f} Hz/s, MNF slope: {slope_MNF:.4f} Hz/s")
-    if not np.isnan(onset_time):
-        print(f"Estimated fatigue onset: ~{onset_time:.1f}s")
+    if np.isfinite(baseline_MDF) and baseline_MDF != 0:
+        threshold = baseline_MDF * 0.85
+        min_time = total_sec * 0.2
+        rolling = pd.Series(mdf).rolling(window=20, min_periods=5).mean().to_numpy(dtype=float)
+        cand = np.where((t >= min_time) & (rolling <= threshold))[0]
+        if len(cand):
+            onset_time = float(t[cand[0]])
+
+    summary = {
+        "baseline_MDF": baseline_MDF,
+        "baseline_MNF": baseline_MNF,
+        "final_MDF": final_MDF,
+        "final_MNF": final_MNF,
+        "MDF_drop_pct": MDF_drop_pct,
+        "MNF_drop_pct": MNF_drop_pct,
+        "slope_MDF": slope_MDF,
+        "slope_MNF": slope_MNF,
+        "fatigue_onset_s": onset_time,
+        "time_col": t_col,
+        "mdf_col": mdf_col,
+        "mnf_col": mnf_col,
+    }
+
+    print("[Fatigue] MDF drop % =", MDF_drop_pct, "; MNF drop % =", MNF_drop_pct, "; onset_s =", onset_time)
+
+    # Save summary + plot
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
-        summary_path = os.path.join(save_dir, "fatigue_summary.csv")
-        pd.DataFrame([{
-            "baseline_MDF": baseline_MDF,
-            "baseline_MNF": baseline_MNF,
-            "final_MDF": final_MDF,
-            "final_MNF": final_MNF,
-            "MDF_drop_pct": MDF_drop_pct,
-            "MNF_drop_pct": MNF_drop_pct,
-            "slope_MDF": slope_MDF,
-            "slope_MNF": slope_MNF,
-            "onset_time_s": onset_time
-        }]).to_csv(summary_path, index=False)
-        plt.figure(figsize=(10,5))
-        plt.plot(feats["t_center_s"], feats["EMG_MDF_Hz"], label="MDF")
-        plt.plot(feats["t_center_s"], feats["EMG_MNF_Hz"], label="MNF")
-        if not np.isnan(onset_time):
-            plt.axvline(onset_time, color="r", linestyle="--", label="Fatigue onset")
-        plt.xlabel("Time (s)"); plt.ylabel("Frequency (Hz)")
-        plt.title("Fatigue Trend (MDF & MNF)")
-        plt.legend(); plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, "fatigue_trend.png"), dpi=150)
-        plt.close()
+        out_csv = os.path.join(save_dir, 'fatigue_summary.csv')
+        pd.DataFrame([summary]).to_csv(out_csv, index=False)
+        print(f"Saved: {out_csv}")
 
-# -----------------------------
-# Plotting
-# -----------------------------
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+            ax.plot(t, mdf, label=f"MDF ({mdf_col})")
+            ax.plot(t, mnf, label=f"MNF ({mnf_col})", alpha=0.85)
+            if np.isfinite(baseline_MDF):
+                ax.axhline(baseline_MDF, color='k', ls='--', lw=1, alpha=0.6, label='baseline MDF')
+                ax.axhline(baseline_MDF*0.85, color='r', ls='--', lw=1, alpha=0.6, label='85% MDF threshold')
+            if np.isfinite(onset_time):
+                ax.axvline(onset_time, color='r', lw=1.5, alpha=0.8, label='fatigue onset')
+            ax.set_xlabel('time (s)')
+            ax.set_ylabel('frequency (Hz)')
+            ax.set_title('Fatigue trend (MDF/MNF)')
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='best')
+            out_png = os.path.join(save_dir, 'fatigue_trend.png')
+            fig.tight_layout()
+            fig.savefig(out_png, dpi=150)
+            plt.close(fig)
+            print(f"Saved: {out_png}")
+        except Exception as e:
+            print(f"[WARN] Could not save fatigue plot: {e}")
+
 def _emg_axes_plot(axes, t_s, raw_y, proc_y, env_y, span_note: str):
     axes[0].plot(t_s, raw_y, lw=0.6, color="k")
     axes[0].set_title(f"Raw EMG ({span_note})")
@@ -611,7 +704,7 @@ def run_imu_detail(emg_imu_df: pd.DataFrame, save_dir: str | None,
 
 
 # ============================
-# IMU swing (stroke) detection & EMG correlation (Phase-1: no FSR required)
+# Phase-1 Windowed + Swing-aligned features (no FSR required)
 # ============================
 
 def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9) -> tuple[np.ndarray, float, float]:
@@ -633,13 +726,18 @@ def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9) -
     return z, med, scale
 
 
-def detect_swing_windows_from_imu(imu_df: pd.DataFrame, baseline_s: float = 2.0, z_thr: float = 5.0,
-                                 min_consec: int = 3, min_gap_ms: float = 300.0,
-                                 pre_ms: float = 250.0, post_ms: float = 450.0,
+def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
+                                 baseline_s: float = 2.0,
+                                 z_thr: float = 5.0,
+                                 min_consec: int = 3,
+                                 min_gap_ms: float = 300.0,
+                                 pre_ms: float = 250.0,
+                                 post_ms: float = 450.0,
                                  use_gyro: bool = True) -> pd.DataFrame:
-    """Detect swing windows from IMU magnitude using robust z-score."""
+    """Detect swing windows from IMU magnitude using robust z-score (no FSR needed)."""
     if imu_df is None or len(imu_df) == 0:
         return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
+
     imu = imu_df.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
     if len(imu) == 0:
         return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
@@ -655,8 +753,7 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame, baseline_s: float = 2.0,
 
     total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else float(baseline_s)
     b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
-    baseline_mask = t_rel_s <= b_s
-    z, _, _ = robust_zscore(mag, baseline_mask)
+    z, _, _ = robust_zscore(mag, t_rel_s <= b_s)
 
     active = z > float(z_thr)
     if int(min_consec) > 1:
@@ -725,166 +822,152 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame, baseline_s: float = 2.0,
     return out[["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"]]
 
 
-def emg_features_for_windows(res: Results, emg_fs_hz: float, windows: pd.DataFrame) -> pd.DataFrame:
-    """Compute basic EMG features per swing window."""
-    if windows is None or len(windows) == 0:
-        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","emg_env_peak","emg_env_mean","emg_iemg","emg_rms"])
-    ts = res.emg_ts_ms
-    env = res.emg_env
-    proc = res.emg_proc
-    dt = 1.0 / float(emg_fs_hz)
+def compute_emg_window_features(proc: np.ndarray, env: np.ndarray, emg_ts_ms: np.ndarray,
+                                emg_fs_hz: float, win_sec: float, step_sec: float,
+                                emg_thr_zc: float = 0.01, emg_thr_ssc: float = 0.01) -> pd.DataFrame:
+    """Compute windowed EMG features on processed signal plus envelope features."""
+    win_samp = max(int(round(win_sec * emg_fs_hz)), 256)
+    step_samp = max(int(round(step_sec * emg_fs_hz)), 1)
     rows = []
-    for r in windows.to_dict('records'):
-        i0 = int(np.searchsorted(ts, float(r['t_start_ms']), side='left'))
-        i1 = int(np.searchsorted(ts, float(r['t_end_ms']), side='right'))
-        i0 = max(0, min(i0, len(ts)-1))
-        i1 = max(i0+1, min(i1, len(ts)))
+    for i0 in range(0, len(proc) - win_samp + 1, step_samp):
+        i1 = i0 + win_samp
+        t_start_ms = float(emg_ts_ms[i0])
+        t_end_ms = float(emg_ts_ms[i1 - 1])
+        seg = proc[i0:i1]
         seg_env = env[i0:i1]
-        seg_proc = proc[i0:i1]
+        mnf_val, mdf_val = mnf_mdf(seg, emg_fs_hz)
         rows.append({
-            "swing_id": int(r['swing_id']),
-            "t_start_ms": float(r['t_start_ms']),
-            "t_peak_ms": float(r['t_peak_ms']),
-            "t_end_ms": float(r['t_end_ms']),
-            "emg_env_peak": float(np.nanmax(seg_env)),
-            "emg_env_mean": float(np.nanmean(seg_env)),
-            "emg_iemg": float(np.nansum(seg_env) * dt),
-            "emg_rms": float(np.sqrt(np.nanmean(seg_proc**2))),
+            "t_start_ms": t_start_ms,
+            "t_end_ms": t_end_ms,
+            "t_center_s": 0.5*(t_start_ms + t_end_ms)/1000.0,
+            "mav": feat_mav(seg),
+            "rms": feat_rms(seg),
+            "wl": feat_wl(seg),
+            "zc": feat_zc(seg, thr=emg_thr_zc),
+            "ssc": feat_ssc(seg, thr=emg_thr_ssc),
+            "mnf": float(mnf_val),
+            "mdf": float(mdf_val),
+            "env_mean": float(np.nanmean(seg_env)),
+            "env_peak": float(np.nanmax(seg_env)),
         })
     return pd.DataFrame(rows)
 
 
-def correlate_emg_imu(res: Results, imu_df: pd.DataFrame, baseline_s: float = 2.0,
-                      use_gyro: bool = True, max_lag_ms: float = 500.0) -> dict:
-    """Estimate correlation and lag between EMG envelope and IMU magnitude."""
-    if imu_df is None or len(imu_df) == 0:
-        return {"corr": None, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
-    imu = imu_df.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
-    if len(imu) == 0:
-        return {"corr": None, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
+def compute_swing_emg_features(res: Results, emg_fs_hz: float, swings: pd.DataFrame,
+                              mdf_pad_ms: float = 300.0,
+                              thr_zc: float = 0.01, thr_ssc: float = 0.01) -> pd.DataFrame:
+    """Compute per-swing EMG features. MDF is computed on a padded window for PSD stability."""
+    if swings is None or len(swings) == 0:
+        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag",
+                                     "emg_env_peak","emg_env_mean","emg_iemg",
+                                     "mav","rms","wl","zc","ssc","mdf","mnf"])
 
-    t_rel_s = build_time_axis_from_ts(imu, fs_fallback=200.0)
-    t0_ms = float(imu['ts_ms'].iloc[0])
-    imu_t_ms = t0_ms + 1000.0 * t_rel_s
+    ts = res.emg_ts_ms
+    proc = res.emg_proc
+    env = res.emg_env
+    dt = 1.0 / float(emg_fs_hz)
 
-    if use_gyro:
-        mag = np.sqrt(imu['gx'].to_numpy(float)**2 + imu['gy'].to_numpy(float)**2 + imu['gz'].to_numpy(float)**2)
-    else:
-        mag = np.sqrt(imu['ax'].to_numpy(float)**2 + imu['ay'].to_numpy(float)**2 + imu['az'].to_numpy(float)**2)
+    rows = []
+    for r in swings.to_dict('records'):
+        t0 = float(r['t_start_ms'])
+        t1 = float(r['t_end_ms'])
 
-    total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else float(baseline_s)
-    b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
-    z, _, _ = robust_zscore(mag, t_rel_s <= b_s)
+        # envelope features on exact swing window
+        i0 = int(np.searchsorted(ts, t0, side='left'))
+        i1 = int(np.searchsorted(ts, t1, side='right'))
+        i0 = max(0, min(i0, len(ts)-1))
+        i1 = max(i0+1, min(i1, len(ts)))
+        seg_env = env[i0:i1]
+        emg_env_peak = float(np.nanmax(seg_env))
+        emg_env_mean = float(np.nanmean(seg_env))
+        emg_iemg = float(np.nansum(seg_env) * dt)
 
-    emg_t_ms = res.emg_ts_ms
-    env_i = np.interp(imu_t_ms, emg_t_ms, res.emg_env)
+        # processed features on padded window
+        t0p = t0 - float(mdf_pad_ms)
+        t1p = t1 + float(mdf_pad_ms)
+        j0 = int(np.searchsorted(ts, t0p, side='left'))
+        j1 = int(np.searchsorted(ts, t1p, side='right'))
+        j0 = max(0, min(j0, len(ts)-1))
+        j1 = max(j0+1, min(j1, len(ts)))
+        seg = proc[j0:j1]
+        mnf_val, mdf_val = mnf_mdf(seg, emg_fs_hz)
 
-    z0 = z - np.nanmean(z)
-    e0 = env_i - np.nanmean(env_i)
-    denom = float(np.nanstd(z0) * np.nanstd(e0))
-    corr0 = float(np.nanmean(z0 * e0) / denom) if denom > 1e-9 else None
+        rows.append({
+            "swing_id": int(r['swing_id']),
+            "t_start_ms": t0,
+            "t_peak_ms": float(r['t_peak_ms']),
+            "t_end_ms": t1,
+            "peak_z": float(r.get('peak_z', np.nan)),
+            "peak_mag": float(r.get('peak_mag', np.nan)),
+            "emg_env_peak": emg_env_peak,
+            "emg_env_mean": emg_env_mean,
+            "emg_iemg": emg_iemg,
+            "mav": feat_mav(seg),
+            "rms": feat_rms(seg),
+            "wl": feat_wl(seg),
+            "zc": feat_zc(seg, thr=thr_zc),
+            "ssc": feat_ssc(seg, thr=thr_ssc),
+            "mnf": float(mnf_val),
+            "mdf": float(mdf_val),
+        })
 
-    dt = float(np.nanmedian(np.diff(imu_t_ms)))
-    if not np.isfinite(dt) or dt <= 0:
-        return {"corr": corr0, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
-
-    max_lag = int(round(float(max_lag_ms) / dt))
-    best_lag = 0
-    best_val = -1e18
-    for lag in range(-max_lag, max_lag + 1):
-        if lag < 0:
-            a = z0[-lag:]
-            b = e0[:len(a)]
-        elif lag > 0:
-            a = z0[:-lag]
-            b = e0[lag:lag+len(a)]
-        else:
-            a, b = z0, e0
-        if len(a) < 50:
-            continue
-        denom2 = float(np.nanstd(a) * np.nanstd(b))
-        if denom2 <= 1e-9:
-            continue
-        c = float(np.nanmean(a * b) / denom2)
-        if c > best_val:
-            best_val = c
-            best_lag = lag
-
-    return {"corr": corr0, "best_lag_ms": float(best_lag * dt), "best_corr": float(best_val), "imu_dt_ms": float(dt)}
+    return pd.DataFrame(rows)
 
 
-def run_imu_swing_analysis(emg_imu_df: pd.DataFrame, res: Results, emg_fs_hz: float,
-                           save_dir: str | None,
-                           baseline_s: float = 2.0,
-                           z_thr: float = 5.0,
-                           min_consec: int = 3,
-                           min_gap_ms: float = 300.0,
-                           pre_ms: float = 250.0,
-                           post_ms: float = 450.0,
-                           use_gyro: bool = True,
-                           max_lag_ms: float = 500.0):
-    """Run swing detection and save outputs (CSV/JSON/PNG)."""
-    imu = emg_imu_df[emg_imu_df[["ax","ay","az","gx","gy","gz"]].notna().any(axis=1)].copy()
-    imu = imu.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
-    if len(imu) == 0:
-        print("No IMU rows found; skipping swing detection.")
-        return
+def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float,
+                           warmup_skip_min: float = 5.0,
+                           warmup_skip_swings: int | None = None,
+                           baseline_swings: int = 20) -> pd.DataFrame:
+    """Select baseline swings after warm-up skip (time-based default) and optional swing-count skip."""
+    if swings is None or len(swings) == 0:
+        return swings
+    sw = swings.sort_values('t_peak_ms').reset_index(drop=True)
+    cutoff = float(session_t0_ms) + float(warmup_skip_min) * 60.0 * 1000.0
+    sw2 = sw[sw['t_peak_ms'] >= cutoff].reset_index(drop=True)
+    if len(sw2) < max(3, baseline_swings//2):
+        sw2 = sw
+    if warmup_skip_swings is not None and warmup_skip_swings > 0:
+        sw2 = sw2.iloc[int(warmup_skip_swings):].reset_index(drop=True)
+    return sw2.iloc[:int(baseline_swings)].reset_index(drop=True)
 
-    swings = detect_swing_windows_from_imu(imu, baseline_s=baseline_s, z_thr=z_thr, min_consec=min_consec,
-                                          min_gap_ms=min_gap_ms, pre_ms=pre_ms, post_ms=post_ms, use_gyro=use_gyro)
-    emg_sw = emg_features_for_windows(res, emg_fs_hz=float(emg_fs_hz), windows=swings)
-    corr = correlate_emg_imu(res, imu, baseline_s=baseline_s, use_gyro=use_gyro, max_lag_ms=max_lag_ms)
 
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        swings.to_csv(os.path.join(save_dir, 'swing_windows.csv'), index=False)
-        emg_sw.to_csv(os.path.join(save_dir, 'swing_emg_features.csv'), index=False)
-        with open(os.path.join(save_dir, 'emg_imu_correlation.json'), 'w', encoding='utf-8') as f:
-            json.dump(corr, f, indent=2)
-        print(f"Saved: {os.path.join(save_dir, 'swing_windows.csv')}")
-        print(f"Saved: {os.path.join(save_dir, 'swing_emg_features.csv')}")
-        print(f"Saved: {os.path.join(save_dir, 'emg_imu_correlation.json')}")
+def compute_baseline_from_swing_features(swing_feats: pd.DataFrame) -> dict:
+    """Compute robust baseline values from per-swing features (median)."""
+    base = {}
+    if swing_feats is None or len(swing_feats) == 0:
+        return base
+    for k in ['mdf','rms','mav','wl','emg_env_mean','emg_iemg']:
+        if k in swing_feats.columns:
+            base[k] = float(np.nanmedian(swing_feats[k].to_numpy(dtype=float)))
+    return base
 
-        # Overlay plot
-        try:
-            imu2 = imu.copy()
-            t_rel_s = build_time_axis_from_ts(imu2, fs_fallback=200.0)
-            t0_ms = float(imu2['ts_ms'].iloc[0])
-            imu_t_s = (t0_ms + 1000.0 * t_rel_s - res.emg_ts_ms[0]) / 1000.0
-            if use_gyro:
-                mag = np.sqrt(imu2['gx'].to_numpy(float)**2 + imu2['gy'].to_numpy(float)**2 + imu2['gz'].to_numpy(float)**2)
-            else:
-                mag = np.sqrt(imu2['ax'].to_numpy(float)**2 + imu2['ay'].to_numpy(float)**2 + imu2['az'].to_numpy(float)**2)
-            total_s = float(np.nanmax(imu_t_s)) if len(imu_t_s) else float(baseline_s)
-            b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
-            z, _, _ = robust_zscore(mag, imu_t_s <= b_s)
 
-            emg_t_s = (res.emg_ts_ms - res.emg_ts_ms[0]) / 1000.0
-            env = res.emg_env
-            env_n = env - np.nanmedian(env)
-            sd = float(np.nanstd(env_n))
-            env_n = env_n / sd if sd > 1e-9 else env_n
+def compute_baseline_from_windows(win_feats: pd.DataFrame, baseline_window_sec: float = 60.0) -> dict:
+    """Compute baseline values from first baseline_window_sec seconds of windowed features."""
+    base = {}
+    if win_feats is None or len(win_feats) == 0:
+        return base
+    t0 = float(win_feats['t_start_ms'].min())
+    cutoff = t0 + float(baseline_window_sec) * 1000.0
+    seg = win_feats[win_feats['t_end_ms'] <= cutoff]
+    if len(seg) < 5:
+        seg = win_feats.iloc[:min(20, len(win_feats))]
+    for k in ['mdf','rms','mav','wl','env_mean','emg_env_mean','emg_iemg']:
+        if k in seg.columns:
+            base[k] = float(np.nanmedian(seg[k].to_numpy(dtype=float)))
+    return base
 
-            fig, ax = plt.subplots(1, 1, figsize=(12, 5))
-            ax.plot(imu_t_s, z, lw=1.0, label='IMU mag z')
-            ax.plot(emg_t_s, env_n, lw=1.0, alpha=0.8, label='EMG env (z)')
-            for r in swings.to_dict('records'):
-                a = (float(r['t_start_ms']) - res.emg_ts_ms[0]) / 1000.0
-                b = (float(r['t_end_ms']) - res.emg_ts_ms[0]) / 1000.0
-                ax.axvspan(a, b, color='orange', alpha=0.15)
-            ax.set_xlabel('time (s)')
-            ax.set_title(f"Swing detection (count={len(swings)}), corr={corr.get('corr')}, best_lag_ms={corr.get('best_lag_ms')}")
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            outp = os.path.join(save_dir, 'swing_overlay.png')
-            fig.tight_layout()
-            fig.savefig(outp, dpi=150)
-            plt.close(fig)
-            print(f"Saved: {outp}")
-        except Exception as e:
-            print(f"[WARN] Could not generate swing overlay plot: {e}")
 
-    print(f"[Swing] windows={len(swings)} | corr={corr.get('corr')} best_lag_ms={corr.get('best_lag_ms')} best_corr={corr.get('best_corr')}")
+def apply_baseline_deltas(df: pd.DataFrame, base: dict, prefix: str = '') -> pd.DataFrame:
+    """Add baseline-relative percentage deltas for MDF drop and RMS increase."""
+    out = df.copy()
+    if not base:
+        return out
+    if 'mdf' in out.columns and 'mdf' in base and base['mdf'] not in (0, None) and np.isfinite(base['mdf']):
+        out[prefix + 'mdf_drop_pct'] = (base['mdf'] - out['mdf']) / base['mdf'] * 100.0
+    if 'rms' in out.columns and 'rms' in base and base['rms'] not in (0, None) and np.isfinite(base['rms']):
+        out[prefix + 'rms_increase_pct'] = (out['rms'] - base['rms']) / base['rms'] * 100.0
+    return out
 
 
 
@@ -892,101 +975,143 @@ def run_imu_swing_analysis(emg_imu_df: pd.DataFrame, res: Results, emg_fs_hz: fl
 # CLI
 # -----------------------------
 def main():
-    ap = argparse.ArgumentParser(description="btCentral EMG/IMU/Vitals analysis + fatigue detection")
+    ap = argparse.ArgumentParser(description="btCentral EMG/IMU/Vitals analysis + fatigue detection (windowed + swing-aligned)")
     ap.add_argument("--emg-imu", required=True, help="Path or glob to emg_imu_log_###.csv")
     ap.add_argument("--emg-fs", type=float, required=True, help="EMG sampling rate in Hz (e.g., 2000)")
-    ap.add_argument("--vitals", default=None, help="Path to vitals_log.csv (optional)")
-    ap.add_argument("--win", type=float, default=1.0, help="Window length in seconds")
-    ap.add_argument("--step", type=float, default=0.25, help="Step (hop) in seconds")
+
+    ap.add_argument("--mode", choices=["windowed","swing","both"], default="both",
+                    help="Compute windowed features, swing-aligned features, or both")
+
+    ap.add_argument("--win", type=float, default=1.0, help="Window length in seconds (windowed mode)")
+    ap.add_argument("--step", type=float, default=0.25, help="Step (hop) in seconds (windowed mode)")
+
     ap.add_argument("--out", default="features.csv", help="Output CSV of windowed features")
-    ap.add_argument("--plot", action="store_true", help="Show plots")
-    ap.add_argument("--full", action="store_true", help="Full-duration EMG traces (decimated)")
-    ap.add_argument("--emg-max-points", type=int, default=200000,
-                    help="Max points for full-duration EMG (decimation target)")
-    ap.add_argument("--page-sec", type=float, default=0.0,
-                    help="If >0, plot paged EMG views with this page length (seconds)")
-    ap.add_argument("--page-start", type=float, default=0.0, help="Start time for paged plots (seconds)")
-    ap.add_argument("--page-count", type=int, default=1, help="How many pages to show; <=0 means show all pages")
-    ap.add_argument("--page-step", type=float, default=0.0,
-                    help="Hop between pages (seconds). 0 means equal to page-sec")
-    ap.add_argument("--save-pages", default=None, help="Directory to save plots and fatigue summary")
-    ap.add_argument("--silent", action="store_true", help="Silent mode: do not display plots, only save files")
+    ap.add_argument("--save-pages", default=None, help="Directory to save plots/CSVs")
+
     ap.add_argument("--dropout-zeros", action="store_true", help="Treat raw==0 as dropout (experimental)")
 
-    ap.add_argument("--imu-detail", action="store_true", help="Run detailed IMU segment/feature analysis")
-    ap.add_argument("--imu-gap-ms", type=float, default=50.0, help="Gap (ms) that splits IMU segments")
-    ap.add_argument("--imu-min-samples", type=int, default=50, help="Minimum samples per IMU segment")
-    ap.add_argument("--imu-win", type=float, default=0.5, help="IMU feature window length (s)")
-    ap.add_argument("--imu-overlap", type=float, default=0.5, help="IMU feature window overlap (0..0.95)")
-    ap.add_argument("--imu-baseline-s", type=float, default=1.0, help="Baseline duration (s) for IMU z-score detection")
-    ap.add_argument("--imu-z", type=float, default=3.0, help="Z threshold for movement detection")
-    # IMU swing / stroke detection (FSR-free, works on legacy logs)
-    ap.add_argument("--imu-swing", action="store_true", help="Detect swing/stroke windows from IMU and extract per-swing EMG features")
-    ap.add_argument("--swing-baseline-s", type=float, default=2.0, help="Baseline duration (s) for robust z-score")
+    # Swing detection parameters
+    ap.add_argument("--swing-baseline-s", type=float, default=2.0, help="Baseline duration (s) for IMU z-score")
     ap.add_argument("--swing-z", type=float, default=5.0, help="Z threshold for swing peak detection")
     ap.add_argument("--swing-min-consec", type=int, default=3, help="Min consecutive IMU samples above threshold")
-    ap.add_argument("--swing-min-gap-ms", type=float, default=300.0, help="Minimum gap (ms) between swing peaks")
-    ap.add_argument("--swing-pre-ms", type=float, default=250.0, help="Window start relative to peak (ms)")
-    ap.add_argument("--swing-post-ms", type=float, default=450.0, help="Window end relative to peak (ms)")
-    ap.add_argument("--swing-use-acc", action="store_true", help="Use accelerometer magnitude instead of gyro magnitude")
-    ap.add_argument("--swing-max-lag-ms", type=float, default=500.0, help="Max lag (ms) to search when correlating EMG vs IMU")
+    ap.add_argument("--swing-min-gap-ms", type=float, default=300.0, help="Min gap (ms) between swing peaks")
+    ap.add_argument("--swing-pre-ms", type=float, default=250.0, help="Swing window start relative to peak (ms)")
+    ap.add_argument("--swing-post-ms", type=float, default=450.0, help="Swing window end relative to peak (ms)")
+    ap.add_argument("--swing-use-acc", action="store_true", help="Use accelerometer magnitude instead of gyro")
+
+    # Baseline policies
+    ap.add_argument("--baseline-mode", choices=["swing","window"], default="swing",
+                    help="How to form baseline for fatigue deltas")
+    ap.add_argument("--warmup-skip-min", type=float, default=5.0, help="Warm-up skip (minutes) for swing baseline")
+    ap.add_argument("--warmup-skip-swings", type=int, default=0, help="Optional: skip first K swings after warm-up")
+    ap.add_argument("--baseline-swings", type=int, default=20, help="Number of swings to use for baseline")
+    ap.add_argument("--baseline-window-sec", type=float, default=60.0, help="Window baseline duration (seconds)")
+
+    # MDF pad
+    ap.add_argument("--swing-mdf-pad-ms", type=float, default=300.0, help="Pad swing window by ±ms when computing MDF")
 
     args = ap.parse_args()
 
+    save_dir = args.save_pages
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
     emg_imu = load_emg_imu_logs(args.emg_imu)
-    vitals = load_vitals_log(args.vitals) if args.vitals else None
-    res = compute(emg_imu, emg_fs_hz=args.emg_fs, win_sec=args.win, step_sec=args.step,
-                  vitals=vitals, treat_zero_as_nan=args.dropout_zeros)
-    res.feats.to_csv(args.out, index=False)
-    print(f"Saved {args.out} (rows={len(res.feats)})")
 
-    # Fatigue analysis
-    analyze_fatigue(res.feats, save_dir=args.save_pages)
+    # Compute EMG signals
+    df = emg_imu.copy()
+    emg_df = df[df["raw"].notna()].copy().sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    if len(emg_df) == 0:
+        raise ValueError("No EMG rows found.")
 
-    # Detailed IMU analysis (segments + windowed features + movement intervals)
-    if args.imu_detail:
-        out_dir = args.save_pages if args.save_pages else os.path.dirname(args.out) or '.'
-        run_imu_detail(emg_imu, save_dir=out_dir, gap_ms=args.imu_gap_ms,
-                   min_samples=args.imu_min_samples, win_s=args.imu_win,
-                   overlap=args.imu_overlap, baseline_s=args.imu_baseline_s,
-                   z_thr=args.imu_z)
+    raw = emg_df["raw"].astype(float).to_numpy()
+    if args.dropout_zeros:
+        raw[raw == 0] = np.nan
+        raw = pd.Series(raw).interpolate(limit=100, limit_direction="both").to_numpy(dtype=float)
 
-    # IMU swing detection + per-swing EMG features + EMG/IMU correlation
-    if args.imu_swing:
-        out_dir = args.save_pages if args.save_pages else os.path.dirname(args.out) or '.'
-        run_imu_swing_analysis(
-            emg_imu_df=emg_imu,
-            res=res,
-            emg_fs_hz=args.emg_fs,
-            save_dir=out_dir,
-            baseline_s=args.swing_baseline_s,
-            z_thr=args.swing_z,
-            min_consec=args.swing_min_consec,
-            min_gap_ms=args.swing_min_gap_ms,
-            pre_ms=args.swing_pre_ms,
-            post_ms=args.swing_post_ms,
-            use_gyro=(not args.swing_use_acc),
-            max_lag_ms=args.swing_max_lag_ms,
-        )
+    t0_ms = float(emg_df["ts_ms"].iloc[0])
+    emg_ts_ms = t0_ms + (np.arange(len(raw)) / float(args.emg_fs)) * 1000.0
+    proc = preprocess_emg(raw, float(args.emg_fs))
+    env = envelope(proc, float(args.emg_fs))
 
+    res = Results(feats=pd.DataFrame(), emg_ts_ms=emg_ts_ms, emg_raw=raw, emg_proc=proc, emg_env=env)
 
-    if args.plot:
-        plot_all(res, emg_fs_hz=args.emg_fs, title=f"EMG/IMU (fs={args.emg_fs:.0f} Hz)",
-                 full_duration=args.full, emg_max_points=args.emg_max_points,
-                 save_dir=args.save_pages, silent=args.silent)
-        if args.page_sec and args.page_sec > 0:
-            hop = args.page_step if args.page_step and args.page_step > 0 else args.page_sec
-            plot_paged(
-                res,
-                emg_fs_hz=args.emg_fs,
-                page_sec=args.page_sec,
-                page_start_sec=args.page_start,
-                page_count=args.page_count,
-                page_step_sec=hop,
-                title=f"EMG pages (fs={args.emg_fs:.0f} Hz)",
-                save_dir=args.save_pages,
-                silent=args.silent,
+    window_feats = None
+    swing_windows = None
+    swing_feats = None
+
+    if args.mode in ("windowed", "both"):
+        window_feats = compute_emg_window_features(proc, env, emg_ts_ms, float(args.emg_fs),
+                                                   win_sec=args.win, step_sec=args.step)
+        # Baseline deltas will be applied later
+        window_feats.to_csv(args.out, index=False)
+        print(f"Saved {args.out} (rows={len(window_feats)})")
+        res.feats = window_feats
+
+    if args.mode in ("swing", "both"):
+        imu_df = df[df[["ax","ay","az","gx","gy","gz"]].notna().any(axis=1)].copy()
+        imu_df = imu_df.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+        if len(imu_df) == 0:
+            print("[WARN] No IMU rows found; cannot do swing detection.")
+        else:
+            swing_windows = detect_swing_windows_from_imu(
+                imu_df,
+                baseline_s=args.swing_baseline_s,
+                z_thr=args.swing_z,
+                min_consec=args.swing_min_consec,
+                min_gap_ms=args.swing_min_gap_ms,
+                pre_ms=args.swing_pre_ms,
+                post_ms=args.swing_post_ms,
+                use_gyro=(not args.swing_use_acc)
             )
+            swing_feats = compute_swing_emg_features(res, float(args.emg_fs), swing_windows,
+                                                     mdf_pad_ms=args.swing_mdf_pad_ms)
+            if save_dir:
+                swing_windows.to_csv(os.path.join(save_dir, 'swing_windows.csv'), index=False)
+                swing_feats.to_csv(os.path.join(save_dir, 'swing_emg_features.csv'), index=False)
+                print(f"Saved: {os.path.join(save_dir, 'swing_windows.csv')}")
+                print(f"Saved: {os.path.join(save_dir, 'swing_emg_features.csv')}")
+
+    # Baseline
+    base = {}
+    if args.baseline_mode == 'swing' and swing_windows is not None and swing_feats is not None and len(swing_feats):
+        warmup_skip_swings = args.warmup_skip_swings if args.warmup_skip_swings > 0 else None
+        base_sw = select_baseline_swings(swing_windows, session_t0_ms=t0_ms,
+                                         warmup_skip_min=args.warmup_skip_min,
+                                         warmup_skip_swings=warmup_skip_swings,
+                                         baseline_swings=args.baseline_swings)
+        base_feats = swing_feats[swing_feats['swing_id'].isin(base_sw['swing_id'])]
+        base = compute_baseline_from_swing_features(base_feats)
+    elif args.baseline_mode == 'window' and window_feats is not None and len(window_feats):
+        base = compute_baseline_from_windows(window_feats, baseline_window_sec=args.baseline_window_sec)
+
+    if save_dir and base:
+        with open(os.path.join(save_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
+            json.dump({'mode': args.baseline_mode, 'baseline': base,
+                       'params': {
+                           'warmup_skip_min': args.warmup_skip_min,
+                           'warmup_skip_swings': args.warmup_skip_swings,
+                           'baseline_swings': args.baseline_swings,
+                           'baseline_window_sec': args.baseline_window_sec,
+                           'swing_mdf_pad_ms': args.swing_mdf_pad_ms,
+                       }}, f, indent=2)
+        print(f"Saved: {os.path.join(save_dir, 'baseline.json')}")
+
+    # Apply baseline deltas
+    if base:
+        if window_feats is not None and len(window_feats):
+            window_feats2 = apply_baseline_deltas(window_feats, base)
+            window_feats2.to_csv(args.out, index=False)
+            print(f"Updated {args.out} with baseline deltas")
+            res.feats = window_feats2
+        if swing_feats is not None and len(swing_feats) and save_dir:
+            swing_feats2 = apply_baseline_deltas(swing_feats, base, prefix='swing_')
+            swing_feats2.to_csv(os.path.join(save_dir, 'swing_emg_features.csv'), index=False)
+            print(f"Updated: {os.path.join(save_dir, 'swing_emg_features.csv')} with baseline deltas")
+
+    # Fatigue analysis on windowed features (uses flexible analyze_fatigue from emg_util_fixed)
+    if res.feats is not None and len(res.feats) and args.mode in ("windowed","both"):
+        analyze_fatigue(res.feats, save_dir=save_dir)
 
 
 if __name__ == "__main__":
