@@ -24,17 +24,13 @@ Features:
 - Silent mode (--silent): skip interactive display, save only.
 - Fatigue analysis:
     * Computes MDF/MNF trends
-    * Detects fatigue onset (≥15% MDF drop)
+    * Detects fatigue onset (≥15% MDF drop after 20% of capture)
     * Saves fatigue_summary.csv and fatigue_trend.png
-
-Example:
-    python emg_util_bt.py --emg-imu "logs/emg_imu_log_*.csv" --emg-fs 2000 \
-        --plot --full --page-sec 10 --page-count 5 \
-        --save-pages ./emg_pages --silent
 """
 
 from __future__ import annotations
 import argparse, glob, os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
@@ -71,7 +67,7 @@ def load_emg_imu_logs(pattern_or_paths: str | Iterable[str]) -> pd.DataFrame:
         dfs.append(df)
 
     out = pd.concat(dfs, ignore_index=True)
-    return out.sort_values("ts_ms").reset_index(drop=True)
+    return out.sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
 
 def load_vitals_log(path: str | Path) -> pd.DataFrame:
     df = pd.read_csv(path, engine="python")
@@ -81,7 +77,7 @@ def load_vitals_log(path: str | Path) -> pd.DataFrame:
     df = df[VITALS_COLS].copy()
     for c in VITALS_COLS:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=["ts_ms"]).sort_values("ts_ms").reset_index(drop=True)
+    return df.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
 
 # -----------------------------
 # Filtering helpers
@@ -162,8 +158,8 @@ class Results:
 def compute(emg_imu: pd.DataFrame, emg_fs_hz: float, win_sec: float = 1.0, step_sec: float = 0.25,
             vitals: Optional[pd.DataFrame] = None, treat_zero_as_nan: bool = False) -> Results:
     df = emg_imu.copy()
-    emg = df[df["raw"].notna()].copy().sort_values("ts_ms").reset_index(drop=True)
-    imu = df[df[["ax","ay","az","gx","gy","gz"]].notna().any(axis=1)].copy().sort_values("ts_ms").reset_index(drop=True)
+    emg = df[df["raw"].notna()].copy().sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    imu = df[df[["ax","ay","az","gx","gy","gz"]].notna().any(axis=1)].copy().sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
     if len(emg) == 0:
         raise ValueError("No EMG rows found.")
     if len(imu) > 0:
@@ -180,7 +176,7 @@ def compute(emg_imu: pd.DataFrame, emg_fs_hz: float, win_sec: float = 1.0, step_
     step_samp = max(int(round(step_sec * emg_fs_hz)), 1)
     vit = None
     if vitals is not None and len(vitals):
-        vit = vitals.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms").reset_index(drop=True)
+        vit = vitals.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
     rows = []
     for i0 in range(0, len(raw) - win_samp + 1, step_samp):
         i1 = i0 + win_samp
@@ -238,7 +234,10 @@ def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
     slope_MNF = np.polyfit(feats["t_center_s"], feats["EMG_MNF_Hz"], 1)[0]
     onset_time = np.nan
     threshold = baseline_MDF * 0.85
-    onset_candidates = feats[feats["EMG_MDF_Hz"] <= threshold]
+    # Improved onset detection: after 20% of capture, rolling average
+    min_time = total_sec * 0.2
+    rolling = feats["EMG_MDF_Hz"].rolling(window=20, min_periods=5).mean()
+    onset_candidates = feats[(feats["t_center_s"] >= min_time) & (rolling <= threshold)]
     if len(onset_candidates):
         onset_time = onset_candidates["t_center_s"].iloc[0]
     print(f"Fatigue Analysis:")
@@ -261,7 +260,6 @@ def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
             "slope_MNF": slope_MNF,
             "onset_time_s": onset_time
         }]).to_csv(summary_path, index=False)
-        # Plot trend
         plt.figure(figsize=(10,5))
         plt.plot(feats["t_center_s"], feats["EMG_MDF_Hz"], label="MDF")
         plt.plot(feats["t_center_s"], feats["EMG_MNF_Hz"], label="MNF")
@@ -273,59 +271,6 @@ def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, "fatigue_trend.png"), dpi=150)
         plt.close()
-
-# -----------------------------
-# CLI
-# -----------------------------
-def main():
-    ap = argparse.ArgumentParser(description="btCentral EMG/IMU/Vitals analysis + fatigue detection")
-    ap.add_argument("--emg-imu", required=True, help="Path or glob to emg_imu_log_###.csv")
-    ap.add_argument("--emg-fs", type=float, required=True, help="EMG sampling rate in Hz (e.g., 2000)")
-    ap.add_argument("--vitals", default=None, help="Path to vitals_log.csv (optional)")
-    ap.add_argument("--win", type=float, default=1.0, help="Window length in seconds")
-    ap.add_argument("--step", type=float, default=0.25, help="Step (hop) in seconds")
-    ap.add_argument("--out", default="features.csv", help="Output CSV of windowed features")
-    ap.add_argument("--plot", action="store_true", help="Show plots")
-    ap.add_argument("--full", action="store_true", help="Full-duration EMG traces (decimated)")
-    ap.add_argument("--emg-max-points", type=int, default=200000, help="Max points for full-duration EMG (decimation target)")
-    ap.add_argument("--page-sec", type=float, default=0.0, help="If >0, plot paged EMG views with this page length (seconds)")
-    ap.add_argument("--page-start", type=float, default=0.0, help="Start time for paged plots (seconds)")
-    ap.add_argument("--page-count", type=int, default=1, help="How many pages to show; <=0 means show all pages")
-    ap.add_argument("--page-step", type=float, default=0.0, help="Hop between pages (seconds). 0 means equal to page-sec")
-    ap.add_argument("--save-pages", default=None, help="Directory to save plots and fatigue summary")
-    ap.add_argument("--silent", action="store_true", help="Silent mode: do not display plots, only save files")
-    ap.add_argument("--dropout-zeros", action="store_true", help="Treat raw==0 as dropout (experimental)")
-    args = ap.parse_args()
-
-    emg_imu = load_emg_imu_logs(args.emg_imu)
-    vitals = load_vitals_log(args.vitals) if args.vitals else None
-    res = compute(emg_imu, emg_fs_hz=args.emg_fs, win_sec=args.win, step_sec=args.step,
-                  vitals=vitals, treat_zero_as_nan=args.dropout_zeros)
-    res.feats.to_csv(args.out, index=False)
-    print(f"Saved {args.out} (rows={len(res.feats)})")
-
-    # Fatigue analysis
-    analyze_fatigue(res.feats, save_dir=args.save_pages)
-
-    if args.plot:
-        plot_all(res, emg_fs_hz=args.emg_fs, title=f"EMG/IMU (fs={args.emg_fs:.0f} Hz)",
-                 full_duration=args.full, emg_max_points=args.emg_max_points,
-                 save_dir=args.save_pages, silent=args.silent)
-
-        if args.page_sec and args.page_sec > 0:
-            hop = args.page_step if args.page_step and args.page_step > 0 else args.page_sec
-            plot_paged(
-                res,
-                emg_fs_hz=args.emg_fs,
-                page_sec=args.page_sec,
-                page_start_sec=args.page_start,
-                page_count=args.page_count,
-                page_step_sec=hop,
-                title=f"EMG pages (fs={args.emg_fs:.0f} Hz)",
-                save_dir=args.save_pages,
-                silent=args.silent,
-            )
-
 
 # -----------------------------
 # Plotting
@@ -370,12 +315,18 @@ def plot_all(res: Results, emg_fs_hz: float, title: str, full_duration: bool,
     axes[3].plot(feats["t_center_s"], feats["EMG_ENV_mean"], lw=1.2, label="ENV mean", alpha=0.85)
     axes[3].set_title("EMG amplitude features"); axes[3].legend(); axes[3].grid(True, alpha=0.2)
     axes[4].plot(feats["t_center_s"], feats["EMG_MNF_Hz"], lw=1.2, label="MNF")
+
     axes[4].plot(feats["t_center_s"], feats["EMG_MDF_Hz"], lw=1.2, label="MDF", alpha=0.85)
-    axes[4].set_title("EMG spectral features"); axes[4].legend(); axes[4].grid(True, alpha=0.2)
+    axes[4].set_title("EMG spectral features");
+    axes[4].legend();
+    axes[4].grid(True, alpha=0.2)
     axes[5].plot(feats["t_center_s"], feats["IMU_acc_rms"], lw=1.2, label="IMU acc RMS")
     axes[5].plot(feats["t_center_s"], feats["IMU_gyro_rms"], lw=1.2, label="IMU gyro RMS", alpha=0.85)
-    axes[5].set_title("IMU activity features"); axes[5].legend(); axes[5].grid(True, alpha=0.2)
-    fig.suptitle(title); plt.tight_layout()
+    axes[5].set_title("IMU activity features");
+    axes[5].legend();
+    axes[5].grid(True, alpha=0.2)
+    fig.suptitle(title);
+    plt.tight_layout()
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
         total_sec = len(res.emg_raw) / emg_fs_hz
@@ -384,6 +335,7 @@ def plot_all(res: Results, emg_fs_hz: float, title: str, full_duration: bool,
     if not silent:
         plt.show()
     plt.close(fig)
+
 
 def plot_paged(res: Results, emg_fs_hz: float, page_sec: float, page_start_sec: float,
                page_count: int, page_step_sec: Optional[float], title: str,
@@ -402,18 +354,640 @@ def plot_paged(res: Results, emg_fs_hz: float, page_sec: float, page_start_sec: 
         i0 = int(max(0, np.floor(t0 * emg_fs_hz)))
         i1 = int(min(len(res.emg_raw), np.ceil(t1 * emg_fs_hz)))
         tt = np.arange(i0, i1) / emg_fs_hz
-        raw_y = res.emg_raw[i0:i1]; proc_y = res.emg_proc[i0:i1]; env_y = res.emg_env[i0:i1]
+        raw_y = res.emg_raw[i0:i1];
+        proc_y = res.emg_proc[i0:i1];
+        env_y = res.emg_env[i0:i1]
         fig, axes = plt.subplots(3, 1, figsize=(13, 8), sharex=True)
-        span_note = f"t=[{t0:.2f}, {t1:.2f}] s (page {i+1}/{len(starts)})"
+        span_note = f"t=[{t0:.2f}, {t1:.2f}] s (page {i + 1}/{len(starts)})"
         _emg_axes_plot(axes, tt, raw_y, proc_y, env_y, span_note)
-        fig.suptitle(title); plt.tight_layout()
+        fig.suptitle(title);
+        plt.tight_layout()
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
-            fname = f"page_{i+1:02d}_t0-{t0:.2f}_t1-{t1:.2f}.png"
+            fname = f"page_{i + 1:02d}_t0-{t0:.2f}_t1-{t1:.2f}.png"
             fig.savefig(os.path.join(save_dir, fname), dpi=150)
         if not silent:
             plt.show()
         plt.close(fig)
+
+
+
+
+# ============================
+# IMU detailed analysis helpers
+# ============================
+try:
+    import imu_feature as imu_feat  # leverages shared imu_feature.py
+except Exception:
+    imu_feat = None
+
+def extract_imu_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Return rows where any of ax..gz is present."""
+    imu_cols = ["ax","ay","az","gx","gy","gz"]
+    imu = df[df[imu_cols].notna().any(axis=1)].copy()
+    imu = imu.sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    for c in imu_cols:
+        imu[c] = pd.to_numeric(imu[c], errors="coerce")
+    imu = imu.dropna(subset=["ts_ms"])
+    return imu
+
+def imu_segments(imu: pd.DataFrame, gap_ms: float = 50.0, min_samples: int = 50) -> pd.DataFrame:
+    """Split IMU stream into 'continuous' segments by timestamp gap."""
+    if len(imu) == 0:
+        return pd.DataFrame(columns=["seg_id","n","t0_ms","t1_ms","dur_s","fs_est_hz","gyro_max","gyro_mean","acc_range"])
+    ts = imu["ts_ms"].to_numpy(dtype=np.int64)
+    dt = np.diff(ts)
+    breaks = np.where(dt > gap_ms)[0]
+    starts = np.r_[0, breaks + 1]
+    ends = np.r_[breaks + 1, len(imu)]
+    rows = []
+    imu_cols = ["ax","ay","az","gx","gy","gz"]
+    for seg_id, (s,e) in enumerate(zip(starts, ends)):
+        seg = imu.iloc[s:e]
+        if len(seg) < min_samples:
+            continue
+        dur_s = (float(seg["ts_ms"].iloc[-1]) - float(seg["ts_ms"].iloc[0])) / 1000.0
+        if dur_s <= 0:
+            continue
+        acc_mag = np.sqrt(seg["ax"]**2 + seg["ay"]**2 + seg["az"]**2)
+        gyro_mag = np.sqrt(seg["gx"]**2 + seg["gy"]**2 + seg["gz"]**2)
+        fs_est = (len(seg) - 1) / dur_s
+        rows.append({
+            "seg_id": seg_id,
+            "s": int(s),
+            "e": int(e),
+            "n": int(len(seg)),
+            "t0_ms": float(seg["ts_ms"].iloc[0]),
+            "t1_ms": float(seg["ts_ms"].iloc[-1]),
+            "dur_s": float(dur_s),
+            "fs_est_hz": float(fs_est),
+            "gyro_max": float(np.nanmax(gyro_mag)),
+            "gyro_mean": float(np.nanmean(gyro_mag)),
+            "gyro_std": float(np.nanstd(gyro_mag, ddof=1) if len(gyro_mag) > 1 else 0.0),
+            "acc_range": float(np.nanmax(acc_mag) - np.nanmin(acc_mag)),
+        })
+    return pd.DataFrame(rows).sort_values(["t0_ms"]).reset_index(drop=True)
+
+def build_time_axis_from_ts(imu: pd.DataFrame, fs_fallback: float = 200.0) -> np.ndarray:
+    """Build a monotonically increasing time axis (seconds) even when ts_ms repeats.
+
+    Many logs have multiple IMU samples with the same ts_ms. We spread samples within
+    the next timestamp delta (or a robust median delta) to get usable time for filtering.
+    """
+    ts = imu["ts_ms"].to_numpy(dtype=np.int64)
+    # group indices by identical ts
+    # For each group, distribute samples within dt_to_next.
+    uniq, idx_start, counts = np.unique(ts, return_index=True, return_counts=True)
+    # compute dt between unique timestamps in seconds
+    dt_u = np.diff(uniq.astype(np.float64)) / 1000.0
+    dt_u_pos = dt_u[dt_u > 0]
+    dt_med = float(np.median(dt_u_pos)) if len(dt_u_pos) else 1.0 / fs_fallback
+
+    t = np.empty(len(ts), dtype=float)
+    base = 0.0
+    # map from unique index to its group slice in original order
+    for k, (start, cnt) in enumerate(zip(idx_start, counts)):
+        if k < len(dt_u):
+            span = float(dt_u[k])
+            if span <= 0:
+                span = dt_med
+        else:
+            span = dt_med
+        if cnt == 1:
+            t[start] = base
+        else:
+            # distribute within [0, span) (not including endpoint to keep monotonicity)
+            offs = np.linspace(0.0, span, cnt, endpoint=False)
+            t[start:start+cnt] = base + offs
+        base += span
+    # shift to start at 0
+    t -= t[0]
+    # ensure strictly increasing (tiny epsilon if needed)
+    eps = 1e-9
+    for i in range(1, len(t)):
+        if t[i] <= t[i-1]:
+            t[i] = t[i-1] + eps
+    return t
+
+def detect_movement_intervals(t_s: np.ndarray, acc_mag: np.ndarray, gyro_mag: np.ndarray,
+                             baseline_s: float = 1.0, z_thr: float = 3.0,
+                             min_consec: int = 5) -> list[tuple[float,float]]:
+    """Z-score based movement detection from acc/gyro magnitudes."""
+    t_s = np.asarray(t_s, dtype=float)
+    acc_mag = np.asarray(acc_mag, dtype=float)
+    gyro_mag = np.asarray(gyro_mag, dtype=float)
+    base = t_s <= min(baseline_s, t_s.max() / 5.0 if t_s.size else baseline_s)
+    if not np.any(base):
+        base = slice(0, min(len(t_s), 10))
+    acc_mu = float(np.nanmean(acc_mag[base]))
+    acc_sd = float(np.nanstd(acc_mag[base], ddof=1)) if np.sum(base) > 1 else 1.0
+    gy_mu  = float(np.nanmean(gyro_mag[base]))
+    gy_sd  = float(np.nanstd(gyro_mag[base], ddof=1)) if np.sum(base) > 1 else 1.0
+    acc_z = (acc_mag - acc_mu) / (acc_sd if acc_sd > 1e-9 else 1e-9)
+    gy_z  = (gyro_mag - gy_mu) / (gy_sd if gy_sd > 1e-9 else 1e-9)
+    move = (np.abs(acc_z) > z_thr) | (np.abs(gy_z) > z_thr)
+
+    flags = np.zeros_like(move, dtype=bool)
+    cnt = 0
+    for i, v in enumerate(move):
+        cnt = cnt + 1 if v else 0
+        flags[i] = cnt >= min_consec
+
+    intervals = []
+    active = False
+    start = None
+    for i, f in enumerate(flags):
+        if f and not active:
+            active = True
+            start = float(t_s[i])
+        if active and (not f or i == len(flags)-1):
+            end = float(t_s[i])
+            intervals.append((start, end))
+            active = False
+    return intervals
+
+def run_imu_detail(emg_imu_df: pd.DataFrame, save_dir: str | None,
+                   gap_ms: float = 50.0, min_samples: int = 50,
+                   win_s: float = 0.5, overlap: float = 0.5,
+                   baseline_s: float = 1.0, z_thr: float = 3.0):
+    """Compute IMU segments + features + movement intervals; save CSV/plots."""
+    imu = extract_imu_rows(emg_imu_df)
+    if len(imu) == 0:
+        print("No IMU rows found; skipping IMU detail.")
+        return
+
+    segs = imu_segments(imu, gap_ms=gap_ms, min_samples=min_samples)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        segs.to_csv(os.path.join(save_dir, 'imu_segments_summary.csv'), index=False)
+        print(f"Saved: {os.path.join(save_dir, 'imu_segments_summary.csv')}")
+
+    # choose candidate segments: top by gyro_max (movement) but also keep the latest segment
+    candidates = []
+    if len(segs):
+        top = segs.sort_values('gyro_max', ascending=False).head(3)
+        last = segs.sort_values('t0_ms', ascending=False).head(1)
+        cand = pd.concat([top, last]).drop_duplicates(subset=['s','e']).reset_index(drop=True)
+        candidates = cand.to_dict('records')
+
+    all_feat_rows = []
+    for c in candidates:
+        s, e = int(c['s']), int(c['e'])
+        seg = imu.iloc[s:e].copy()
+        t = build_time_axis_from_ts(seg)
+        seg = seg.reset_index(drop=True)
+        seg['time'] = t
+        seg['acc_mag'] = np.sqrt(seg['ax']**2 + seg['ay']**2 + seg['az']**2)
+        seg['gyro_mag'] = np.sqrt(seg['gx']**2 + seg['gy']**2 + seg['gz']**2)
+        intervals = detect_movement_intervals(seg['time'].to_numpy(), seg['acc_mag'].to_numpy(),
+                                             seg['gyro_mag'].to_numpy(), baseline_s=baseline_s,
+                                             z_thr=z_thr, min_consec=5)
+        # feature extraction using imu_feature if available
+        feats = None
+        if imu_feat is not None and hasattr(imu_feat, 'compute_features'):
+            feat_df = seg[['time','ax','ay','az','gx','gy','gz']].rename(columns={'time':'time'})
+            fs_est = float(c.get('fs_est_hz', 200.0))
+            # Adapt window length so we always have at least one window in short segments
+            fs_est = float(c.get('fs_est_hz', 200.0))
+            n_samp = len(seg)
+            win_samples = int(round(win_s * fs_est))
+            win_samples = max(20, min(win_samples, n_samp))  # clamp
+            win_s_eff = win_samples / fs_est
+            overlap_eff = float(np.clip(overlap, 0.0, 0.95))
+            feats = imu_feat.compute_features(feat_df, fs=fs_est, win_s=win_s_eff, overlap=overlap_eff,
+                                              baseline_mask=(0.0, baseline_s))
+            feats['seg_id'] = c['seg_id']
+            feats['seg_t0_offset_s'] = (c['t0_ms'] - float(emg_imu_df['ts_ms'].min()))/1000.0
+            all_feat_rows.append(feats)
+
+        # plotting
+        if save_dir:
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(3, 1, figsize=(12, 7), sharex=True)
+            axes[0].plot(seg['time'], seg['acc_mag'], lw=1.0)
+            axes[0].set_ylabel('acc_mag (raw)')
+            axes[0].grid(True, alpha=0.3)
+            axes[1].plot(seg['time'], seg['gyro_mag'], lw=1.0, color='tab:red')
+            axes[1].set_ylabel('gyro_mag (raw)')
+            axes[1].grid(True, alpha=0.3)
+            axes[2].plot(seg['time'], seg['ax'], label='ax', alpha=0.7)
+            axes[2].plot(seg['time'], seg['ay'], label='ay', alpha=0.7)
+            axes[2].plot(seg['time'], seg['az'], label='az', alpha=0.7)
+            axes[2].set_ylabel('acc axes (raw)')
+            axes[2].set_xlabel('time (s)')
+            axes[2].legend(ncol=3, fontsize=8)
+            axes[2].grid(True, alpha=0.3)
+            for (a,b) in intervals:
+                for ax in axes:
+                    ax.axvspan(a,b, color='orange', alpha=0.15)
+            fig.suptitle(f"IMU segment seg_id={c['seg_id']} offset=[{c['t0_ms']:.0f},{c['t1_ms']:.0f}]ms, intervals={len(intervals)}")
+            fig.tight_layout()
+            outp = os.path.join(save_dir, f"imu_segment_{int(c['seg_id']):03d}.png")
+            fig.savefig(outp, dpi=150)
+            plt.close(fig)
+            print(f"Saved: {outp}")
+
+            if feats is not None and len(feats):
+                fig, ax = plt.subplots(1,1, figsize=(12,4))
+                tt = 0.5*(feats['t_start'] + feats['t_end'])
+                ax.plot(tt, feats['gyro_rms'], label='gyro_rms')
+                ax.plot(tt, feats['acc_rms'], label='acc_rms', alpha=0.85)
+                ax.plot(tt, feats['jerk_rms'], label='jerk_rms', alpha=0.85)
+                ax.set_xlabel('time (s)')
+                ax.set_title('IMU windowed features')
+                ax.grid(True, alpha=0.3)
+                ax.legend()
+                outp2 = os.path.join(save_dir, f"imu_features_{int(c['seg_id']):03d}.png")
+                fig.tight_layout()
+                fig.savefig(outp2, dpi=150)
+                plt.close(fig)
+                print(f"Saved: {outp2}")
+
+    if save_dir and all_feat_rows:
+        all_feats = pd.concat(all_feat_rows, ignore_index=True)
+        all_feats.to_csv(os.path.join(save_dir, 'imu_window_features.csv'), index=False)
+        print(f"Saved: {os.path.join(save_dir, 'imu_window_features.csv')}")
+
+
+
+# ============================
+# IMU swing (stroke) detection & EMG correlation (Phase-1: no FSR required)
+# ============================
+
+def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9) -> tuple[np.ndarray, float, float]:
+    """Robust z-score using median and MAD."""
+    x = np.asarray(x, dtype=float)
+    baseline_mask = np.asarray(baseline_mask, dtype=bool)
+    xb = x[baseline_mask]
+    xb = xb[np.isfinite(xb)]
+    if len(xb) < 10:
+        xb = x[np.isfinite(x)]
+    med = float(np.median(xb)) if len(xb) else float(np.nanmedian(x))
+    mad = float(np.median(np.abs(xb - med))) if len(xb) else float(np.nanmedian(np.abs(x - med)))
+    scale = 1.4826 * mad
+    if not np.isfinite(scale) or scale < eps:
+        scale = float(np.nanstd(xb)) if len(xb) else float(np.nanstd(x))
+        if not np.isfinite(scale) or scale < eps:
+            scale = 1.0
+    z = (x - med) / (scale + eps)
+    return z, med, scale
+
+
+def detect_swing_windows_from_imu(imu_df: pd.DataFrame, baseline_s: float = 2.0, z_thr: float = 5.0,
+                                 min_consec: int = 3, min_gap_ms: float = 300.0,
+                                 pre_ms: float = 250.0, post_ms: float = 450.0,
+                                 use_gyro: bool = True) -> pd.DataFrame:
+    """Detect swing windows from IMU magnitude using robust z-score."""
+    if imu_df is None or len(imu_df) == 0:
+        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
+    imu = imu_df.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    if len(imu) == 0:
+        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
+
+    t_rel_s = build_time_axis_from_ts(imu, fs_fallback=200.0)
+    t0_ms = float(imu["ts_ms"].iloc[0])
+    t_ms = t0_ms + 1000.0 * t_rel_s
+
+    if use_gyro:
+        mag = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2)
+    else:
+        mag = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
+
+    total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else float(baseline_s)
+    b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
+    baseline_mask = t_rel_s <= b_s
+    z, _, _ = robust_zscore(mag, baseline_mask)
+
+    active = z > float(z_thr)
+    if int(min_consec) > 1:
+        run = 0
+        flags = np.zeros_like(active, dtype=bool)
+        for i, v in enumerate(active):
+            run = run + 1 if v else 0
+            flags[i] = run >= int(min_consec)
+        active = flags
+
+    peaks = []
+    i = 0
+    while i < len(active):
+        if not active[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(active) and active[j]:
+            j += 1
+        seg = slice(i, j)
+        k = int(i + np.nanargmax(z[seg]))
+        peaks.append(k)
+        i = j
+
+    if not peaks:
+        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
+
+    peaks_sorted = sorted(peaks, key=lambda k: t_ms[k])
+    kept = []
+    last_t = -1e18
+    for k in peaks_sorted:
+        if (t_ms[k] - last_t) >= float(min_gap_ms):
+            kept.append(k)
+            last_t = t_ms[k]
+        else:
+            if kept and z[k] > z[kept[-1]]:
+                kept[-1] = k
+                last_t = t_ms[k]
+
+    rows = []
+    for si, k in enumerate(kept):
+        tp = float(t_ms[k])
+        rows.append({
+            "swing_id": int(si),
+            "t_start_ms": tp - float(pre_ms),
+            "t_peak_ms": tp,
+            "t_end_ms": tp + float(post_ms),
+            "peak_z": float(z[k]),
+            "peak_mag": float(mag[k]),
+        })
+
+    win = pd.DataFrame(rows).sort_values("t_start_ms").reset_index(drop=True)
+    merged = []
+    cur = win.iloc[0].to_dict()
+    for r in win.iloc[1:].to_dict('records'):
+        if r["t_start_ms"] <= cur["t_end_ms"]:
+            cur["t_end_ms"] = max(cur["t_end_ms"], r["t_end_ms"])
+            if r["peak_z"] > cur["peak_z"]:
+                cur.update({"t_peak_ms": r["t_peak_ms"], "peak_z": r["peak_z"], "peak_mag": r["peak_mag"]})
+        else:
+            merged.append(cur)
+            cur = r
+    merged.append(cur)
+    out = pd.DataFrame(merged)
+    out["swing_id"] = np.arange(len(out), dtype=int)
+    return out[["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"]]
+
+
+def emg_features_for_windows(res: Results, emg_fs_hz: float, windows: pd.DataFrame) -> pd.DataFrame:
+    """Compute basic EMG features per swing window."""
+    if windows is None or len(windows) == 0:
+        return pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","emg_env_peak","emg_env_mean","emg_iemg","emg_rms"])
+    ts = res.emg_ts_ms
+    env = res.emg_env
+    proc = res.emg_proc
+    dt = 1.0 / float(emg_fs_hz)
+    rows = []
+    for r in windows.to_dict('records'):
+        i0 = int(np.searchsorted(ts, float(r['t_start_ms']), side='left'))
+        i1 = int(np.searchsorted(ts, float(r['t_end_ms']), side='right'))
+        i0 = max(0, min(i0, len(ts)-1))
+        i1 = max(i0+1, min(i1, len(ts)))
+        seg_env = env[i0:i1]
+        seg_proc = proc[i0:i1]
+        rows.append({
+            "swing_id": int(r['swing_id']),
+            "t_start_ms": float(r['t_start_ms']),
+            "t_peak_ms": float(r['t_peak_ms']),
+            "t_end_ms": float(r['t_end_ms']),
+            "emg_env_peak": float(np.nanmax(seg_env)),
+            "emg_env_mean": float(np.nanmean(seg_env)),
+            "emg_iemg": float(np.nansum(seg_env) * dt),
+            "emg_rms": float(np.sqrt(np.nanmean(seg_proc**2))),
+        })
+    return pd.DataFrame(rows)
+
+
+def correlate_emg_imu(res: Results, imu_df: pd.DataFrame, baseline_s: float = 2.0,
+                      use_gyro: bool = True, max_lag_ms: float = 500.0) -> dict:
+    """Estimate correlation and lag between EMG envelope and IMU magnitude."""
+    if imu_df is None or len(imu_df) == 0:
+        return {"corr": None, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
+    imu = imu_df.copy().dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    if len(imu) == 0:
+        return {"corr": None, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
+
+    t_rel_s = build_time_axis_from_ts(imu, fs_fallback=200.0)
+    t0_ms = float(imu['ts_ms'].iloc[0])
+    imu_t_ms = t0_ms + 1000.0 * t_rel_s
+
+    if use_gyro:
+        mag = np.sqrt(imu['gx'].to_numpy(float)**2 + imu['gy'].to_numpy(float)**2 + imu['gz'].to_numpy(float)**2)
+    else:
+        mag = np.sqrt(imu['ax'].to_numpy(float)**2 + imu['ay'].to_numpy(float)**2 + imu['az'].to_numpy(float)**2)
+
+    total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else float(baseline_s)
+    b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
+    z, _, _ = robust_zscore(mag, t_rel_s <= b_s)
+
+    emg_t_ms = res.emg_ts_ms
+    env_i = np.interp(imu_t_ms, emg_t_ms, res.emg_env)
+
+    z0 = z - np.nanmean(z)
+    e0 = env_i - np.nanmean(env_i)
+    denom = float(np.nanstd(z0) * np.nanstd(e0))
+    corr0 = float(np.nanmean(z0 * e0) / denom) if denom > 1e-9 else None
+
+    dt = float(np.nanmedian(np.diff(imu_t_ms)))
+    if not np.isfinite(dt) or dt <= 0:
+        return {"corr": corr0, "best_lag_ms": None, "best_corr": None, "imu_dt_ms": None}
+
+    max_lag = int(round(float(max_lag_ms) / dt))
+    best_lag = 0
+    best_val = -1e18
+    for lag in range(-max_lag, max_lag + 1):
+        if lag < 0:
+            a = z0[-lag:]
+            b = e0[:len(a)]
+        elif lag > 0:
+            a = z0[:-lag]
+            b = e0[lag:lag+len(a)]
+        else:
+            a, b = z0, e0
+        if len(a) < 50:
+            continue
+        denom2 = float(np.nanstd(a) * np.nanstd(b))
+        if denom2 <= 1e-9:
+            continue
+        c = float(np.nanmean(a * b) / denom2)
+        if c > best_val:
+            best_val = c
+            best_lag = lag
+
+    return {"corr": corr0, "best_lag_ms": float(best_lag * dt), "best_corr": float(best_val), "imu_dt_ms": float(dt)}
+
+
+def run_imu_swing_analysis(emg_imu_df: pd.DataFrame, res: Results, emg_fs_hz: float,
+                           save_dir: str | None,
+                           baseline_s: float = 2.0,
+                           z_thr: float = 5.0,
+                           min_consec: int = 3,
+                           min_gap_ms: float = 300.0,
+                           pre_ms: float = 250.0,
+                           post_ms: float = 450.0,
+                           use_gyro: bool = True,
+                           max_lag_ms: float = 500.0):
+    """Run swing detection and save outputs (CSV/JSON/PNG)."""
+    imu = emg_imu_df[emg_imu_df[["ax","ay","az","gx","gy","gz"]].notna().any(axis=1)].copy()
+    imu = imu.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
+    if len(imu) == 0:
+        print("No IMU rows found; skipping swing detection.")
+        return
+
+    swings = detect_swing_windows_from_imu(imu, baseline_s=baseline_s, z_thr=z_thr, min_consec=min_consec,
+                                          min_gap_ms=min_gap_ms, pre_ms=pre_ms, post_ms=post_ms, use_gyro=use_gyro)
+    emg_sw = emg_features_for_windows(res, emg_fs_hz=float(emg_fs_hz), windows=swings)
+    corr = correlate_emg_imu(res, imu, baseline_s=baseline_s, use_gyro=use_gyro, max_lag_ms=max_lag_ms)
+
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        swings.to_csv(os.path.join(save_dir, 'swing_windows.csv'), index=False)
+        emg_sw.to_csv(os.path.join(save_dir, 'swing_emg_features.csv'), index=False)
+        with open(os.path.join(save_dir, 'emg_imu_correlation.json'), 'w', encoding='utf-8') as f:
+            json.dump(corr, f, indent=2)
+        print(f"Saved: {os.path.join(save_dir, 'swing_windows.csv')}")
+        print(f"Saved: {os.path.join(save_dir, 'swing_emg_features.csv')}")
+        print(f"Saved: {os.path.join(save_dir, 'emg_imu_correlation.json')}")
+
+        # Overlay plot
+        try:
+            imu2 = imu.copy()
+            t_rel_s = build_time_axis_from_ts(imu2, fs_fallback=200.0)
+            t0_ms = float(imu2['ts_ms'].iloc[0])
+            imu_t_s = (t0_ms + 1000.0 * t_rel_s - res.emg_ts_ms[0]) / 1000.0
+            if use_gyro:
+                mag = np.sqrt(imu2['gx'].to_numpy(float)**2 + imu2['gy'].to_numpy(float)**2 + imu2['gz'].to_numpy(float)**2)
+            else:
+                mag = np.sqrt(imu2['ax'].to_numpy(float)**2 + imu2['ay'].to_numpy(float)**2 + imu2['az'].to_numpy(float)**2)
+            total_s = float(np.nanmax(imu_t_s)) if len(imu_t_s) else float(baseline_s)
+            b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
+            z, _, _ = robust_zscore(mag, imu_t_s <= b_s)
+
+            emg_t_s = (res.emg_ts_ms - res.emg_ts_ms[0]) / 1000.0
+            env = res.emg_env
+            env_n = env - np.nanmedian(env)
+            sd = float(np.nanstd(env_n))
+            env_n = env_n / sd if sd > 1e-9 else env_n
+
+            fig, ax = plt.subplots(1, 1, figsize=(12, 5))
+            ax.plot(imu_t_s, z, lw=1.0, label='IMU mag z')
+            ax.plot(emg_t_s, env_n, lw=1.0, alpha=0.8, label='EMG env (z)')
+            for r in swings.to_dict('records'):
+                a = (float(r['t_start_ms']) - res.emg_ts_ms[0]) / 1000.0
+                b = (float(r['t_end_ms']) - res.emg_ts_ms[0]) / 1000.0
+                ax.axvspan(a, b, color='orange', alpha=0.15)
+            ax.set_xlabel('time (s)')
+            ax.set_title(f"Swing detection (count={len(swings)}), corr={corr.get('corr')}, best_lag_ms={corr.get('best_lag_ms')}")
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            outp = os.path.join(save_dir, 'swing_overlay.png')
+            fig.tight_layout()
+            fig.savefig(outp, dpi=150)
+            plt.close(fig)
+            print(f"Saved: {outp}")
+        except Exception as e:
+            print(f"[WARN] Could not generate swing overlay plot: {e}")
+
+    print(f"[Swing] windows={len(swings)} | corr={corr.get('corr')} best_lag_ms={corr.get('best_lag_ms')} best_corr={corr.get('best_corr')}")
+
+
+
+# -----------------------------
+# CLI
+# -----------------------------
+def main():
+    ap = argparse.ArgumentParser(description="btCentral EMG/IMU/Vitals analysis + fatigue detection")
+    ap.add_argument("--emg-imu", required=True, help="Path or glob to emg_imu_log_###.csv")
+    ap.add_argument("--emg-fs", type=float, required=True, help="EMG sampling rate in Hz (e.g., 2000)")
+    ap.add_argument("--vitals", default=None, help="Path to vitals_log.csv (optional)")
+    ap.add_argument("--win", type=float, default=1.0, help="Window length in seconds")
+    ap.add_argument("--step", type=float, default=0.25, help="Step (hop) in seconds")
+    ap.add_argument("--out", default="features.csv", help="Output CSV of windowed features")
+    ap.add_argument("--plot", action="store_true", help="Show plots")
+    ap.add_argument("--full", action="store_true", help="Full-duration EMG traces (decimated)")
+    ap.add_argument("--emg-max-points", type=int, default=200000,
+                    help="Max points for full-duration EMG (decimation target)")
+    ap.add_argument("--page-sec", type=float, default=0.0,
+                    help="If >0, plot paged EMG views with this page length (seconds)")
+    ap.add_argument("--page-start", type=float, default=0.0, help="Start time for paged plots (seconds)")
+    ap.add_argument("--page-count", type=int, default=1, help="How many pages to show; <=0 means show all pages")
+    ap.add_argument("--page-step", type=float, default=0.0,
+                    help="Hop between pages (seconds). 0 means equal to page-sec")
+    ap.add_argument("--save-pages", default=None, help="Directory to save plots and fatigue summary")
+    ap.add_argument("--silent", action="store_true", help="Silent mode: do not display plots, only save files")
+    ap.add_argument("--dropout-zeros", action="store_true", help="Treat raw==0 as dropout (experimental)")
+
+    ap.add_argument("--imu-detail", action="store_true", help="Run detailed IMU segment/feature analysis")
+    ap.add_argument("--imu-gap-ms", type=float, default=50.0, help="Gap (ms) that splits IMU segments")
+    ap.add_argument("--imu-min-samples", type=int, default=50, help="Minimum samples per IMU segment")
+    ap.add_argument("--imu-win", type=float, default=0.5, help="IMU feature window length (s)")
+    ap.add_argument("--imu-overlap", type=float, default=0.5, help="IMU feature window overlap (0..0.95)")
+    ap.add_argument("--imu-baseline-s", type=float, default=1.0, help="Baseline duration (s) for IMU z-score detection")
+    ap.add_argument("--imu-z", type=float, default=3.0, help="Z threshold for movement detection")
+    # IMU swing / stroke detection (FSR-free, works on legacy logs)
+    ap.add_argument("--imu-swing", action="store_true", help="Detect swing/stroke windows from IMU and extract per-swing EMG features")
+    ap.add_argument("--swing-baseline-s", type=float, default=2.0, help="Baseline duration (s) for robust z-score")
+    ap.add_argument("--swing-z", type=float, default=5.0, help="Z threshold for swing peak detection")
+    ap.add_argument("--swing-min-consec", type=int, default=3, help="Min consecutive IMU samples above threshold")
+    ap.add_argument("--swing-min-gap-ms", type=float, default=300.0, help="Minimum gap (ms) between swing peaks")
+    ap.add_argument("--swing-pre-ms", type=float, default=250.0, help="Window start relative to peak (ms)")
+    ap.add_argument("--swing-post-ms", type=float, default=450.0, help="Window end relative to peak (ms)")
+    ap.add_argument("--swing-use-acc", action="store_true", help="Use accelerometer magnitude instead of gyro magnitude")
+    ap.add_argument("--swing-max-lag-ms", type=float, default=500.0, help="Max lag (ms) to search when correlating EMG vs IMU")
+
+    args = ap.parse_args()
+
+    emg_imu = load_emg_imu_logs(args.emg_imu)
+    vitals = load_vitals_log(args.vitals) if args.vitals else None
+    res = compute(emg_imu, emg_fs_hz=args.emg_fs, win_sec=args.win, step_sec=args.step,
+                  vitals=vitals, treat_zero_as_nan=args.dropout_zeros)
+    res.feats.to_csv(args.out, index=False)
+    print(f"Saved {args.out} (rows={len(res.feats)})")
+
+    # Fatigue analysis
+    analyze_fatigue(res.feats, save_dir=args.save_pages)
+
+    # Detailed IMU analysis (segments + windowed features + movement intervals)
+    if args.imu_detail:
+        out_dir = args.save_pages if args.save_pages else os.path.dirname(args.out) or '.'
+        run_imu_detail(emg_imu, save_dir=out_dir, gap_ms=args.imu_gap_ms,
+                   min_samples=args.imu_min_samples, win_s=args.imu_win,
+                   overlap=args.imu_overlap, baseline_s=args.imu_baseline_s,
+                   z_thr=args.imu_z)
+
+    # IMU swing detection + per-swing EMG features + EMG/IMU correlation
+    if args.imu_swing:
+        out_dir = args.save_pages if args.save_pages else os.path.dirname(args.out) or '.'
+        run_imu_swing_analysis(
+            emg_imu_df=emg_imu,
+            res=res,
+            emg_fs_hz=args.emg_fs,
+            save_dir=out_dir,
+            baseline_s=args.swing_baseline_s,
+            z_thr=args.swing_z,
+            min_consec=args.swing_min_consec,
+            min_gap_ms=args.swing_min_gap_ms,
+            pre_ms=args.swing_pre_ms,
+            post_ms=args.swing_post_ms,
+            use_gyro=(not args.swing_use_acc),
+            max_lag_ms=args.swing_max_lag_ms,
+        )
+
+
+    if args.plot:
+        plot_all(res, emg_fs_hz=args.emg_fs, title=f"EMG/IMU (fs={args.emg_fs:.0f} Hz)",
+                 full_duration=args.full, emg_max_points=args.emg_max_points,
+                 save_dir=args.save_pages, silent=args.silent)
+        if args.page_sec and args.page_sec > 0:
+            hop = args.page_step if args.page_step and args.page_step > 0 else args.page_sec
+            plot_paged(
+                res,
+                emg_fs_hz=args.emg_fs,
+                page_sec=args.page_sec,
+                page_start_sec=args.page_start,
+                page_count=args.page_count,
+                page_step_sec=hop,
+                title=f"EMG pages (fs={args.emg_fs:.0f} Hz)",
+                save_dir=args.save_pages,
+                silent=args.silent,
+            )
+
 
 if __name__ == "__main__":
     main()
