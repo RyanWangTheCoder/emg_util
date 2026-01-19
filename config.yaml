@@ -1,0 +1,106 @@
+
+# ============================================================
+# EMG + IMU Analysis Configuration (single YAML)
+#
+# Goal:
+#   - Detect swings (strokes) from IMU
+#   - Compute per-swing EMG features (fatigue proxies, effort)
+#   - Segment session into bouts (rallies/active periods) + breaks
+#   - Produce bout summaries (scalable for multi-hour logs)
+#
+# Notes:
+#   - btCentral rotates emg_imu_log_###.csv by row count (MAX_ROWS). This YAML
+#     supports globs so multi-hour sessions spanning many files can be analyzed.
+#   - Legacy logs use host ts_ms and often have repeated timestamps. We use
+#     robust methods (ordering + z-scores) rather than assuming perfect timing.
+# ============================================================
+
+session:
+  # Input: rotated files via glob. Example: emg_imu_log_*.csv
+  emg_imu_glob: "emg_imu_log_*.csv"
+
+  # Sampling rates (used for feature extraction & fallback timing)
+  emg_fs_hz: 2000
+  imu_fs_fallback_hz: 200
+
+  # Output directory
+  out_dir: "out"
+
+features:
+  # Default mode (your choice):
+  #   - swing: per-swing features only
+  #   - bout : bout summaries only (fast)
+  #   - both : per-swing features + bout summaries (default)
+  mode: "both"
+
+  # Full-session windowed features can be expensive for multi-hour 2kHz EMG.
+  # Keep false by default for scalability.
+  compute_windowed: false
+
+  # Thresholds used by ZC/SSC classic features (dimensionless, signal-dependent)
+  zc_thr: 0.01
+  ssc_thr: 0.01
+
+swing_detection:
+  # Swing detection uses IMU magnitude + robust z-score (no FSR required).
+  # Default uses gyro magnitude; set false to use accelerometer magnitude.
+  use_gyro: true
+
+  # Baseline duration used to compute robust median/MAD for IMU z-score
+  baseline_s: 2.0
+
+  # Detection threshold on IMU magnitude z-score
+  z_thr: 5.0
+
+  # Require min_consec consecutive samples above threshold to confirm an active region
+  min_consec: 3
+
+  # Minimum time between detected swing peaks (ms) to avoid double counting
+  min_gap_ms: 300
+
+  # Swing window around peak (ms) for per-swing EMG features
+  pre_ms: 250
+  post_ms: 450
+
+  # MDF/PSD stability padding (ms): compute MDF on [start-pad, end+pad]
+  mdf_pad_ms: 300
+
+baseline:
+  # Baseline is used to compute percent MDF drop and percent RMS increase.
+  # Default: swing-based baseline (sport-real), with window fallback.
+  mode: "swing"     # swing or window
+
+  # Warm-up handling: typical session uses first ~5 minutes swings as warm-up
+  warmup_skip_min: 5
+
+  # Optional additional skip by swing count (0 disables)
+  warmup_skip_swings: 0
+
+  # Baseline swings N (after warm-up)
+  baseline_swings: 20
+
+  # Fallback: baseline from first X seconds (if swing baseline not possible)
+  baseline_window_sec: 60
+
+bout:
+  # Bout segmentation for mixed rest patterns:
+  # Option C = swing-gap + IMU activity, with EMG gating to handle walking.
+
+  # Swing-gap thresholds (seconds)
+  gap_thr_s: 10         # short break threshold
+  gap_thr_long_s: 30    # long break threshold
+
+  # Rest confirmation duration (seconds)
+  rest_dur_s: 4
+
+  # IMU gating (robust z-score on IMU magnitude)
+  imu_z_low: 1.2
+  imu_z_high: 2.5
+
+  # EMG gating (percentile thresholds on EMG activity)
+  emg_env_low_pct: 25
+  emg_env_high_pct: 60
+
+  # Robustness
+  merge_short_rest_s: 6
+  min_bout_swings: 3
