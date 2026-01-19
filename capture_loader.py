@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""capture_loader.py
+
+Loader/adapter for the NEW btCentral.py capture format:
+- Rotated EMG CSVs:  emg_log_<SESSIONID>_<OPENID>_<idx>.csv
+- Rotated IMU CSVs:  imu_log_<SESSIONID>_<OPENID>_<idx>.csv
+- Optional vitals:    vitals_log.csv
+
+This module is intentionally *I/O + alignment + scaling only*.
+All DSP / feature extraction remains in emg_util.py.
+
+Time base:
+- Uses device-derived timestamps (dev_us) as canonical.
+- Provides derived ts_ms for compatibility with existing analysis paths.
+
+IMU scaling:
+- Converts raw counts to physical units by default using per-row FSR columns:
+  acc_fsr_g, gyro_fsr_dps.
+
+"""
+
+from __future__ import annotations
+
+import glob
+import os
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+
+# Filename patterns produced by btCentral.py
+_RE_EMG = re.compile(r"^emg_log_(\d{8}_\d{6})_(\d{8}_\d{6})_(\d{3})\.csv$")
+_RE_IMU = re.compile(r"^imu_log_(\d{8}_\d{6})_(\d{8}_\d{6})_(\d{3})\.csv$")
+
+
+@dataclass
+class SegmentSummary:
+    kind: str  # 'emg' or 'imu'
+    path: str
+    session_id: str
+    open_id: str
+    index: int
+    start_dev_us: int
+    end_dev_us: int
+    duration_s: float
+    n_rows: int
+    est_rate_hz: float
+
+
+@dataclass
+class SessionFiles:
+    session_id: str
+    emg_paths: List[str]
+    imu_paths: List[str]
+    vitals_path: Optional[str]
+
+
+@dataclass
+class SessionData:
+    session_id: str
+    emg_paths: List[str]
+    imu_paths: List[str]
+    vitals_path: Optional[str]
+    emg_segments: List[SegmentSummary]
+    imu_segments: List[SegmentSummary]
+    session_summary: Dict
+
+
+def _acc_lsb_per_g(acc_fsr_g: float) -> float:
+    # ICM-20948 mapping used in btCentral.py
+    m = {2.0: 16384.0, 4.0: 8192.0, 8.0: 4096.0, 16.0: 2048.0}
+    return float(m.get(float(acc_fsr_g), 16384.0))
+
+
+def _gyro_lsb_per_dps(gyro_fsr_dps: float) -> float:
+    m = {250.0: 131.0, 500.0: 65.5, 1000.0: 32.8, 2000.0: 16.4}
+    return float(m.get(float(gyro_fsr_dps), 131.0))
+
+
+def discover_sessions(log_dir: str,
+                      emg_glob: str = "emg_log_*.csv",
+                      imu_glob: str = "imu_log_*.csv",
+                      vitals_name: str = "vitals_log.csv") -> Dict[str, SessionFiles]:
+    """Discover all sessions in a directory.
+
+    Returns mapping: session_id -> SessionFiles.
+    """
+    log_dir = os.path.abspath(log_dir)
+    emg_paths = sorted(glob.glob(os.path.join(log_dir, emg_glob)))
+    imu_paths = sorted(glob.glob(os.path.join(log_dir, imu_glob)))
+
+    by_session: Dict[str, Dict[str, List[str]]] = {}
+
+    def add_path(p: str, kind: str):
+        base = os.path.basename(p)
+        m = _RE_EMG.match(base) if kind == 'emg' else _RE_IMU.match(base)
+        if not m:
+            return
+        session_id, open_id, idx = m.group(1), m.group(2), int(m.group(3))
+        d = by_session.setdefault(session_id, {'emg': [], 'imu': []})
+        d[kind].append(p)
+
+    for p in emg_paths:
+        add_path(p, 'emg')
+    for p in imu_paths:
+        add_path(p, 'imu')
+
+    vitals_path = os.path.join(log_dir, vitals_name)
+    vitals_exists = os.path.exists(vitals_path)
+
+    out: Dict[str, SessionFiles] = {}
+    for session_id, d in by_session.items():
+        # sort each list by open_id then idx using filename regex
+        def sort_key(path: str):
+            b = os.path.basename(path)
+            mm = _RE_EMG.match(b) or _RE_IMU.match(b)
+            if not mm:
+                return ("", 0)
+            return (mm.group(2), int(mm.group(3)))
+
+        emg_sorted = sorted(d['emg'], key=sort_key)
+        imu_sorted = sorted(d['imu'], key=sort_key)
+        out[session_id] = SessionFiles(
+            session_id=session_id,
+            emg_paths=emg_sorted,
+            imu_paths=imu_sorted,
+            vitals_path=(vitals_path if vitals_exists else None)
+        )
+    return out
+
+
+def _summarize_segment(path: str, kind: str) -> SegmentSummary:
+    base = os.path.basename(path)
+    m = _RE_EMG.match(base) if kind == 'emg' else _RE_IMU.match(base)
+    if not m:
+        raise ValueError(f"Unrecognized {kind} filename: {base}")
+    session_id, open_id, idx = m.group(1), m.group(2), int(m.group(3))
+
+    # Read dev_us only (fast)
+    df = pd.read_csv(path, usecols=['dev_us'], engine='python')
+    dev = pd.to_numeric(df['dev_us'], errors='coerce').dropna().astype(np.int64)
+    n_rows = int(len(dev))
+    if n_rows == 0:
+        start = end = 0
+        dur_s = 0.0
+        est_rate = 0.0
+    else:
+        start = int(dev.min())
+        end = int(dev.max())
+        dur_s = float(max(end - start, 0)) / 1e6
+        est_rate = float((n_rows - 1) / dur_s) if dur_s > 1e-9 else 0.0
+
+    return SegmentSummary(
+        kind=kind,
+        path=path,
+        session_id=session_id,
+        open_id=open_id,
+        index=idx,
+        start_dev_us=start,
+        end_dev_us=end,
+        duration_s=dur_s,
+        n_rows=n_rows,
+        est_rate_hz=est_rate
+    )
+
+
+def summarize_session(files: SessionFiles) -> SessionData:
+    """Compute per-file segment summaries and a session-level summary."""
+    emg_segs = [_summarize_segment(p, 'emg') for p in files.emg_paths]
+    imu_segs = [_summarize_segment(p, 'imu') for p in files.imu_paths]
+
+    def gaps(segs: List[SegmentSummary]) -> Dict[str, float]:
+        segs2 = sorted(segs, key=lambda s: (s.start_dev_us, s.end_dev_us))
+        if len(segs2) <= 1:
+            return {'n_gaps': 0, 'total_gap_s': 0.0, 'max_gap_s': 0.0}
+        g = []
+        prev_end = segs2[0].end_dev_us
+        for s in segs2[1:]:
+            if s.start_dev_us > prev_end:
+                g.append((s.start_dev_us - prev_end) / 1e6)
+            prev_end = max(prev_end, s.end_dev_us)
+        if not g:
+            return {'n_gaps': 0, 'total_gap_s': 0.0, 'max_gap_s': 0.0}
+        return {'n_gaps': int(len(g)), 'total_gap_s': float(np.sum(g)), 'max_gap_s': float(np.max(g))}
+
+    # Session overall time span across EMG+IMU (if present)
+    starts = [s.start_dev_us for s in emg_segs + imu_segs if s.n_rows > 0]
+    ends = [s.end_dev_us for s in emg_segs + imu_segs if s.n_rows > 0]
+    if starts and ends:
+        session_start = int(min(starts))
+        session_end = int(max(ends))
+        session_dur_s = float(max(session_end - session_start, 0)) / 1e6
+    else:
+        session_start = session_end = 0
+        session_dur_s = 0.0
+
+    summary = {
+        'session_id': files.session_id,
+        'n_emg_files': int(len(files.emg_paths)),
+        'n_imu_files': int(len(files.imu_paths)),
+        'session_start_dev_us': session_start,
+        'session_end_dev_us': session_end,
+        'session_duration_s': session_dur_s,
+        'emg_gaps': gaps(emg_segs),
+        'imu_gaps': gaps(imu_segs),
+    }
+
+    return SessionData(
+        session_id=files.session_id,
+        emg_paths=files.emg_paths,
+        imu_paths=files.imu_paths,
+        vitals_path=files.vitals_path,
+        emg_segments=emg_segs,
+        imu_segments=imu_segs,
+        session_summary=summary
+    )
+
+
+def load_emg_concat(paths: List[str], usecols: Optional[List[str]] = None) -> pd.DataFrame:
+    """Load and concatenate EMG CSVs, sorted by dev_us.
+
+    Default columns: dev_us, env, raw, ref.
+    Adds derived ts_ms column.
+    """
+    if usecols is None:
+        usecols = ['dev_us', 'env', 'raw', 'ref']
+    parts = []
+    for p in paths:
+        df = pd.read_csv(p, usecols=usecols, engine='python')
+        for c in usecols:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+        df = df.dropna(subset=['dev_us'])
+        parts.append(df)
+    if not parts:
+        return pd.DataFrame(columns=['dev_us', 'ts_ms', 'env', 'raw', 'ref'])
+    out = pd.concat(parts, ignore_index=True)
+    out = out.sort_values('dev_us', kind='mergesort').reset_index(drop=True)
+    out['dev_us'] = out['dev_us'].astype(np.int64)
+    out['ts_ms'] = out['dev_us'].astype(np.float64) / 1000.0
+    return out
+
+
+def load_imu_concat(paths: List[str],
+                    use_physical_units: bool = True,
+                    acc_fsr_default_g: float = 2.0,
+                    gyro_fsr_default_dps: float = 250.0,
+                    usecols: Optional[List[str]] = None) -> pd.DataFrame:
+    """Load and concatenate IMU CSVs, sorted by dev_us.
+
+    If use_physical_units=True, converts ax..az to g and gx..gz to dps.
+    Adds derived ts_ms column.
+    """
+    if usecols is None:
+        usecols = ['dev_us', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'acc_fsr_g', 'gyro_fsr_dps']
+    parts = []
+    for p in paths:
+        df = pd.read_csv(p, usecols=usecols, engine='python')
+        for c in usecols:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+        df = df.dropna(subset=['dev_us'])
+        parts.append(df)
+    if not parts:
+        cols = ['dev_us', 'ts_ms', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'acc_fsr_g', 'gyro_fsr_dps']
+        return pd.DataFrame(columns=cols)
+    out = pd.concat(parts, ignore_index=True)
+    out = out.sort_values('dev_us', kind='mergesort').reset_index(drop=True)
+    out['dev_us'] = out['dev_us'].astype(np.int64)
+    out['ts_ms'] = out['dev_us'].astype(np.float64) / 1000.0
+
+    # Fill FSR missing values with forward-fill, then defaults
+    if 'acc_fsr_g' in out.columns:
+        out['acc_fsr_g'] = out['acc_fsr_g'].ffill().fillna(acc_fsr_default_g)
+    else:
+        out['acc_fsr_g'] = float(acc_fsr_default_g)
+
+    if 'gyro_fsr_dps' in out.columns:
+        out['gyro_fsr_dps'] = out['gyro_fsr_dps'].ffill().fillna(gyro_fsr_default_dps)
+    else:
+        out['gyro_fsr_dps'] = float(gyro_fsr_default_dps)
+
+    if use_physical_units:
+        # Map FSR to scale factors
+        acc_lsb = out['acc_fsr_g'].map(lambda v: _acc_lsb_per_g(v)).astype(np.float64)
+        gyr_lsb = out['gyro_fsr_dps'].map(lambda v: _gyro_lsb_per_dps(v)).astype(np.float64)
+        for c in ['ax', 'ay', 'az']:
+            out[c] = out[c].astype(np.float64) / acc_lsb
+        for c in ['gx', 'gy', 'gz']:
+            out[c] = out[c].astype(np.float64) / gyr_lsb
+
+    return out
+
+
+def load_vitals(path: str) -> pd.DataFrame:
+    """Load vitals_log.csv if present."""
+    if path is None or (not os.path.exists(path)):
+        return pd.DataFrame()
+    df = pd.read_csv(path, engine='python')
+    # Attempt to standardize a time column: prefer dev_us_computed if present
+    for c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors='ignore')
+    # Provide ts_ms if we can
+    if 'dev_us_computed' in df.columns:
+        df['ts_ms'] = pd.to_numeric(df['dev_us_computed'], errors='coerce') / 1000.0
+    elif 'dev_us_frame' in df.columns:
+        df['ts_ms'] = pd.to_numeric(df['dev_us_frame'], errors='coerce') / 1000.0
+    return df
+
+
+def make_interleaved_df(emg_df: pd.DataFrame, imu_df: pd.DataFrame) -> pd.DataFrame:
+    """Create an interleaved dataframe compatible with legacy analysis paths.
+
+    Produces a dataframe with columns including:
+      ts_ms, env, raw, ref, ax..gz
+    with EMG rows having NaNs for IMU columns and vice versa.
+
+    This does NOT change the source format externally; it is only for reuse
+    of existing compute/plot routines.
+    """
+    # Normalize columns
+    emg = emg_df.copy()
+    imu = imu_df.copy()
+
+    # Ensure required columns exist
+    for c in ['ts_ms', 'env', 'raw', 'ref']:
+        if c not in emg.columns:
+            emg[c] = np.nan
+    for c in ['ts_ms', 'ax', 'ay', 'az', 'gx', 'gy', 'gz']:
+        if c not in imu.columns:
+            imu[c] = np.nan
+
+    emg_rows = emg[['ts_ms', 'env', 'raw', 'ref']].copy()
+    for c in ['ax', 'ay', 'az', 'gx', 'gy', 'gz']:
+        emg_rows[c] = np.nan
+
+    imu_rows = imu[['ts_ms', 'ax', 'ay', 'az', 'gx', 'gy', 'gz']].copy()
+    for c in ['env', 'raw', 'ref']:
+        imu_rows[c] = np.nan
+
+    df = pd.concat([emg_rows, imu_rows], ignore_index=True)
+    df['ts_ms'] = pd.to_numeric(df['ts_ms'], errors='coerce')
+    df = df.dropna(subset=['ts_ms']).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
+    return df
