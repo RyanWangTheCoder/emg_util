@@ -104,3 +104,18 @@ bout:
   # Robustness
   merge_short_rest_s: 6
   min_bout_swings: 3
+
+
+plots:
+  enable: false
+  full_duration: true
+  emg_max_points: 300000
+  do_fatigue: false
+  win_sec: 1.0
+  step_sec: 0.25
+  paged:
+    enable: false
+    page_sec: 5.0
+    page_start_sec: 0.0
+    page_count: 0
+    page_step_sec: null
