@@ -105,7 +105,6 @@ bout:
   merge_short_rest_s: 6
   min_bout_swings: 3
 
-
 plots:
   enable: true
   full_duration: true
@@ -119,3 +118,14 @@ plots:
     page_start_sec: 0.0
     page_count: 0
     page_step_sec: null
+
+diagnostics:
+  swing_overlay:
+    enable: true
+    save_name: swing_overlay.png
+    plot_env_mean: true
+    two_y_axes: true
+  emg_imu_correlation:
+    enable: true
+    method: pearson
+    save_name: emg_imu_correlation.json
