@@ -1,32 +1,19 @@
-# ============================================================
-# EMG + IMU Analysis Configuration (single YAML)
-#
-# NEW btCentral.py capture format (separate rotated EMG / IMU logs).
-# - Pass capture directory via CLI: --log-dir <LOG_DIR>
-# - Runner outputs to out/<session_id>/...
-# ============================================================
-
 session:
-  log_dir: ""  # leave empty; pass via CLI --log-dir
-  emg_glob: "emg_log_*.csv"
-  imu_glob: "imu_log_*.csv"
-  vitals_path: "vitals_log.csv"  # optional
-
+  log_dir: ''
+  emg_glob: emg_log_*.csv
+  imu_glob: imu_log_*.csv
+  vitals_path: vitals_log.csv
   emg_fs_hz: 2000
   imu_fs_fallback_hz: 200
-
   use_physical_units: true
   acc_fsr_default_g: 2
   gyro_fsr_default_dps: 250
-
-  out_dir: "out"
-
+  out_dir: out
 features:
-  mode: "both"  # swing | bout | both
+  mode: both
   compute_windowed: false
   zc_thr: 0.01
   ssc_thr: 0.01
-
 swing_detection:
   use_gyro: true
   baseline_s: 2.0
@@ -36,14 +23,12 @@ swing_detection:
   pre_ms: 250
   post_ms: 450
   mdf_pad_ms: 300
-
 baseline:
-  mode: "swing"
-  warmup_skip_min: 5
+  mode: swing
+  warmup_skip_min: 0
   warmup_skip_swings: 0
-  baseline_swings: 20
+  baseline_swings: 5
   baseline_window_sec: 60
-
 bout:
   gap_thr_s: 10
   gap_thr_long_s: 30
@@ -54,7 +39,6 @@ bout:
   emg_env_high_pct: 60
   merge_short_rest_s: 6
   min_bout_swings: 3
-
 plots:
   enable: true
   full_duration: true
@@ -68,7 +52,6 @@ plots:
     page_start_sec: 0.0
     page_count: 0
     page_step_sec: null
-
 diagnostics:
   swing_overlay:
     enable: true
@@ -79,3 +62,15 @@ diagnostics:
     enable: true
     method: pearson
     save_name: emg_imu_correlation.json
+  activity_overlay:
+    enable: true
+    save_name: imu_activity_overlay.png
+    plot_swings: true
+activity_gating:
+  enable: true
+  primary: gyro_mag
+  p_high: 97
+  p_low: 92
+  min_active_ms: 100
+  merge_gap_ms: 300
+  skip_min: 0
