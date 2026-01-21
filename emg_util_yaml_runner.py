@@ -73,7 +73,7 @@ def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9):
 
 
 # ----------------------------
-# IMU percentile-based activity gating (conservative)
+# IMU activity gating for WORK PERIODS (hybrid gyro+acc intensity)
 # ----------------------------
 
 def compute_gyro_mag(df: pd.DataFrame) -> np.ndarray:
@@ -81,16 +81,106 @@ def compute_gyro_mag(df: pd.DataFrame) -> np.ndarray:
     return np.sqrt(df['gx'].to_numpy(float)**2 + df['gy'].to_numpy(float)**2 + df['gz'].to_numpy(float)**2)
 
 
+def compute_acc_mag(df: pd.DataFrame) -> np.ndarray:
+    """Compute accel magnitude sqrt(ax^2 + ay^2 + az^2)."""
+    return np.sqrt(df['ax'].to_numpy(float)**2 + df['ay'].to_numpy(float)**2 + df['az'].to_numpy(float)**2)
+
+
+def _robust_z(x: np.ndarray, ref_mask: np.ndarray, eps: float = 1e-9) -> np.ndarray:
+    """Robust z-score using median and MAD on reference subset."""
+    x = np.asarray(x, dtype=float)
+    ref_mask = np.asarray(ref_mask, dtype=bool)
+    ref = x[ref_mask]
+    ref = ref[np.isfinite(ref)]
+    if ref.size < 50:
+        ref = x[np.isfinite(x)]
+    if ref.size == 0:
+        return np.zeros_like(x, dtype=float)
+    med = float(np.median(ref))
+    mad = float(np.median(np.abs(ref - med)))
+    scale = 1.4826 * mad
+    if (not np.isfinite(scale)) or scale < eps:
+        scale = float(np.nanstd(ref))
+    if (not np.isfinite(scale)) or scale < eps:
+        scale = 1.0
+    return (x - med) / (scale + eps)
+
+
+def _ema_smooth(x: np.ndarray, t_ms: np.ndarray, tau_ms: float) -> np.ndarray:
+    """Exponential smoothing with time-aware alpha based on tau_ms."""
+    x = np.asarray(x, dtype=float)
+    t_ms = np.asarray(t_ms, dtype=float)
+    if x.size == 0:
+        return x
+    if tau_ms <= 0:
+        return x.copy()
+    y = np.empty_like(x, dtype=float)
+    y[0] = x[0]
+    for i in range(1, len(x)):
+        dt = float(t_ms[i] - t_ms[i-1])
+        if not np.isfinite(dt) or dt <= 0:
+            dt = 0.0
+        alpha = dt / (tau_ms + dt) if (tau_ms + dt) > 0 else 1.0
+        y[i] = y[i-1] + alpha * (x[i] - y[i-1])
+    return y
+
+
+def compute_hybrid_intensity(imu: pd.DataFrame, cfg: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """Compute hybrid intensity (gyro + dynamic-acc), plus smoothed intensity.
+
+    Returns dict with keys: t_ms, gyro_mag, acc_dyn, intensity, intensity_smooth.
+    """
+    ag = (cfg.get('activity_gating', {}) or {})
+
+    t_ms = imu['ts_ms'].to_numpy(float)
+    gyro_mag = compute_gyro_mag(imu)
+
+    # dynamic accel: abs(|a|-1g) by default (assuming ax/ay/az in g)
+    acc_dyn_method = str(ag.get('acc_dyn_method', 'abs_mag_minus_1g'))
+    if all(c in imu.columns for c in ['ax','ay','az']):
+        acc_mag = compute_acc_mag(imu)
+    else:
+        acc_mag = np.zeros_like(gyro_mag)
+
+    if acc_dyn_method == 'abs_mag_minus_1g':
+        acc_dyn = np.abs(acc_mag - 1.0)
+    else:
+        acc_dyn = np.abs(acc_mag - 1.0)
+
+    # Reference mask for robust scaling based on skip_min
+    skip_min = ag.get('skip_min', 0)
+    if skip_min is None:
+        skip_min = (cfg.get('baseline', {}) or {}).get('warmup_skip_min', 0)
+    skip_ms = float(skip_min) * 60.0 * 1000.0
+    t0 = float(t_ms[0])
+    ref_mask = t_ms >= (t0 + skip_ms)
+    if not np.any(ref_mask):
+        ref_mask = np.ones_like(t_ms, dtype=bool)
+
+    zg = _robust_z(gyro_mag, ref_mask)
+    za = _robust_z(acc_dyn, ref_mask)
+
+    w_g = float(ag.get('w_gyro', 0.8))
+    w_a = float(ag.get('w_acc', 0.2))
+    intensity = w_g * zg + w_a * za
+
+    smooth_ms = float(ag.get('smooth_ms', 250.0))
+    intensity_smooth = _ema_smooth(intensity, t_ms, tau_ms=smooth_ms)
+
+    return {
+        't_ms': t_ms,
+        'gyro_mag': gyro_mag,
+        'acc_dyn': acc_dyn,
+        'intensity': intensity,
+        'intensity_smooth': intensity_smooth,
+        'ref_mask': ref_mask,
+    }
+
+
 def activity_segments_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Create ACTIVE segments using percentile hysteresis on gyro_mag.
+    """Create ACTIVE segments representing WORK PERIODS.
 
-    cfg.activity_gating:
-      p_high (enter), p_low (exit), min_active_ms, merge_gap_ms, skip_min
-
-    If skip_min is None, falls back to baseline.warmup_skip_min.
-
-    Returns DataFrame with columns: t_start_ms, t_end_ms, duration_s.
-    Stores thresholds in out.attrs: thr_high, thr_low.
+    Uses smoothed hybrid intensity and percentile hysteresis.
     """
     ag = (cfg.get('activity_gating', {}) or {})
     if not bool(ag.get('enable', True)):
@@ -99,39 +189,35 @@ def activity_segments_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.
     if imu_df is None or len(imu_df) == 0:
         return pd.DataFrame(columns=['t_start_ms','t_end_ms','duration_s'])
 
-    imu = imu_df.dropna(subset=['ts_ms','gx','gy','gz']).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
+    need_cols = ['ts_ms','gx','gy','gz']
+    imu = imu_df.dropna(subset=need_cols).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
     if len(imu) == 0:
         return pd.DataFrame(columns=['t_start_ms','t_end_ms','duration_s'])
 
-    t_ms = imu['ts_ms'].to_numpy(float)
-    t0_ms = float(t_ms[0])
+    sig = compute_hybrid_intensity(imu, cfg)
+    t_ms = sig['t_ms']
+    x = sig['intensity_smooth']
+    ref_mask = sig['ref_mask']
 
-    skip_min = ag.get('skip_min', None)
-    if skip_min is None:
-        skip_min = (cfg.get('baseline', {}) or {}).get('warmup_skip_min', 0)
-    skip_ms = float(skip_min) * 60.0 * 1000.0
-    mask = t_ms >= (t0_ms + skip_ms)
-    if not np.any(mask):
-        mask = np.ones_like(t_ms, dtype=bool)
+    p_high = float(ag.get('p_high', 90))
+    p_low  = float(ag.get('p_low', 75))
+    p_high = float(np.clip(p_high, 50.0, 99.99))
+    p_low  = float(np.clip(p_low,  10.0, p_high - 1e-6))
 
-    mag = compute_gyro_mag(imu)
-    ref = mag[mask]
+    ref = x[ref_mask]
     ref = ref[np.isfinite(ref)]
     if ref.size < 50:
-        ref = mag[np.isfinite(mag)]
-
-    p_high = float(ag.get('p_high', 99))
-    p_low  = float(ag.get('p_low', 95))
-    p_high = float(np.clip(p_high, 50.0, 99.99))
-    p_low  = float(np.clip(p_low, 10.0, p_high - 1e-6))
+        ref = x[np.isfinite(x)]
+    if ref.size == 0:
+        return pd.DataFrame(columns=['t_start_ms','t_end_ms','duration_s'])
 
     thr_high = float(np.nanpercentile(ref, p_high))
     thr_low  = float(np.nanpercentile(ref, p_low))
 
-    # hysteresis
-    active = np.zeros(len(mag), dtype=bool)
+    # Hysteresis
+    active = np.zeros(len(x), dtype=bool)
     state = False
-    for i, v in enumerate(mag):
+    for i, v in enumerate(x):
         if not np.isfinite(v):
             active[i] = state
             continue
@@ -155,10 +241,15 @@ def activity_segments_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.
     if in_seg:
         segs.append((float(s0), float(t_ms[-1])))
 
-    min_active_ms = float(ag.get('min_active_ms', 150.0))
-    merge_gap_ms  = float(ag.get('merge_gap_ms', 300.0))
+    min_active_ms = float(ag.get('min_active_ms', 1000.0))
+    merge_gap_ms  = float(ag.get('merge_gap_ms', 2000.0))
+    expand_ms     = float(ag.get('expand_ms', 400.0))
+
     segs = [(a,b) for (a,b) in segs if (b-a) >= min_active_ms]
     segs.sort(key=lambda ab: ab[0])
+
+    t_min = float(t_ms[0]); t_max = float(t_ms[-1])
+    segs = [(max(t_min, a-expand_ms), min(t_max, b+expand_ms)) for (a,b) in segs]
 
     merged = []
     for a,b in segs:
@@ -176,28 +267,91 @@ def activity_segments_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.
     out.attrs['thr_low'] = thr_low
     out.attrs['p_high'] = p_high
     out.attrs['p_low'] = p_low
-    out.attrs['skip_min'] = float(skip_min)
+    out.attrs['w_gyro'] = float(ag.get('w_gyro', 0.8))
+    out.attrs['w_acc'] = float(ag.get('w_acc', 0.2))
+    out.attrs['smooth_ms'] = float(ag.get('smooth_ms', 250.0))
     return out
 
 
-def filter_df_by_segments(df: pd.DataFrame, segs: pd.DataFrame, t_col: str = 'ts_ms') -> pd.DataFrame:
-    """Filter df rows whose t_col lies inside any [t_start_ms, t_end_ms] segment."""
-    if df is None or len(df) == 0 or segs is None or len(segs) == 0:
-        return df
-    t = df[t_col].to_numpy(float)
-    starts = segs['t_start_ms'].to_numpy(float)
-    ends = segs['t_end_ms'].to_numpy(float)
+def swing_in_active_mask(swings: pd.DataFrame, active_segs: pd.DataFrame) -> np.ndarray:
+    """Return boolean mask for swings whose t_peak_ms is within any active segment."""
+    if swings is None or len(swings) == 0 or active_segs is None or len(active_segs) == 0:
+        return np.zeros(0, dtype=bool) if swings is None else np.zeros(len(swings), dtype=bool)
+    t = swings['t_peak_ms'].to_numpy(float)
+    starts = active_segs['t_start_ms'].to_numpy(float)
+    ends = active_segs['t_end_ms'].to_numpy(float)
     order = np.argsort(starts)
     starts = starts[order]; ends = ends[order]
     idx = np.searchsorted(starts, t, side='right') - 1
     valid = idx >= 0
     idx2 = np.clip(idx, 0, len(starts)-1)
-    inside = valid & (t >= starts[idx2]) & (t <= ends[idx2])
-    return df.loc[inside].copy().reset_index(drop=True)
+    return valid & (t >= starts[idx2]) & (t <= ends[idx2])
+
+
+def plot_imu_activity_overlay(imu_df: pd.DataFrame, active_segs: pd.DataFrame, swings: pd.DataFrame, out_dir: str, cfg: Dict[str, Any]) -> None:
+    """Save IMU activity overlay plot (smoothed intensity + active spans + swing peaks)."""
+    diag = cfg.get('diagnostics', {}) or {}
+    acfg = diag.get('activity_overlay', {}) or {}
+    if not bool(acfg.get('enable', True)):
+        return
+    if imu_df is None or len(imu_df) == 0:
+        return
+
+    import matplotlib.pyplot as plt
+
+    need_cols = ['ts_ms','gx','gy','gz']
+    imu = imu_df.dropna(subset=need_cols).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
+    if len(imu) == 0:
+        return
+
+    sig = compute_hybrid_intensity(imu, cfg)
+    t0 = float(sig['t_ms'][0])
+    t_s = (sig['t_ms'] - t0) / 1000.0
+
+    plot_signal = str(acfg.get('plot_signal', 'intensity'))
+    if plot_signal == 'gyro_mag':
+        y = sig['gyro_mag']
+        ylab = 'gyro magnitude'
+    else:
+        y = sig['intensity_smooth']
+        ylab = 'hybrid intensity (smoothed)'
+
+    fig, ax = plt.subplots(1,1, figsize=(12,4))
+    ax.plot(t_s, y, lw=0.7, label=plot_signal)
+
+    if active_segs is not None and len(active_segs):
+        for a,b in zip(active_segs['t_start_ms'].to_numpy(float), active_segs['t_end_ms'].to_numpy(float)):
+            ax.axvspan((a-t0)/1000.0, (b-t0)/1000.0, color='orange', alpha=0.18)
+
+    if swings is not None and len(swings) and bool(acfg.get('plot_swings', True)) and 't_peak_ms' in swings.columns:
+        sp = (swings['t_peak_ms'].to_numpy(float) - t0)/1000.0
+        ax.vlines(sp, ymin=float(np.nanmin(y)), ymax=float(np.nanmax(y)), color='r', alpha=0.25, lw=0.8, label='swing peaks')
+
+    try:
+        th = active_segs.attrs.get('thr_high', None)
+        tl = active_segs.attrs.get('thr_low', None)
+        if th is not None:
+            ax.axhline(float(th), color='k', ls='--', lw=1, alpha=0.5, label='enter thr')
+        if tl is not None:
+            ax.axhline(float(tl), color='k', ls=':', lw=1, alpha=0.5, label='exit thr')
+    except Exception:
+        pass
+
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel(ylab)
+    ax.set_title('IMU work-period activity gating overlay')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=8)
+
+    os.makedirs(out_dir, exist_ok=True)
+    fname = str(acfg.get('save_name', 'imu_activity_overlay.png'))
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, fname), dpi=150)
+    plt.close(fig)
 
 
 def segment_bouts_from_active(active_segs: pd.DataFrame, swings: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Segment bouts using ACTIVE segments as primary structure, then swing density."""
+    """Create bout summary using ACTIVE segments as primary structure."""
     bt = cfg.get('bout', {}) or {}
     gap_thr_s = float(bt.get('gap_thr_s', 10))
     gap_long_s = float(bt.get('gap_thr_long_s', 30))
@@ -207,82 +361,33 @@ def segment_bouts_from_active(active_segs: pd.DataFrame, swings: pd.DataFrame, c
         return pd.DataFrame(columns=['bout_id','t_start_ms','t_end_ms','duration_s','num_swings','swings_per_min'])
 
     segs = active_segs.sort_values('t_start_ms').reset_index(drop=True)
-    merged=[]
-    cur_a=float(segs.loc[0,'t_start_ms']); cur_b=float(segs.loc[0,'t_end_ms'])
+    merged = []
+    cur_a = float(segs.loc[0,'t_start_ms'])
+    cur_b = float(segs.loc[0,'t_end_ms'])
     for i in range(1, len(segs)):
-        a=float(segs.loc[i,'t_start_ms']); b=float(segs.loc[i,'t_end_ms'])
-        gap_s=(a-cur_b)/1000.0
+        a = float(segs.loc[i,'t_start_ms']); b = float(segs.loc[i,'t_end_ms'])
+        gap_s = (a - cur_b)/1000.0
         if gap_s >= gap_long_s or gap_s >= gap_thr_s:
-            merged.append((cur_a,cur_b)); cur_a,cur_b=a,b
+            merged.append((cur_a, cur_b))
+            cur_a, cur_b = a, b
         else:
-            cur_b=max(cur_b,b)
-    merged.append((cur_a,cur_b))
+            cur_b = max(cur_b, b)
+    merged.append((cur_a, cur_b))
 
     sw = swings.sort_values('t_peak_ms').reset_index(drop=True) if swings is not None and len(swings) else pd.DataFrame(columns=['t_peak_ms'])
     tpeaks = sw['t_peak_ms'].to_numpy(float) if 't_peak_ms' in sw.columns and len(sw) else np.array([], dtype=float)
 
-    bouts=[]; bid=0
+    bouts = []
+    bid = 0
     for a,b in merged:
-        num = int(np.sum((tpeaks>=a)&(tpeaks<=b))) if tpeaks.size else 0
+        num = int(np.sum((tpeaks >= a) & (tpeaks <= b))) if tpeaks.size else 0
         if num < min_bout_swings:
             continue
-        dur_s=(b-a)/1000.0
-        bouts.append({'bout_id':bid,'t_start_ms':a,'t_end_ms':b,'duration_s':dur_s,'num_swings':num,
-                      'swings_per_min': float(num/max(dur_s/60.0,1e-9))})
+        dur_s = (b-a)/1000.0
+        bouts.append({'bout_id': bid, 't_start_ms': a, 't_end_ms': b, 'duration_s': dur_s,
+                      'num_swings': num, 'swings_per_min': float(num/max(dur_s/60.0,1e-9))})
         bid += 1
     return pd.DataFrame(bouts)
-
-
-def plot_imu_activity_overlay(imu_df: pd.DataFrame, active_segs: pd.DataFrame, swings: pd.DataFrame, out_dir: str, cfg: Dict[str, Any]) -> None:
-    """Save an IMU activity overlay plot (gyro_mag + ACTIVE spans + optional swing peaks)."""
-    diag = cfg.get('diagnostics', {}) or {}
-    acfg = diag.get('activity_overlay', {}) or {}
-    if not bool(acfg.get('enable', True)):
-        return
-    if imu_df is None or len(imu_df) == 0:
-        return
-
-    import matplotlib.pyplot as plt
-    imu = imu_df.dropna(subset=['ts_ms','gx','gy','gz']).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
-    if len(imu) == 0:
-        return
-
-    t0=float(imu['ts_ms'].iloc[0])
-    t_s=(imu['ts_ms'].to_numpy(float)-t0)/1000.0
-    mag=compute_gyro_mag(imu)
-
-    fig, ax = plt.subplots(1,1, figsize=(12,4))
-    ax.plot(t_s, mag, lw=0.6, label='gyro_mag')
-
-    if active_segs is not None and len(active_segs):
-        for a,b in zip(active_segs['t_start_ms'].to_numpy(float), active_segs['t_end_ms'].to_numpy(float)):
-            ax.axvspan((a-t0)/1000.0, (b-t0)/1000.0, color='orange', alpha=0.18)
-
-    if swings is not None and len(swings) and bool(acfg.get('plot_swings', True)) and 't_peak_ms' in swings.columns:
-        sp=(swings['t_peak_ms'].to_numpy(float)-t0)/1000.0
-        ax.vlines(sp, ymin=float(np.nanmin(mag)), ymax=float(np.nanmax(mag)), color='r', alpha=0.25, lw=0.8, label='swing peaks')
-
-    try:
-        th=active_segs.attrs.get('thr_high', None)
-        tl=active_segs.attrs.get('thr_low', None)
-        if th is not None:
-            ax.axhline(float(th), color='k', ls='--', lw=1, alpha=0.5, label='P99 threshold')
-        if tl is not None:
-            ax.axhline(float(tl), color='k', ls=':', lw=1, alpha=0.5, label='P95 threshold')
-    except Exception:
-        pass
-
-    ax.set_xlabel('time (s)')
-    ax.set_ylabel('gyro magnitude')
-    ax.set_title('IMU activity gating overlay (percentile hysteresis)')
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='best', fontsize=8)
-
-    os.makedirs(out_dir, exist_ok=True)
-    fname=str(acfg.get('save_name','imu_activity_overlay.png'))
-    fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, fname), dpi=150)
-    plt.close(fig)
 
 def detect_swings_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     sd = cfg.get('swing_detection', {})
@@ -595,26 +700,34 @@ def main():
         pd.DataFrame([s.__dict__ for s in sdata.emg_segments]).to_csv(os.path.join(out_dir, 'segment_summary_emg.csv'), index=False)
         pd.DataFrame([s.__dict__ for s in sdata.imu_segments]).to_csv(os.path.join(out_dir, 'segment_summary_imu.csv'), index=False)
 
+
         # IMU load + activity gating + swing detection
         imu_df = loader.load_imu_concat(files.imu_paths,
                                         use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
                                         acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2)),
                                         gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250)))
-
-        # Percentile-based activity gating (gyro_mag) -> ACTIVE segments
+        # Work-period activity gating (hybrid intensity)
         active_segs = activity_segments_from_imu(imu_df, cfg)
         active_segs.to_csv(os.path.join(out_dir, 'active_segments.csv'), index=False)
 
-        # Swing detection on full IMU; then keep only swings whose peak is inside ACTIVE segments
+        # Swing detection on full IMU
         swings = detect_swings_from_imu(imu_df, cfg)
-        if active_segs is not None and len(active_segs):
-            swings = filter_df_by_segments(swings.rename(columns={'t_peak_ms':'ts_ms'}), active_segs, t_col='ts_ms').rename(columns={'ts_ms':'t_peak_ms'})
+
+        # Mark swings that fall inside ACTIVE segments
+        in_active = swing_in_active_mask(swings, active_segs)
+        if len(swings):
+            swings = swings.copy()
+            swings['in_active'] = in_active.astype(int)
+
+        # Optionally filter swings by ACTIVE (disabled by default)
+        ag_cfg = (cfg.get('activity_gating', {}) or {})
+        if bool(ag_cfg.get('filter_swings', False)) and len(swings):
+            swings = swings.loc[swings['in_active'].astype(bool)].reset_index(drop=True)
 
         swings.to_csv(os.path.join(out_dir, 'swing_windows.csv'), index=False)
 
         # Diagnostics: IMU activity overlay
         plot_imu_activity_overlay(imu_df, active_segs, swings, out_dir, cfg)
-
         log(f'Detected swings: {len(swings)}')
 
         # If no swings detected, skip per-swing feature extraction to avoid downstream errors
@@ -622,7 +735,7 @@ def main():
             bout_df = segment_bouts_from_active(active_segs, swings, cfg)
             bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
             with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-                json.dump({**sdata.session_summary, 'num_swings': 0, 'num_bouts': int(len(bout_df)), 'num_active_segments': int(len(active_segs)) if active_segs is not None else 0, 'active_total_s': float(active_segs['duration_s'].sum()) if active_segs is not None and len(active_segs) else 0.0, 'activity_thr_high': float(getattr(active_segs, 'attrs', {}).get('thr_high', np.nan)), 'activity_thr_low': float(getattr(active_segs, 'attrs', {}).get('thr_low', np.nan)), 'mode': mode}, f, indent=2)
+                json.dump({**sdata.session_summary, 'num_swings': 0, 'num_bouts': int(len(bout_df)), 'num_active_segments': int(len(active_segs)) if active_segs is not None else 0, 'active_total_s': float(active_segs['duration_s'].sum()) if active_segs is not None and len(active_segs) else 0.0, 'mode': mode}, f, indent=2)
             log(f'Finished session {session_id} (no swings). Outputs -> {out_dir}')
             continue
 

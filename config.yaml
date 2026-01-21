@@ -25,9 +25,9 @@ swing_detection:
   mdf_pad_ms: 300
 baseline:
   mode: swing
-  warmup_skip_min: 0
+  warmup_skip_min: 5
   warmup_skip_swings: 0
-  baseline_swings: 5
+  baseline_swings: 20
   baseline_window_sec: 60
 bout:
   gap_thr_s: 10
@@ -66,11 +66,19 @@ diagnostics:
     enable: true
     save_name: imu_activity_overlay.png
     plot_swings: true
+    plot_signal: intensity
 activity_gating:
   enable: true
-  primary: gyro_mag
-  p_high: 97
-  p_low: 92
-  min_active_ms: 100
-  merge_gap_ms: 300
+  mode: work_period
+  intensity: hybrid
+  w_gyro: 0.8
+  w_acc: 0.2
+  acc_dyn_method: abs_mag_minus_1g
+  smooth_ms: 250
+  expand_ms: 400
+  p_high: 90
+  p_low: 75
+  min_active_ms: 1000
+  merge_gap_ms: 2000
   skip_min: 0
+  filter_swings: false
