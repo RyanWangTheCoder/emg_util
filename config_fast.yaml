@@ -1,9 +1,15 @@
 # ============================================================
-# EMG + IMU Analysis Configuration (single YAML)
+# EMG + IMU Analysis Configuration (FAST MODE)
 #
 # NEW btCentral.py capture format (separate rotated EMG / IMU logs).
 # - Pass capture directory via CLI: --log-dir <LOG_DIR>
 # - Runner outputs to out/<session_id>/...
+#
+# FAST MODE optimizations:
+# - features.mode = "bout" (skip per-swing EMG features)
+# - plots.enable = false (skip windowed features + plots)
+# - diagnostics.emg_imu_correlation.enable = false
+# - diagnostics.activity_overlay.enable = false (optional: set true for quick visual check)
 # ============================================================
 
 session:
@@ -22,7 +28,7 @@ session:
   out_dir: "out"
 
 features:
-  mode: "bout"  # swing | bout | both
+  mode: "bout"  # ← FAST: skip per-swing EMG features (use "both" for full analysis)
   compute_windowed: false
   zc_thr: 0.01
   ssc_thr: 0.01
@@ -56,7 +62,7 @@ bout:
   min_bout_swings: 3
 
 plots:
-  enable: false
+  enable: false  # ← FAST: skip windowed features + plots (set true for full analysis)
   full_duration: true
   emg_max_points: 300000
   do_fatigue: true
@@ -76,6 +82,27 @@ diagnostics:
     plot_env_mean: true
     two_y_axes: true
   emg_imu_correlation:
-    enable: false
+    enable: false  # ← FAST: skip correlation (set true for full analysis)
     method: pearson
     save_name: emg_imu_correlation.json
+  activity_overlay:
+    enable: false  # ← FAST: skip IMU activity overlay plot (set true for quick visual check)
+    save_name: imu_activity_overlay.png
+    plot_swings: true
+    plot_signal: intensity  # 'intensity' or 'gyro_mag'
+
+activity_gating:
+  enable: true  # ← Keep enabled (fast; only computes intensity, no heavy I/O)
+  mode: work_period
+  intensity: hybrid
+  w_gyro: 0.8
+  w_acc: 0.2
+  acc_dyn_method: abs_mag_minus_1g
+  smooth_ms: 250
+  expand_ms: 400
+  p_high: 90
+  p_low: 75
+  min_active_ms: 1000
+  merge_gap_ms: 2000
+  skip_min: 0  # 0 = use baseline.warmup_skip_min
+  filter_swings: false  # ← Keep false (filtering is fast; useful for downstream analysis)
