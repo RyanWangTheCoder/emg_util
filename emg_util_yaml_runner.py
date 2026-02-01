@@ -25,6 +25,10 @@ Feature correlation (EMG vs IMU):
 - If plots.enable == true AND diagnostics.emg_imu_correlation.enable == true,
   compute windowed features (via emg_util.compute) and save emg_imu_correlation.json.
 
+REFACTOR NOTE:
+This script exposes `analyze_single_session(...)` so it can be imported by 
+cloud notebooks for parallel processing, while `main()` preserves the original 
+CLI behavior for PC use.
 """
 
 from __future__ import annotations
@@ -68,8 +72,6 @@ def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9):
     if not np.isfinite(scale) or scale < eps:
         scale = 1.0
     return (x - med) / (scale + eps), med, scale
-
-
 
 
 # ----------------------------
@@ -657,147 +659,159 @@ def save_emg_imu_correlation(feats: pd.DataFrame, out_dir: str, method: str = 'p
     return out
 
 
+# ---------------------------------------------------------
+# NEW: Reusable Analysis Function (Decoupled from CLI)
+# ---------------------------------------------------------
+def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out_root: str) -> str:
+    """
+    Process a single session. Can be called by CLI main() or by External Notebook.
+    Returns the path to the output directory.
+    """
+    # Create session output directory
+    out_dir = os.path.join(out_root, session_id)
+    os.makedirs(out_dir, exist_ok=True)
+
+    log(f'=== Processing session {session_id} ===')
+    
+    # --- Load Session Data & Summary ---
+    sdata = loader.summarize_session(files)
+    pd.DataFrame([s.__dict__ for s in sdata.emg_segments]).to_csv(os.path.join(out_dir, 'segment_summary_emg.csv'), index=False)
+    pd.DataFrame([s.__dict__ for s in sdata.imu_segments]).to_csv(os.path.join(out_dir, 'segment_summary_imu.csv'), index=False)
+
+    sess_cfg = cfg.get('session', {})
+    
+    # --- IMU Loading & Activity Gating ---
+    imu_df = loader.load_imu_concat(
+        files.imu_paths,
+        use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
+        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2)),
+        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250))
+    )
+    
+    active_segs = activity_segments_from_imu(imu_df, cfg)
+    active_segs.to_csv(os.path.join(out_dir, 'active_segments.csv'), index=False)
+
+    # --- Swing Detection ---
+    swings = detect_swings_from_imu(imu_df, cfg)
+    
+    in_active = swing_in_active_mask(swings, active_segs)
+    if len(swings):
+        swings = swings.copy()
+        swings['in_active'] = in_active.astype(int)
+
+    ag_cfg = (cfg.get('activity_gating', {}) or {})
+    if bool(ag_cfg.get('filter_swings', False)) and len(swings):
+        swings = swings.loc[swings['in_active'].astype(bool)].reset_index(drop=True)
+
+    swings.to_csv(os.path.join(out_dir, 'swing_windows.csv'), index=False)
+    
+    # Diagnostics
+    plot_imu_activity_overlay(imu_df, active_segs, swings, out_dir, cfg)
+
+    mode = (cfg.get('features', {}) or {}).get('mode', 'both')
+
+    # --- Early Exit if No Swings ---
+    if len(swings) == 0:
+        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+        # Save minimal summary
+        with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
+            json.dump({**sdata.session_summary, 'num_swings': 0, 'mode': mode}, f, indent=2)
+        return out_dir
+
+    # --- Fast Mode (Bout Only) ---
+    if mode == 'bout':
+        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+        with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
+            json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'mode': mode}, f, indent=2)
+        return out_dir
+
+    # --- Full Mode: EMG Processing ---
+    # 1. Per-Swing Features
+    emg_idx = file_time_index(files.emg_paths, time_col='dev_us')
+    swing_feat_df = per_swing_emg_features(swings, emg_idx, cfg)
+    
+    # 2. Baseline
+    session_t0_ms = float(sdata.session_summary.get('session_start_dev_us', 0) / 1000.0)
+    base_sw = select_baseline_swings(swings, session_t0_ms=session_t0_ms, cfg=cfg)
+    base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
+    base = baseline_from_features(base_feats)
+    swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
+    
+    swing_feat_df.to_csv(os.path.join(out_dir, 'swing_features.csv'), index=False)
+    with open(os.path.join(out_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
+        json.dump({'baseline': base, 'selected_swings': base_sw.to_dict('records')}, f, indent=2)
+
+    # 3. Bouts
+    bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+    bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+
+    # 4. Plots & Correlation (Windowed)
+    pl = cfg.get('plots', {}) or {}
+    if bool(pl.get('enable', False)):
+        emg_df = loader.load_emg_concat(files.emg_paths, usecols=['dev_us', 'env', 'raw', 'ref'])
+        emg_imu_df = loader.make_interleaved_df(emg_df, imu_df)
+        res = core.compute(emg_imu_df,
+                           emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
+                           win_sec=float(pl.get('win_sec', 1.0)),
+                           step_sec=float(pl.get('step_sec', 0.25)))
+
+        corr_cfg = (cfg.get('diagnostics', {}) or {}).get('emg_imu_correlation', {})
+        if bool(corr_cfg.get('enable', False)):
+            save_emg_imu_correlation(res.feats, out_dir,
+                                     method=str(corr_cfg.get('method', 'pearson')),
+                                     fname=str(corr_cfg.get('save_name', 'emg_imu_correlation.json')))
+
+        core.plot_all(res,
+                      emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
+                      title=f'EMG/IMU summary session={session_id}',
+                      full_duration=bool(pl.get('full_duration', True)),
+                      emg_max_points=int(pl.get('emg_max_points', 300000)),
+                      save_dir=out_dir,
+                      silent=True)
+        
+        if bool(pl.get('do_fatigue', False)):
+            core.analyze_fatigue(res.feats, save_dir=out_dir)
+
+    # 5. Final Session Summary
+    with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
+        json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'num_bouts': int(len(bout_df)), 'mode': mode}, f, indent=2)
+
+    log(f'Finished session {session_id}.')
+    return out_dir
+
+
+# ---------------------------------------------------------
+# CLI Main (Keep this for PC compatibility)
+# ---------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description='YAML-driven EMG/IMU analysis for new btCentral capture format')
+    ap = argparse.ArgumentParser(description='YAML-driven EMG/IMU analysis')
     ap.add_argument('--config', default='config.yaml', help='Path to YAML config')
-    ap.add_argument('--log-dir', required=True, help='Directory containing btCentral logs (rotated emg_log_*, imu_log_*)')
-    ap.add_argument('--out-dir', default=None, help='Override output directory (else session.out_dir)')
+    ap.add_argument('--log-dir', required=True, help='Directory containing btCentral logs')
+    ap.add_argument('--out-dir', default=None, help='Override output directory')
     args = ap.parse_args()
 
+    # Load YAML from disk
     cfg = load_config(args.config)
     sess_cfg = cfg.get('session', {})
 
     out_root = args.out_dir if args.out_dir is not None else sess_cfg.get('out_dir', 'out')
-    os.makedirs(out_root, exist_ok=True)
-
-    log(f'Loaded config: {args.config}')
-    log(f'Output root: {out_root}')
-    log(f'Scanning log_dir: {args.log_dir}')
-
+    
+    # Discovery
     sessions = loader.discover_sessions(args.log_dir,
                                         emg_glob=sess_cfg.get('emg_glob', 'emg_log_*.csv'),
                                         imu_glob=sess_cfg.get('imu_glob', 'imu_log_*.csv'),
                                         vitals_name=sess_cfg.get('vitals_path', 'vitals_log.csv'))
+    
     session_ids = sorted(sessions.keys())
-    if not session_ids:
-        raise SystemExit('No sessions found')
-    log(f'Found {len(session_ids)} session(s): {", ".join(session_ids)}')
+    log(f'Found {len(session_ids)} sessions.')
 
-    mode = (cfg.get('features', {}) or {}).get('mode', 'both')
-    pl = cfg.get('plots', {}) or {}
-    diag = cfg.get('diagnostics', {}) or {}
-    corr_cfg = (diag.get('emg_imu_correlation', {}) or {})
-
+    # Sequential execution on PC
     for si, session_id in enumerate(session_ids, start=1):
         files = sessions[session_id]
-        out_dir = os.path.join(out_root, session_id)
-        os.makedirs(out_dir, exist_ok=True)
-
-        log(f'=== [{si}/{len(session_ids)}] Processing session {session_id} ===')
-        log(f'EMG files: {len(files.emg_paths)} | IMU files: {len(files.imu_paths)}')
-
-        sdata = loader.summarize_session(files)
-        pd.DataFrame([s.__dict__ for s in sdata.emg_segments]).to_csv(os.path.join(out_dir, 'segment_summary_emg.csv'), index=False)
-        pd.DataFrame([s.__dict__ for s in sdata.imu_segments]).to_csv(os.path.join(out_dir, 'segment_summary_imu.csv'), index=False)
-
-
-        # IMU load + activity gating + swing detection
-        imu_df = loader.load_imu_concat(files.imu_paths,
-                                        use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
-                                        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2)),
-                                        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250)))
-        # Work-period activity gating (hybrid intensity)
-        active_segs = activity_segments_from_imu(imu_df, cfg)
-        active_segs.to_csv(os.path.join(out_dir, 'active_segments.csv'), index=False)
-
-        # Swing detection on full IMU
-        swings = detect_swings_from_imu(imu_df, cfg)
-
-        # Mark swings that fall inside ACTIVE segments
-        in_active = swing_in_active_mask(swings, active_segs)
-        if len(swings):
-            swings = swings.copy()
-            swings['in_active'] = in_active.astype(int)
-
-        # Optionally filter swings by ACTIVE (disabled by default)
-        ag_cfg = (cfg.get('activity_gating', {}) or {})
-        if bool(ag_cfg.get('filter_swings', False)) and len(swings):
-            swings = swings.loc[swings['in_active'].astype(bool)].reset_index(drop=True)
-
-        swings.to_csv(os.path.join(out_dir, 'swing_windows.csv'), index=False)
-
-        # Diagnostics: IMU activity overlay
-        plot_imu_activity_overlay(imu_df, active_segs, swings, out_dir, cfg)
-        log(f'Detected swings: {len(swings)}')
-
-        # If no swings detected, skip per-swing feature extraction to avoid downstream errors
-        if len(swings) == 0:
-            bout_df = segment_bouts_from_active(active_segs, swings, cfg)
-            bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
-            with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-                json.dump({**sdata.session_summary, 'num_swings': 0, 'num_bouts': int(len(bout_df)), 'num_active_segments': int(len(active_segs)) if active_segs is not None else 0, 'active_total_s': float(active_segs['duration_s'].sum()) if active_segs is not None and len(active_segs) else 0.0, 'mode': mode}, f, indent=2)
-            log(f'Finished session {session_id} (no swings). Outputs -> {out_dir}')
-            continue
-
-
-        # Fast mode: skip heavy work
-        if mode == 'bout':
-            bout_df = segment_bouts_from_active(active_segs, swings, cfg)
-            bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
-            with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-                json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'num_bouts': int(len(bout_df)), 'mode': mode}, f, indent=2)
-            log(f'Finished session {session_id} (fast). Outputs -> {out_dir}')
-            continue
-
-        # Default/both mode: per-swing EMG features
-        emg_idx = file_time_index(files.emg_paths, time_col='dev_us')
-        swing_feat_df = per_swing_emg_features(swings, emg_idx, cfg)
-        # baseline
-        session_t0_ms = float(sdata.session_summary.get('session_start_dev_us', 0) / 1000.0)
-        base_sw = select_baseline_swings(swings, session_t0_ms=session_t0_ms, cfg=cfg)
-        base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
-        base = baseline_from_features(base_feats)
-        swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
-        swing_feat_df.to_csv(os.path.join(out_dir, 'swing_features.csv'), index=False)
-        with open(os.path.join(out_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
-            json.dump({'baseline': base, 'selected_swings': base_sw.to_dict('records')}, f, indent=2)
-
-        # bouts
-        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
-        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
-
-        # windowed features for plots + correlation
-        if bool(pl.get('enable', False)):
-            emg_df = loader.load_emg_concat(files.emg_paths, usecols=['dev_us', 'env', 'raw', 'ref'])
-            emg_imu_df = loader.make_interleaved_df(emg_df, imu_df)
-            res = core.compute(emg_imu_df,
-                               emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
-                               win_sec=float(pl.get('win_sec', 1.0)),
-                               step_sec=float(pl.get('step_sec', 0.25)))
-
-            if bool(corr_cfg.get('enable', False)):
-                save_emg_imu_correlation(res.feats, out_dir,
-                                         method=str(corr_cfg.get('method', 'pearson')),
-                                         fname=str(corr_cfg.get('save_name', 'emg_imu_correlation.json')))
-                log('Saved emg_imu_correlation.json')
-
-            # plots + fatigue using existing emg_util functions
-            core.plot_all(res,
-                          emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
-                          title=f'EMG/IMU summary session={session_id}',
-                          full_duration=bool(pl.get('full_duration', True)),
-                          emg_max_points=int(pl.get('emg_max_points', 300000)),
-                          save_dir=out_dir,
-                          silent=True)
-            if bool(pl.get('do_fatigue', False)):
-                core.analyze_fatigue(res.feats, save_dir=out_dir)
-
-        # session summary
-        with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-            json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'num_bouts': int(len(bout_df)), 'mode': mode}, f, indent=2)
-
-        log(f'Finished session {session_id}. Outputs -> {out_dir}')
-
+        # CALL THE REUSABLE FUNCTION
+        analyze_single_session(session_id, files, cfg, out_root)
 
 if __name__ == '__main__':
     main()
