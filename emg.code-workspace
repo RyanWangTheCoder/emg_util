@@ -2,23 +2,23 @@
 	"folders": [
 		{
 			"name": "data capture",
-			"path": "../arduino/py_scripts"
+			"path": "arduino/py_scripts"
 		},
 		{
 			"name": "data analysis",
-			"path": "."
+			"path": "emg_util"
 		},
 		{
 			"name": "arduino",
-			"path": "../arduino/myoware_imu_v2"
+			"path": "arduino/myoware_imu_v2"
 		},
 		{
 			"name": "Android Ble",
-			"path": "../btLeApp/FastBleLib/src"
+			"path": "btLeApp/FastBleLib/src"
 		},
 		{
 			"name": "Android app",
-			"path": "../btLeApp/app/src"
+			"path": "btLeApp/app/src"
 		}
 	],
 	"settings": {
