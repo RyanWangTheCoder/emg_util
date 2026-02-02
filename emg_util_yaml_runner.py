@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """emg_util_yaml_runner.py
@@ -672,6 +673,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     os.makedirs(out_dir, exist_ok=True)
 
     log(f'=== Processing session {session_id} ===')
+    log(f'EMG files: {len(files.emg_paths)} | IMU files: {len(files.imu_paths)}')
     
     # --- Load Session Data & Summary ---
     sdata = loader.summarize_session(files)
@@ -693,6 +695,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
 
     # --- Swing Detection ---
     swings = detect_swings_from_imu(imu_df, cfg)
+    log(f'Detected swings: {len(swings)}')
     
     in_active = swing_in_active_mask(swings, active_segs)
     if len(swings):
@@ -717,6 +720,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
         # Save minimal summary
         with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
             json.dump({**sdata.session_summary, 'num_swings': 0, 'mode': mode}, f, indent=2)
+        log(f'Finished session {session_id} (no swings). Outputs -> {out_dir}')
         return out_dir
 
     # --- Fast Mode (Bout Only) ---
@@ -725,6 +729,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
         bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
         with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
             json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'mode': mode}, f, indent=2)
+        log(f'Finished session {session_id} (fast). Outputs -> {out_dir}')
         return out_dir
 
     # --- Full Mode: EMG Processing ---
@@ -762,6 +767,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
             save_emg_imu_correlation(res.feats, out_dir,
                                      method=str(corr_cfg.get('method', 'pearson')),
                                      fname=str(corr_cfg.get('save_name', 'emg_imu_correlation.json')))
+            log('Saved emg_imu_correlation.json')
 
         core.plot_all(res,
                       emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
@@ -778,7 +784,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
         json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'num_bouts': int(len(bout_df)), 'mode': mode}, f, indent=2)
 
-    log(f'Finished session {session_id}.')
+    log(f'Finished session {session_id}. Outputs -> {out_dir}')
     return out_dir
 
 
@@ -797,6 +803,11 @@ def main():
     sess_cfg = cfg.get('session', {})
 
     out_root = args.out_dir if args.out_dir is not None else sess_cfg.get('out_dir', 'out')
+    os.makedirs(out_root, exist_ok=True)
+
+    log(f'Loaded config: {args.config}')
+    log(f'Output root: {out_root}')
+    log(f'Scanning log_dir: {args.log_dir}')
     
     # Discovery
     sessions = loader.discover_sessions(args.log_dir,
@@ -805,7 +816,9 @@ def main():
                                         vitals_name=sess_cfg.get('vitals_path', 'vitals_log.csv'))
     
     session_ids = sorted(sessions.keys())
-    log(f'Found {len(session_ids)} sessions.')
+    if not session_ids:
+        raise SystemExit('No sessions found')
+    log(f'Found {len(session_ids)} sessions: {", ".join(session_ids)}')
 
     # Sequential execution on PC
     for si, session_id in enumerate(session_ids, start=1):
