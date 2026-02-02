@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """emg_util_yaml_runner.py
@@ -26,10 +25,6 @@ Feature correlation (EMG vs IMU):
 - If plots.enable == true AND diagnostics.emg_imu_correlation.enable == true,
   compute windowed features (via emg_util.compute) and save emg_imu_correlation.json.
 
-REFACTOR NOTE:
-This script exposes `analyze_single_session(...)` so it can be imported by 
-cloud notebooks for parallel processing, while `main()` preserves the original 
-CLI behavior for PC use.
 """
 
 from __future__ import annotations
@@ -663,7 +658,7 @@ def save_emg_imu_correlation(feats: pd.DataFrame, out_dir: str, method: str = 'p
 # ---------------------------------------------------------
 # NEW: Reusable Analysis Function (Decoupled from CLI)
 # ---------------------------------------------------------
-def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out_root: str) -> str:
+def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out_root: str, session_idx: int = None, total_sessions: int = None) -> str:
     """
     Process a single session. Can be called by CLI main() or by External Notebook.
     Returns the path to the output directory.
@@ -672,7 +667,11 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     out_dir = os.path.join(out_root, session_id)
     os.makedirs(out_dir, exist_ok=True)
 
-    log(f'=== Processing session {session_id} ===')
+    if session_idx is not None and total_sessions is not None:
+        log(f'=== [{session_idx}/{total_sessions}] Processing session {session_id} ===')
+    else:
+        log(f'=== Processing session {session_id} ===')
+
     log(f'EMG files: {len(files.emg_paths)} | IMU files: {len(files.imu_paths)}')
     
     # --- Load Session Data & Summary ---
@@ -695,7 +694,6 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
 
     # --- Swing Detection ---
     swings = detect_swings_from_imu(imu_df, cfg)
-    log(f'Detected swings: {len(swings)}')
     
     in_active = swing_in_active_mask(swings, active_segs)
     if len(swings):
@@ -710,6 +708,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     
     # Diagnostics
     plot_imu_activity_overlay(imu_df, active_segs, swings, out_dir, cfg)
+    log(f'Detected swings: {len(swings)}')
 
     mode = (cfg.get('features', {}) or {}).get('mode', 'both')
 
@@ -719,7 +718,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
         bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
         # Save minimal summary
         with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-            json.dump({**sdata.session_summary, 'num_swings': 0, 'mode': mode}, f, indent=2)
+            json.dump({**sdata.session_summary, 'num_swings': 0, 'num_bouts': int(len(bout_df)), 'num_active_segments': int(len(active_segs)) if active_segs is not None else 0, 'active_total_s': float(active_segs['duration_s'].sum()) if active_segs is not None and len(active_segs) else 0.0, 'mode': mode}, f, indent=2)
         log(f'Finished session {session_id} (no swings). Outputs -> {out_dir}')
         return out_dir
 
@@ -728,7 +727,7 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
         bout_df = segment_bouts_from_active(active_segs, swings, cfg)
         bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
         with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
-            json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'mode': mode}, f, indent=2)
+            json.dump({**sdata.session_summary, 'num_swings': int(len(swings)), 'num_bouts': int(len(bout_df)), 'mode': mode}, f, indent=2)
         log(f'Finished session {session_id} (fast). Outputs -> {out_dir}')
         return out_dir
 
@@ -824,7 +823,7 @@ def main():
     for si, session_id in enumerate(session_ids, start=1):
         files = sessions[session_id]
         # CALL THE REUSABLE FUNCTION
-        analyze_single_session(session_id, files, cfg, out_root)
+        analyze_single_session(session_id, files, cfg, out_root, session_idx=si, total_sessions=len(session_ids))
 
 if __name__ == '__main__':
     main()
