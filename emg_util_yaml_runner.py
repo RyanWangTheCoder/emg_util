@@ -530,9 +530,11 @@ def per_swing_emg_features(swings: pd.DataFrame, emg_idx: List[Tuple[str, int, i
 
     rows = []
     n = int(len(swings))
+    log(f'Computing per-swing EMG features for {n} swings...')
     for ii, r in enumerate(swings.to_dict('records'), start=1):
-        if n >= 50 and (ii % 25 == 0 or ii == n):
-            log(f'  per-swing EMG features: {ii}/{n}')
+        # Progress every 10 swings or at milestones
+        if ii == 1 or ii % 10 == 0 or ii == n or ii in [25, 50, 100, 200, 300, 400, 500]:
+            log(f'  Processing swing {ii}/{n} ({100*ii//n}%)')
 
         t0_ms = float(r['t_start_ms']); t1_ms = float(r['t_end_ms'])
         raw_exact = read_emg_segment(emg_idx, int(round(t0_ms * 1000.0)), int(round(t1_ms * 1000.0)))
