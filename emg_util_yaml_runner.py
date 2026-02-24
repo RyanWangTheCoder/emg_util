@@ -40,6 +40,7 @@ import yaml
 
 import emg_util as core
 import capture_loader as loader
+import capture_health as health
 
 
 def log(msg: str) -> None:
@@ -70,6 +71,27 @@ def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9):
     return (x - med) / (scale + eps), med, scale
 
 
+
+
+# ----------------------------
+# EMG health + swing filtering (additive)
+# ----------------------------
+
+def _health_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return (cfg.get('health', {}) or {})
+
+
+def _overlaps_bad_emg(t0_ms: float, t1_ms: float, bad_emg_ms: List[Tuple[float, float]]) -> bool:
+    return health.intervals_overlap(float(t0_ms), float(t1_ms), bad_emg_ms)
+
+
+def _filter_swings_by_bad_emg(swings: pd.DataFrame, bad_emg_ms: List[Tuple[float, float]]) -> pd.DataFrame:
+    if swings is None or len(swings) == 0 or not bad_emg_ms:
+        return swings
+    keep = []
+    for a0, a1 in zip(swings['t_start_ms'].to_numpy(float), swings['t_end_ms'].to_numpy(float)):
+        keep.append(not _overlaps_bad_emg(a0, a1, bad_emg_ms))
+    return swings.loc[np.array(keep, dtype=bool)].reset_index(drop=True)
 # ----------------------------
 # IMU activity gating for WORK PERIODS (hybrid gyro+acc intensity)
 # ----------------------------
@@ -709,6 +731,34 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     # Diagnostics
     plot_imu_activity_overlay(imu_df, active_segs, swings, out_dir, cfg)
     log(f'Detected swings: {len(swings)}')
+
+
+    # --- EMG health (sporadic disconnect/contact) and optional swing filtering ---
+    # EMG is more fragile than IMU due to cabling/electrodes. When IMU is good, we can
+    # keep the session and simply skip swing windows that overlap BAD EMG intervals.
+    hcfg = _health_cfg(cfg)
+    bad_emg_ms: List[Tuple[float, float]] = []
+    try:
+        if bool(hcfg.get('enable', True)) and files.emg_paths:
+            bad_us = health.emg_bad_intervals_us(files.emg_paths, cfg)
+            bad_emg_ms = [(a/1000.0, b/1000.0) for (a,b) in bad_us]
+            # Save EMG bad intervals for debugging
+            if bad_us:
+                pd.DataFrame([
+                    {'start_dev_us': a, 'end_dev_us': b, 'duration_s': (b - a) / 1e6}
+                    for (a, b) in bad_us
+                ]).to_csv(os.path.join(out_dir, 'emg_bad_intervals.csv'), index=False)
+    except Exception as e:
+        log(f'[WARN] EMG bad-interval detection failed: {e}')
+
+    # Optional knob: filter swings that overlap BAD EMG intervals
+    if bad_emg_ms and bool(hcfg.get('filter_swings_by_emg_bad', False)) and len(swings):
+        swings_before = len(swings)
+        swings = _filter_swings_by_bad_emg(swings, bad_emg_ms)
+        if len(swings) != swings_before:
+            # Preserve an explicit record of what was used
+            swings.to_csv(os.path.join(out_dir, 'swing_windows_emg_filtered.csv'), index=False)
+            log(f'[EMG] Filtered swings by BAD EMG intervals: {swings_before} -> {len(swings)}')
 
     mode = (cfg.get('features', {}) or {}).get('mode', 'both')
 
