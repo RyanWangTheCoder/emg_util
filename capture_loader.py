@@ -310,6 +310,122 @@ def load_vitals(path: str) -> pd.DataFrame:
     return df
 
 
+# ============================
+# NEW: Stitched session loader
+# Treats all BLE connections in a folder as one continuous tennis session.
+# Uses wall-clock session_id timestamps to compute absolute time offsets,
+# correctly handling device reboots between BLE connections.
+# ============================
+
+def _parse_session_datetime(session_id: str):
+    """Parse session_id (YYYYMMDD_HHMMSS) as a datetime object."""
+    from datetime import datetime
+    return datetime.strptime(session_id, '%Y%m%d_%H%M%S')
+
+
+def load_session_stitched(
+    sessions: Dict[str, 'SessionFiles'],
+    use_physical_units: bool = True,
+    acc_fsr_default_g: float = 2.0,
+    gyro_fsr_default_dps: float = 250.0,
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[float], List[str]]:
+    """Load all BLE connections in a folder as one stitched tennis session.
+
+    Each BLE connection has its own device clock (dev_us = microseconds since
+    device boot). This function uses the wall-clock session_id timestamps to
+    compute absolute time offsets, correctly handling device reboots between
+    BLE connections.
+
+    The returned DataFrames have:
+      - abs_us  : absolute microseconds from the start of the tennis session
+      - ts_ms   : abs_us / 1000.0  (for compatibility with existing analysis)
+      - session_id : which BLE connection this row came from
+      - capture_idx: integer index (0 = first connection, 1 = second, ...)
+
+    Args:
+        sessions: dict of session_id -> SessionFiles (from discover_sessions())
+        use_physical_units: convert IMU raw counts to g / dps
+        acc_fsr_default_g: default accelerometer FSR if not in CSV
+        gyro_fsr_default_dps: default gyroscope FSR if not in CSV
+
+    Returns:
+        emg_df            : stitched EMG DataFrame
+        imu_df            : stitched IMU DataFrame
+        reconnection_times_s : list of reconnection times in seconds from
+                               session start (one entry per BLE connection
+                               after the first)
+        capture_ids       : list of session_ids in chronological order
+    """
+    # Sort BLE connections by wall-clock time
+    sorted_items = sorted(sessions.items(), key=lambda x: _parse_session_datetime(x[0]))
+    if not sorted_items:
+        empty = pd.DataFrame()
+        return empty, empty, [], []
+
+    first_dt = _parse_session_datetime(sorted_items[0][0])
+
+    emg_parts: List[pd.DataFrame] = []
+    imu_parts: List[pd.DataFrame] = []
+    reconnection_times_s: List[float] = []
+    capture_ids: List[str] = []
+
+    for i, (session_id, files) in enumerate(sorted_items):
+        session_dt = _parse_session_datetime(session_id)
+        # Wall-clock offset from session start in microseconds
+        wall_offset_us = int((session_dt - first_dt).total_seconds() * 1e6)
+
+        if i > 0:
+            reconnection_times_s.append(wall_offset_us / 1e6)
+
+        capture_ids.append(session_id)
+
+        # --- Load EMG ---
+        if files.emg_paths:
+            emg = load_emg_concat(files.emg_paths)
+            if len(emg) > 0:
+                dev_start = int(emg['dev_us'].min())
+                emg['abs_us'] = (wall_offset_us
+                                 + (emg['dev_us'].astype(np.int64) - dev_start))
+                emg['session_id'] = session_id
+                emg['capture_idx'] = i
+                emg_parts.append(emg)
+
+        # --- Load IMU ---
+        if files.imu_paths:
+            imu = load_imu_concat(
+                files.imu_paths,
+                use_physical_units=use_physical_units,
+                acc_fsr_default_g=acc_fsr_default_g,
+                gyro_fsr_default_dps=gyro_fsr_default_dps,
+            )
+            if len(imu) > 0:
+                dev_start_imu = int(imu['dev_us'].min())
+                imu['abs_us'] = (wall_offset_us
+                                 + (imu['dev_us'].astype(np.int64) - dev_start_imu))
+                imu['session_id'] = session_id
+                imu['capture_idx'] = i
+                imu_parts.append(imu)
+
+    # Concatenate and sort by absolute time
+    if emg_parts:
+        emg_out = (pd.concat(emg_parts, ignore_index=True)
+                   .sort_values('abs_us', kind='mergesort')
+                   .reset_index(drop=True))
+        emg_out['ts_ms'] = emg_out['abs_us'].astype(np.float64) / 1000.0
+    else:
+        emg_out = pd.DataFrame()
+
+    if imu_parts:
+        imu_out = (pd.concat(imu_parts, ignore_index=True)
+                   .sort_values('abs_us', kind='mergesort')
+                   .reset_index(drop=True))
+        imu_out['ts_ms'] = imu_out['abs_us'].astype(np.float64) / 1000.0
+    else:
+        imu_out = pd.DataFrame()
+
+    return emg_out, imu_out, reconnection_times_s, capture_ids
+
+
 def make_interleaved_df(emg_df: pd.DataFrame, imu_df: pd.DataFrame) -> pd.DataFrame:
     """Create an interleaved dataframe compatible with legacy analysis paths.
 

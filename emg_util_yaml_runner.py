@@ -840,6 +840,673 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
 
 
 # ---------------------------------------------------------
+# NEW: Per-swing EMG features from stitched in-memory DataFrame
+# Unlike per_swing_emg_features() which reads from CSV files by dev_us,
+# this version uses the stitched EMG DataFrame indexed by abs_us.
+# ---------------------------------------------------------
+
+def per_swing_emg_medium_stitched(
+    swings: pd.DataFrame,
+    emg_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Fast per-swing EMG features: envelope + MDF + RMS only.
+
+    Faster than per_swing_emg_features_stitched() because it skips
+    wl, zc, ssc, mnf, mav. Computes only the two most useful fatigue
+    indicators (MDF ↓ = fatigue, RMS ↑ = effort) plus envelope proxies.
+
+    Suitable for 'medium' mode where speed matters but some EMG insight
+    is still needed.
+    """
+    fs = float(cfg.get('session', {}).get('emg_fs_hz', 2000.0))
+    pad_ms = float(cfg.get('swing_detection', {}).get('mdf_pad_ms', 300.0))
+
+    emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
+    abs_us_arr = emg_sorted['abs_us'].to_numpy(dtype=np.int64)
+    raw_arr = emg_sorted['raw'].to_numpy(dtype=float)
+
+    rows = []
+    n = int(len(swings))
+    log(f'Computing per-swing EMG envelope+MDF for {n} swings (medium mode)...')
+
+    for ii, r in enumerate(swings.to_dict('records'), start=1):
+        if ii == 1 or ii % 50 == 0 or ii == n:
+            log(f'  Swing {ii}/{n} ({100 * ii // n}%)')
+
+        t0_ms = float(r['t_start_ms'])
+        t1_ms = float(r['t_end_ms'])
+        t0_us = int(t0_ms * 1000)
+        t1_us = int(t1_ms * 1000)
+        t0p_us = int((t0_ms - pad_ms) * 1000)
+        t1p_us = int((t1_ms + pad_ms) * 1000)
+
+        i0 = int(np.searchsorted(abs_us_arr, t0_us, side='left'))
+        i1 = int(np.searchsorted(abs_us_arr, t1_us, side='right'))
+        raw_exact = raw_arr[i0:i1]
+
+        j0 = int(np.searchsorted(abs_us_arr, t0p_us, side='left'))
+        j1 = int(np.searchsorted(abs_us_arr, t1p_us, side='right'))
+        raw_pad = raw_arr[j0:j1]
+
+        # Envelope features (no FFT, no preprocessing)
+        if raw_exact.size:
+            env_mean = float(np.mean(np.abs(raw_exact)))
+            env_peak = float(np.max(np.abs(raw_exact)))
+            iemg = float(np.sum(np.abs(raw_exact)) / fs)
+        else:
+            env_mean = env_peak = iemg = np.nan
+
+        # MDF + RMS on padded window (with preprocessing — key fatigue indicators)
+        if raw_pad.size >= 32:
+            proc = core.preprocess_emg(raw_pad, fs)
+            _, mdf = core.mnf_mdf(proc, fs)
+            rms = float(np.sqrt(np.mean(proc * proc)))
+        else:
+            mdf = rms = np.nan
+
+        rows.append({
+            'swing_id': int(r['swing_id']),
+            't_start_ms': t0_ms,
+            't_peak_ms': float(r['t_peak_ms']),
+            't_end_ms': t1_ms,
+            'imu_peak_z': float(r.get('peak_z', np.nan)),
+            'imu_peak_mag': float(r.get('peak_mag', np.nan)),
+            'emg_env_mean': env_mean,
+            'emg_env_peak': env_peak,
+            'emg_iemg': iemg,
+            'rms': rms,
+            'mdf': float(mdf) if mdf is not None else np.nan,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def windowed_emg_rms_stitched(
+    emg_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    win_s: float = 10.0,
+    step_s: float = 5.0,
+) -> pd.DataFrame:
+    """Compute windowed EMG RMS/MAV across the full stitched session.
+
+    Uses fixed-size windows on the raw EMG signal (no per-swing alignment).
+    Very fast: O(N) where N = total EMG samples.
+
+    Returns DataFrame with columns: t_ms (window center), rms, mav.
+    """
+    if emg_df is None or len(emg_df) == 0:
+        return pd.DataFrame(columns=['t_ms', 'rms', 'mav'])
+
+    fs = float(cfg.get('session', {}).get('emg_fs_hz', 2000.0))
+    win_samples = max(1, int(win_s * fs))
+    step_samples = max(1, int(step_s * fs))
+
+    emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
+    raw_arr = emg_sorted['raw'].to_numpy(dtype=float)
+    t_ms_arr = emg_sorted['ts_ms'].to_numpy(dtype=float)
+
+    rows = []
+    i = 0
+    while i + win_samples <= len(raw_arr):
+        seg = raw_arr[i:i + win_samples]
+        t_center = float(t_ms_arr[i + win_samples // 2])
+        rms = float(np.sqrt(np.mean(seg * seg)))
+        mav = float(np.mean(np.abs(seg)))
+        rows.append({'t_ms': t_center, 'rms': rms, 'mav': mav})
+        i += step_samples
+
+    return pd.DataFrame(rows)
+
+
+def _plot_windowed_rms(
+    win_rms_df: pd.DataFrame,
+    reconnection_times_s: List[float],
+    out_dir: str,
+) -> None:
+    """Plot windowed EMG RMS across the full session with reconnection markers."""
+    if win_rms_df is None or len(win_rms_df) == 0:
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    t_s = win_rms_df['t_ms'].to_numpy(float) / 1000.0
+
+    fig, ax = plt.subplots(1, 1, figsize=(14, 3))
+    ax.plot(t_s, win_rms_df['rms'].to_numpy(float),
+            lw=1.0, color='darkorange', label='RMS (windowed)')
+    if 'mav' in win_rms_df.columns:
+        ax.plot(t_s, win_rms_df['mav'].to_numpy(float),
+                lw=0.8, color='steelblue', alpha=0.6, label='MAV (windowed)')
+
+    for rt in reconnection_times_s:
+        ax.axvline(rt, color='navy', ls='--', lw=1.0, alpha=0.6)
+        ax.text(rt, float(np.nanmax(win_rms_df['rms'])) * 0.95,
+                f' {rt/60:.1f}m', fontsize=7, color='navy', va='top', rotation=90)
+
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel('EMG amplitude')
+    ax.set_title('Windowed EMG RMS/MAV — full session (navy dashed = BLE reconnection)')
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(os.path.join(out_dir, 'windowed_rms.png'), dpi=150)
+    plt.close(fig)
+    log('Saved windowed_rms.png')
+
+
+def per_swing_emg_features_stitched(
+    swings: pd.DataFrame,
+    emg_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Compute per-swing EMG features from stitched in-memory EMG data.
+
+    Args:
+        swings:  swing windows with t_start_ms / t_end_ms in absolute ms
+                 (i.e. abs_us / 1000, where abs_us=0 is session start)
+        emg_df:  stitched EMG DataFrame with abs_us and raw columns
+        cfg:     config dict
+    """
+    fs = float(cfg.get('session', {}).get('emg_fs_hz', 2000.0))
+    pad_ms = float(cfg.get('swing_detection', {}).get('mdf_pad_ms', 300.0))
+    zc_thr = float(cfg.get('features', {}).get('zc_thr', 0.01))
+    ssc_thr = float(cfg.get('features', {}).get('ssc_thr', 0.01))
+
+    # Pre-sort EMG by abs_us for fast binary-search indexing
+    emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
+    abs_us_arr = emg_sorted['abs_us'].to_numpy(dtype=np.int64)
+    raw_arr = emg_sorted['raw'].to_numpy(dtype=float)
+
+    rows = []
+    n = int(len(swings))
+    log(f'Computing per-swing EMG features for {n} swings (stitched)...')
+
+    for ii, r in enumerate(swings.to_dict('records'), start=1):
+        if ii == 1 or ii % 10 == 0 or ii == n or ii in [25, 50, 100, 200, 300, 400, 500]:
+            log(f'  Processing swing {ii}/{n} ({100 * ii // n}%)')
+
+        t0_ms = float(r['t_start_ms'])
+        t1_ms = float(r['t_end_ms'])
+
+        # Convert ms to us for indexing into abs_us array
+        t0_us = int(t0_ms * 1000)
+        t1_us = int(t1_ms * 1000)
+        t0p_us = int((t0_ms - pad_ms) * 1000)
+        t1p_us = int((t1_ms + pad_ms) * 1000)
+
+        # Extract exact window using binary search
+        i0 = int(np.searchsorted(abs_us_arr, t0_us, side='left'))
+        i1 = int(np.searchsorted(abs_us_arr, t1_us, side='right'))
+        raw_exact = raw_arr[i0:i1]
+
+        # Extract padded window
+        j0 = int(np.searchsorted(abs_us_arr, t0p_us, side='left'))
+        j1 = int(np.searchsorted(abs_us_arr, t1p_us, side='right'))
+        raw_pad = raw_arr[j0:j1]
+
+        # Effort proxies on exact window
+        if raw_exact.size:
+            env_mean = float(np.mean(np.abs(raw_exact)))
+            env_peak = float(np.max(np.abs(raw_exact)))
+            iemg = float(np.sum(np.abs(raw_exact)) / fs)
+        else:
+            env_mean = env_peak = iemg = np.nan
+
+        # Spectral/time features on padded window
+        if raw_pad.size >= 32:
+            proc = core.preprocess_emg(raw_pad, fs)
+            mnf, mdf = core.mnf_mdf(proc, fs)
+            mav = float(np.mean(np.abs(proc)))
+            rms = float(np.sqrt(np.mean(proc * proc)))
+            wl = float(np.sum(np.abs(np.diff(proc))))
+            s = proc - float(np.mean(proc))
+            zc = float(np.sum(((s[:-1] * s[1:]) < 0) & (np.abs(s[:-1] - s[1:]) > zc_thr))) if s.size > 2 else np.nan
+            a = s[1:-1] - s[:-2]
+            b = s[1:-1] - s[2:]
+            ssc = float(np.sum((a * b > 0) & (np.abs(a) > ssc_thr) & (np.abs(b) > ssc_thr))) if s.size > 3 else np.nan
+        else:
+            mnf = mdf = mav = rms = wl = zc = ssc = np.nan
+
+        rows.append({
+            'swing_id': int(r['swing_id']),
+            't_start_ms': t0_ms,
+            't_peak_ms': float(r['t_peak_ms']),
+            't_end_ms': t1_ms,
+            'imu_peak_z': float(r.get('peak_z', np.nan)),
+            'imu_peak_mag': float(r.get('peak_mag', np.nan)),
+            'emg_env_mean': env_mean,
+            'emg_env_peak': env_peak,
+            'emg_iemg': iemg,
+            'mav': mav,
+            'rms': rms,
+            'wl': wl,
+            'zc': zc,
+            'ssc': ssc,
+            'mnf': float(mnf) if mnf is not None else np.nan,
+            'mdf': float(mdf) if mdf is not None else np.nan,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def _plot_fatigue_trend_stitched(
+    swing_feat_df: pd.DataFrame,
+    reconnection_times_s: List[float],
+    out_dir: str,
+    cfg: Dict[str, Any],
+) -> None:
+    """Plot MDF and RMS fatigue trend across the full stitched session.
+
+    Vertical dashed lines mark BLE reconnection boundaries.
+    """
+    if swing_feat_df is None or len(swing_feat_df) == 0:
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        log('[WARN] matplotlib not available; skipping fatigue trend plot')
+        return
+
+    t_s = swing_feat_df['t_peak_ms'].to_numpy(float) / 1000.0
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+
+    for ax, col, ylabel, color in [
+        (axes[0], 'mdf', 'MDF (Hz)', 'steelblue'),
+        (axes[1], 'rms', 'RMS', 'darkorange'),
+    ]:
+        if col not in swing_feat_df.columns:
+            continue
+        y = swing_feat_df[col].to_numpy(float)
+        ax.scatter(t_s, y, s=8, alpha=0.5, color=color, label=col.upper())
+
+        # Rolling median trend line (window = 20 swings)
+        win = min(20, max(3, len(y) // 10))
+        if len(y) >= win:
+            from numpy.lib.stride_tricks import sliding_window_view
+            try:
+                yw = sliding_window_view(y, win)
+                tw = t_s[win - 1:]
+                trend = np.nanmedian(yw, axis=1)
+                ax.plot(tw, trend, lw=1.5, color=color, alpha=0.9, label=f'{col.upper()} trend')
+            except Exception:
+                pass
+
+        # BLE reconnection markers
+        for rt in reconnection_times_s:
+            ax.axvline(rt, color='gray', ls='--', lw=1.0, alpha=0.7)
+
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+
+    # Annotate reconnection times on top axis
+    if reconnection_times_s:
+        for rt in reconnection_times_s:
+            axes[0].text(rt, axes[0].get_ylim()[1], f' {rt/60:.1f}min',
+                         fontsize=7, color='gray', va='top', rotation=90)
+
+    axes[1].set_xlabel('time (s)')
+    fig.suptitle('Fatigue trend — full tennis session (dashed = BLE reconnection)', fontsize=11)
+    fig.tight_layout()
+    os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(os.path.join(out_dir, 'fatigue_trend.png'), dpi=150)
+    plt.close(fig)
+    log(f'Saved fatigue_trend.png')
+
+
+# ---------------------------------------------------------
+# NEW: Tennis Session Analysis (Folder-Level)
+# Treats ALL BLE connections in a folder as ONE continuous tennis session.
+# Replaces the per-BLE-connection loop in main().
+# ---------------------------------------------------------
+
+def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> str:
+    """Analyze a full tennis session from a folder of BLE capture files.
+
+    All BLE connections in log_dir are stitched into one continuous timeline
+    using wall-clock session_id timestamps. Analysis (swing detection, fatigue,
+    bouts) runs on the full stitched data as one unit.
+
+    Args:
+        log_dir: directory containing all BLE capture CSV files for the session
+        cfg:     config dict (from config.yaml)
+        out_dir: output directory — all outputs written here, no subdirectories
+
+    Returns:
+        out_dir path
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    sess_cfg = cfg.get('session', {}) or {}
+
+    log(f'=== Analyzing tennis session: {log_dir} ===')
+    log(f'Output: {out_dir}')
+
+    # 1. Discover all BLE connections in the folder
+    sessions = loader.discover_sessions(
+        log_dir,
+        emg_glob=str(sess_cfg.get('emg_glob', 'emg_log_*.csv')),
+        imu_glob=str(sess_cfg.get('imu_glob', 'imu_log_*.csv')),
+        vitals_name=str(sess_cfg.get('vitals_path', 'vitals_log.csv')),
+    )
+
+    if not sessions:
+        raise SystemExit(f'No capture files found in {log_dir}')
+
+    capture_ids_sorted = sorted(sessions.keys())
+    log(f'Found {len(sessions)} BLE connection(s): {capture_ids_sorted}')
+
+    # 2. Stitch all BLE connections into one continuous timeline
+    emg_df, imu_df, reconnection_times_s, capture_ids = loader.load_session_stitched(
+        sessions,
+        use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
+        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2.0)),
+        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250.0)),
+    )
+
+    total_dur_s = (
+        float(emg_df['abs_us'].max() - emg_df['abs_us'].min()) / 1e6
+        if len(emg_df) else 0.0
+    )
+    log(f'Stitched: {len(emg_df)} EMG rows, {len(imu_df)} IMU rows, '
+        f'total={total_dur_s:.1f}s ({total_dur_s/60:.1f}min)')
+    log(f'BLE reconnections at: {[f"{t:.1f}s ({t/60:.1f}min)" for t in reconnection_times_s]}')
+
+    # Save capture segment info for reference
+    pd.DataFrame({
+        'capture_id': capture_ids,
+        'reconnection_time_s': [0.0] + reconnection_times_s,
+    }).to_csv(os.path.join(out_dir, 'capture_segments.csv'), index=False)
+
+    # 3. Activity gating on full IMU stream
+    # ts_ms is already set to abs_us/1000 by load_session_stitched, so
+    # all existing activity_segments_from_imu() logic works unchanged.
+    active_segs = activity_segments_from_imu(imu_df, cfg)
+    active_segs.to_csv(os.path.join(out_dir, 'active_segments.csv'), index=False)
+    log(f'Active segments: {len(active_segs)}')
+
+    # 4. Swing detection on full IMU stream
+    swings = detect_swings_from_imu(imu_df, cfg)
+
+    in_active = swing_in_active_mask(swings, active_segs)
+    if len(swings):
+        swings = swings.copy()
+        swings['in_active'] = in_active.astype(int)
+
+    ag_cfg = (cfg.get('activity_gating', {}) or {})
+    if bool(ag_cfg.get('filter_swings', False)) and len(swings):
+        swings = swings.loc[swings['in_active'].astype(bool)].reset_index(drop=True)
+        swings['swing_id'] = np.arange(len(swings), dtype=int)
+
+    swings.to_csv(os.path.join(out_dir, 'swing_windows.csv'), index=False)
+    log(f'Detected {len(swings)} swings across full session')
+
+    # 5. IMU activity overlay plot (with reconnection markers)
+    _plot_imu_overlay_with_reconnections(imu_df, active_segs, swings,
+                                         reconnection_times_s, out_dir, cfg)
+
+    # 6. EMG health check — run per BLE connection, convert to absolute time
+    hcfg = _health_cfg(cfg)
+    bad_emg_ms: List[Tuple[float, float]] = []
+    try:
+        if bool(hcfg.get('enable', True)):
+            from datetime import datetime
+            first_dt = datetime.strptime(capture_ids[0], '%Y%m%d_%H%M%S')
+            for session_id, files in sessions.items():
+                if not files.emg_paths:
+                    continue
+                bad_us = health.emg_bad_intervals_us(files.emg_paths, cfg)
+                if bad_us:
+                    sess_dt = datetime.strptime(session_id, '%Y%m%d_%H%M%S')
+                    wall_offset_us = int((sess_dt - first_dt).total_seconds() * 1e6)
+                    cap_emg = emg_df[emg_df['session_id'] == session_id]
+                    if len(cap_emg):
+                        dev_start = int(cap_emg['dev_us'].min())
+                        for a_us, b_us in bad_us:
+                            a_abs = (wall_offset_us + (a_us - dev_start)) / 1000.0
+                            b_abs = (wall_offset_us + (b_us - dev_start)) / 1000.0
+                            bad_emg_ms.append((a_abs, b_abs))
+        if bad_emg_ms:
+            pd.DataFrame([
+                {'start_abs_ms': a, 'end_abs_ms': b, 'duration_s': (b - a) / 1000.0}
+                for (a, b) in bad_emg_ms
+            ]).to_csv(os.path.join(out_dir, 'emg_bad_intervals.csv'), index=False)
+    except Exception as e:
+        log(f'[WARN] EMG bad-interval detection failed: {e}')
+
+    if bad_emg_ms and bool(hcfg.get('filter_swings_by_emg_bad', False)) and len(swings):
+        swings_before = len(swings)
+        swings = _filter_swings_by_bad_emg(swings, bad_emg_ms)
+        if len(swings) != swings_before:
+            swings.to_csv(os.path.join(out_dir, 'swing_windows_emg_filtered.csv'), index=False)
+            log(f'[EMG] Filtered swings by BAD EMG: {swings_before} -> {len(swings)}')
+
+    mode = (cfg.get('features', {}) or {}).get('mode', 'both')
+
+    # --- Early exit if no swings ---
+    if len(swings) == 0:
+        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+        _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
+                                     total_dur_s, 0, len(bout_df), mode)
+        log(f'Finished (no swings). Outputs -> {out_dir}')
+        return out_dir
+
+    # --- Fast mode (bout only, no EMG) ---
+    if mode == 'bout':
+        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+        _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
+                                     total_dur_s, len(swings), len(bout_df), mode)
+        log(f'Finished (fast mode). Outputs -> {out_dir}')
+        return out_dir
+
+    # --- Medium mode: envelope + MDF + RMS per swing + windowed RMS ---
+    # Faster than full mode: skips wl/zc/ssc/mnf/mav, no health check overhead.
+    # Gives the two key fatigue indicators (MDF ↓, RMS ↑) plus effort proxies.
+    if mode == 'medium':
+        feat_cfg = cfg.get('features', {}) or {}
+        win_rms_s = float(feat_cfg.get('win_rms_s', 10.0))
+        step_rms_s = float(feat_cfg.get('step_rms_s', 5.0))
+
+        swing_feat_df = per_swing_emg_medium_stitched(swings, emg_df, cfg)
+
+        # Windowed RMS for continuous fatigue trend
+        win_rms_df = windowed_emg_rms_stitched(emg_df, cfg,
+                                                win_s=win_rms_s, step_s=step_rms_s)
+        win_rms_df.to_csv(os.path.join(out_dir, 'windowed_rms.csv'), index=False)
+
+        # Baseline from first N swings
+        base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
+        base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
+        base = baseline_from_features(base_feats)
+        swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
+
+        swing_feat_df.to_csv(os.path.join(out_dir, 'swing_features.csv'), index=False)
+        with open(os.path.join(out_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
+            json.dump({'baseline': base, 'selected_swings': base_sw.to_dict('records')},
+                      f, indent=2)
+
+        bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+        bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+
+        _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg)
+        _plot_windowed_rms(win_rms_df, reconnection_times_s, out_dir)
+
+        _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
+                                     total_dur_s, len(swings), len(bout_df), mode)
+        log(f'Finished (medium mode). Outputs -> {out_dir}')
+        return out_dir
+
+    # --- Full mode: per-swing EMG features ---
+    swing_feat_df = per_swing_emg_features_stitched(swings, emg_df, cfg)
+
+    # Baseline: first N swings of the full session (abs_us starts at 0)
+    base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
+    base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
+    base = baseline_from_features(base_feats)
+    swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
+
+    swing_feat_df.to_csv(os.path.join(out_dir, 'swing_features.csv'), index=False)
+    with open(os.path.join(out_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
+        json.dump({'baseline': base, 'selected_swings': base_sw.to_dict('records')}, f, indent=2)
+
+    # Bouts
+    bout_df = segment_bouts_from_active(active_segs, swings, cfg)
+    bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
+
+    # Windowed plots (optional)
+    pl = cfg.get('plots', {}) or {}
+    if bool(pl.get('enable', False)):
+        emg_imu_df = loader.make_interleaved_df(emg_df, imu_df)
+        res = core.compute(
+            emg_imu_df,
+            emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
+            win_sec=float(pl.get('win_sec', 1.0)),
+            step_sec=float(pl.get('step_sec', 0.25)),
+        )
+
+        corr_cfg = (cfg.get('diagnostics', {}) or {}).get('emg_imu_correlation', {})
+        if bool(corr_cfg.get('enable', False)):
+            save_emg_imu_correlation(
+                res.feats, out_dir,
+                method=str(corr_cfg.get('method', 'pearson')),
+                fname=str(corr_cfg.get('save_name', 'emg_imu_correlation.json')),
+            )
+            log('Saved emg_imu_correlation.json')
+
+        label = str(sess_cfg.get('label', os.path.basename(log_dir.rstrip('/\\'))))
+        core.plot_all(
+            res,
+            emg_fs_hz=float(sess_cfg.get('emg_fs_hz', 2000)),
+            title=f'EMG/IMU summary | {label}',
+            full_duration=bool(pl.get('full_duration', True)),
+            emg_max_points=int(pl.get('emg_max_points', 300000)),
+            save_dir=out_dir,
+            silent=True,
+        )
+
+        if bool(pl.get('do_fatigue', False)):
+            core.analyze_fatigue(res.feats, save_dir=out_dir)
+
+    # Fatigue trend plot with reconnection markers
+    _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg)
+
+    # Session summary
+    _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
+                                 total_dur_s, len(swings), len(bout_df), mode)
+
+    log(f'Finished. Outputs -> {out_dir}')
+    return out_dir
+
+
+def _save_tennis_session_summary(
+    out_dir: str,
+    capture_ids: List[str],
+    reconnection_times_s: List[float],
+    total_dur_s: float,
+    num_swings: int,
+    num_bouts: int,
+    mode: str,
+) -> None:
+    """Save session_summary.json for the full tennis session."""
+    summary = {
+        'n_capture_files': len(capture_ids),
+        'capture_ids': capture_ids,
+        'total_duration_s': round(total_dur_s, 3),
+        'total_duration_min': round(total_dur_s / 60.0, 2),
+        'num_swings': num_swings,
+        'num_bouts': num_bouts,
+        'reconnection_times_s': reconnection_times_s,
+        'mode': mode,
+    }
+    with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+
+
+def _plot_imu_overlay_with_reconnections(
+    imu_df: pd.DataFrame,
+    active_segs: pd.DataFrame,
+    swings: pd.DataFrame,
+    reconnection_times_s: List[float],
+    out_dir: str,
+    cfg: Dict[str, Any],
+) -> None:
+    """IMU activity overlay plot with BLE reconnection boundary markers."""
+    diag = cfg.get('diagnostics', {}) or {}
+    acfg = diag.get('activity_overlay', {}) or {}
+    if not bool(acfg.get('enable', True)):
+        return
+    if imu_df is None or len(imu_df) == 0:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    need_cols = ['ts_ms', 'gx', 'gy', 'gz']
+    imu = imu_df.dropna(subset=need_cols).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
+    if len(imu) == 0:
+        return
+
+    sig = compute_hybrid_intensity(imu, cfg)
+    t0 = float(sig['t_ms'][0])
+    t_s = (sig['t_ms'] - t0) / 1000.0
+
+    plot_signal = str(acfg.get('plot_signal', 'intensity'))
+    y = sig['gyro_mag'] if plot_signal == 'gyro_mag' else sig['intensity_smooth']
+    ylab = 'gyro magnitude' if plot_signal == 'gyro_mag' else 'hybrid intensity (smoothed)'
+
+    fig, ax = plt.subplots(1, 1, figsize=(14, 4))
+    ax.plot(t_s, y, lw=0.7, label=plot_signal)
+
+    if active_segs is not None and len(active_segs):
+        for a, b in zip(active_segs['t_start_ms'].to_numpy(float),
+                        active_segs['t_end_ms'].to_numpy(float)):
+            ax.axvspan((a - t0) / 1000.0, (b - t0) / 1000.0, color='orange', alpha=0.18)
+
+    if (swings is not None and len(swings) and bool(acfg.get('plot_swings', True))
+            and 't_peak_ms' in swings.columns):
+        sp = (swings['t_peak_ms'].to_numpy(float) - t0) / 1000.0
+        ax.vlines(sp, ymin=float(np.nanmin(y)), ymax=float(np.nanmax(y)),
+                  color='r', alpha=0.25, lw=0.8, label='swing peaks')
+
+    # BLE reconnection markers
+    for rt in reconnection_times_s:
+        ax.axvline(rt, color='navy', ls='--', lw=1.2, alpha=0.7)
+        ax.text(rt, float(np.nanmax(y)) * 0.95, f' {rt/60:.1f}min',
+                fontsize=7, color='navy', va='top', rotation=90)
+
+    try:
+        th = active_segs.attrs.get('thr_high', None)
+        tl = active_segs.attrs.get('thr_low', None)
+        if th is not None:
+            ax.axhline(float(th), color='k', ls='--', lw=1, alpha=0.5, label='enter thr')
+        if tl is not None:
+            ax.axhline(float(tl), color='k', ls=':', lw=1, alpha=0.5, label='exit thr')
+    except Exception:
+        pass
+
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel(ylab)
+    ax.set_title('IMU activity overlay — full tennis session (navy dashed = BLE reconnection)')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=8)
+
+    os.makedirs(out_dir, exist_ok=True)
+    fname = str(acfg.get('save_name', 'imu_activity_overlay.png'))
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, fname), dpi=150)
+    plt.close(fig)
+    log(f'Saved {fname}')
+
+
+# ---------------------------------------------------------
 # CLI Main (Keep this for PC compatibility)
 # ---------------------------------------------------------
 def main():
@@ -859,23 +1526,18 @@ def main():
     log(f'Loaded config: {args.config}')
     log(f'Output root: {out_root}')
     log(f'Scanning log_dir: {args.log_dir}')
-    
-    # Discovery
-    sessions = loader.discover_sessions(args.log_dir,
-                                        emg_glob=sess_cfg.get('emg_glob', 'emg_log_*.csv'),
-                                        imu_glob=sess_cfg.get('imu_glob', 'imu_log_*.csv'),
-                                        vitals_name=sess_cfg.get('vitals_path', 'vitals_log.csv'))
-    
-    session_ids = sorted(sessions.keys())
-    if not session_ids:
-        raise SystemExit('No sessions found')
-    log(f'Found {len(session_ids)} sessions: {", ".join(session_ids)}')
 
-    # Sequential execution on PC
-    for si, session_id in enumerate(session_ids, start=1):
-        files = sessions[session_id]
-        # CALL THE REUSABLE FUNCTION
-        analyze_single_session(session_id, files, cfg, out_root, session_idx=si, total_sessions=len(session_ids))
+    # Analyze the entire folder as one tennis session
+    analyze_tennis_session(args.log_dir, cfg, out_root)
+
+    # NOTE: The old per-BLE-connection loop is preserved below for reference.
+    # It is no longer called by default. Use analyze_single_session() directly
+    # if you need per-capture-file debugging output.
+    #
+    # sessions = loader.discover_sessions(args.log_dir, ...)
+    # for si, session_id in enumerate(sorted(sessions.keys()), start=1):
+    #     analyze_single_session(session_id, sessions[session_id], cfg, out_root,
+    #                            session_idx=si, total_sessions=len(sessions))
 
 if __name__ == '__main__':
     main()

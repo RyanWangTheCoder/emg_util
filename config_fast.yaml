@@ -1,15 +1,21 @@
 # ============================================================
-# EMG + IMU Analysis Configuration (FAST MODE)
+# EMG + IMU Analysis Configuration (FAST / MEDIUM MODE)
 #
 # NEW btCentral.py capture format (separate rotated EMG / IMU logs).
 # - Pass capture directory via CLI: --log-dir <LOG_DIR>
-# - Runner outputs to out/<session_id>/...
+# - The entire folder is treated as ONE tennis session (all BLE connections stitched).
+# - Runner outputs to out/ (flat, no per-capture subdirectories).
 #
-# FAST MODE optimizations:
-# - features.mode = "bout" (skip per-swing EMG features)
-# - plots.enable = false (skip windowed features + plots)
-# - diagnostics.emg_imu_correlation.enable = false
-# - diagnostics.activity_overlay.enable = false (optional: set true for quick visual check)
+# Three analysis modes (set features.mode):
+#   "bout"   — IMU-only: swing detection + bout summary. No EMG processing.
+#              Fastest. ~60s for 70min session (mostly I/O).
+#   "medium" — Adds per-swing EMG envelope + MDF + RMS + windowed RMS trend.
+#              Key fatigue indicators without full feature set. ~2-3s extra.
+#   "both"   — Full per-swing EMG features (mdf, rms, mav, wl, zc, ssc, mnf).
+#              Use config.yaml for full mode.
+#
+# This file defaults to "medium" — fast enough for daily use, enough EMG
+# insight to track fatigue trends.
 # ============================================================
 
 session:
@@ -26,12 +32,17 @@ session:
   gyro_fsr_default_dps: 250
 
   out_dir: "out"
+  # Optional human-readable label for this tennis session (used in plot titles)
+  label: ""
 
 features:
-  mode: "bout"  # ← FAST: skip per-swing EMG features (use "both" for full analysis)
+  mode: "medium"  # "bout" = IMU-only | "medium" = envelope+MDF+RMS | "both" = full EMG
   compute_windowed: false
   zc_thr: 0.01
   ssc_thr: 0.01
+  # Windowed RMS parameters (used in medium mode for continuous fatigue trend)
+  win_rms_s: 10.0   # window size in seconds
+  step_rms_s: 5.0   # step size in seconds
 
 swing_detection:
   use_gyro: true
@@ -62,7 +73,7 @@ bout:
   min_bout_swings: 3
 
 plots:
-  enable: false  # ← FAST: skip windowed features + plots (set true for full analysis)
+  enable: false  # skip windowed EMG/IMU features + plots (set true for full analysis)
   full_duration: true
   emg_max_points: 300000
   do_fatigue: true
@@ -86,7 +97,7 @@ diagnostics:
     method: pearson
     save_name: emg_imu_correlation.json
   activity_overlay:
-    enable: false  # ← FAST: skip IMU activity overlay plot (set true for quick visual check)
+    enable: true  # medium mode: enable activity overlay (fast, IMU-only)
     save_name: imu_activity_overlay.png
     plot_swings: true
     plot_signal: intensity  # 'intensity' or 'gyro_mag'
@@ -106,3 +117,14 @@ activity_gating:
   merge_gap_ms: 2000
   skip_min: 0  # 0 = use baseline.warmup_skip_min
   filter_swings: false  # ← Keep false (filtering is fast; useful for downstream analysis)
+
+health:
+  # Medium mode: enable EMG health detection (EMG is loaded anyway for medium mode)
+  # Set to false if using mode: "bout" (no EMG processing)
+  enable: true
+  window_s: 1.0
+  bad_persist_s: 2.0
+  emg_zero_frac_bad: 0.9
+  emg_flat_std_bad: 1.0
+  emg_gap_bad_us: 200000
+  filter_swings_by_emg_bad: false
