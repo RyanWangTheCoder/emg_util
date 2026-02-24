@@ -82,3 +82,19 @@ activity_gating:
   merge_gap_ms: 2000
   skip_min: 0
   filter_swings: false
+
+
+health:
+  # Enable EMG health detection (zeros/flatline/gaps) for sporadic contact issues
+  enable: true
+  # Fixed health window (seconds)
+  window_s: 1.0
+  # Require persistence before declaring a BAD interval
+  bad_persist_s: 2.0
+  # EMG BAD thresholds
+  emg_zero_frac_bad: 0.9
+  emg_flat_std_bad: 1.0
+  emg_gap_bad_us: 200000
+
+  # New knob: filter out swing windows that overlap BAD EMG intervals
+  filter_swings_by_emg_bad: true
