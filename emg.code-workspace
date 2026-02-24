@@ -7,7 +7,7 @@
     { "name": "Android app", "path": "../btLeApp/app/src" }
   ],
   "settings": {
-    "window.openFilesInNewWindow": "on",
+    "window.openFilesInNewWindow": "off",
     "git.openRepositoryInParentFolders": "never",
 
     "python.analysis.indexing": true,
