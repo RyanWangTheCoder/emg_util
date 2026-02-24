@@ -9,6 +9,8 @@ session:
   acc_fsr_default_g: 2
   gyro_fsr_default_dps: 250
   out_dir: out
+  # Optional human-readable label for this tennis session (used in plot titles)
+  label: ''
 features:
   mode: both
   compute_windowed: false

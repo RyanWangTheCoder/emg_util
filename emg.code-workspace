@@ -1,34 +1,92 @@
 {
-	"folders": [
-		{
-			"name": "data capture",
-			"path": "arduino/py_scripts"
-		},
-		{
-			"name": "data analysis",
-			"path": "emg_util"
-		},
-		{
-			"name": "arduino",
-			"path": "arduino/myoware_imu_v2"
-		},
-		{
-			"name": "Android Ble",
-			"path": "btLeApp/FastBleLib/src"
-		},
-		{
-			"name": "Android app",
-			"path": "btLeApp/app/src"
-		}
-	],
-	"settings": {
-		"files.exclude": {
-		"**/__pycache__": true,
-		"**/.pytest_cache": true,
-		"**/.mypy_cache": true,
-		"**/.ipynb_checkpoints": true,
-		"**/build": true,
-		"**/dist": true
-		}
-	}
+  "folders": [
+    { "name": "data capture", "path": "../arduino/py_scripts" },
+    { "name": "data analysis", "path": "./" },
+    { "name": "arduino", "path": "../arduino/myoware_imu_v2" },
+    { "name": "Android Ble", "path": "../btLeApp/FastBleLib/src" },
+    { "name": "Android app", "path": "../btLeApp/app/src" }
+  ],
+  "settings": {
+    "window.openFilesInNewWindow": "on",
+    "git.openRepositoryInParentFolders": "never",
+
+    "python.analysis.indexing": true,
+    "python.analysis.inlayHints.functionReturnTypes": true,
+
+    "outline.autoReveal": false,
+
+    // Workspace-level AI disable (keep if effective in your setup)
+    "chat.disableAIFeatures": true,
+
+    "editor.largeFileOptimizations": true,
+    "json.maxItemsComputed": 5000,
+
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/__pycache__/**": true,
+
+      "**/.pytest_cache": true,
+      "**/.pytest_cache/**": true,
+
+      "**/.mypy_cache": true,
+      "**/.mypy_cache/**": true,
+
+      "**/.ipynb_checkpoints": true,
+      "**/.ipynb_checkpoints/**": true,
+
+      "**/build": true,
+      "**/build/**": true,
+
+      "**/dist": true,
+      "**/dist/**": true,
+
+      "**/*.7z": true,
+      "**/*.a": true,
+      "**/*.ac": true,
+      "**/*.mat": true,
+      //"**/*.fig": true,
+      //"**/*.log": true,
+      "**/*.zip": true
+      // NOTE: CSV & JSON intentionally NOT excluded → remain visible
+    },
+
+    "files.watcherExclude": {
+      "**/.git/**": true,
+      "**/.hg/**": true,
+      "**/.svn/**": true,
+      "**/.tox/**": true,
+
+      "**/.mypy_cache/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.cache/**": true,
+
+      "**/.venv/**": true,
+      "**/venv/**": true,
+
+      "**/build/**": true,
+      "**/dist/**": true,
+
+      "**/__pycache__/**": true,
+
+      "**/node_modules/**": true,
+      "**/.idea/**": true,
+
+      "**/*.log": true,
+      "**/*.zip": true,
+      "**/*.csv": true,
+      "**/*.json": true
+    },
+
+    "search.exclude": {
+      "**/*.csv": true,
+      "**/*.json": true,
+      "**/*.mat": true,
+      "**/*.bin": true
+    },
+
+    "python.analysis.exclude": [
+      "**/*.csv",
+      "**/*.json"
+    ]
+  }
 }
