@@ -27,7 +27,7 @@ swing_detection:
   mdf_pad_ms: 300
 baseline:
   mode: swing
-  warmup_skip_min: 5
+  warmup_skip_min: 10
   warmup_skip_swings: 0
   baseline_swings: 20
   baseline_window_sec: 60
