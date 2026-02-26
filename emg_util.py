@@ -92,22 +92,10 @@ def filtfilt_safe(b, a, x: np.ndarray) -> np.ndarray:
         return filtfilt(b, a, x, method="gust")
     return filtfilt(b, a, x)
 
-def preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
-    x = np.asarray(x, dtype=float)
-    if x.size == 0:
-        return x
-    y = detrend(x, type="constant")
-    nyq = fs / 2.0
-    high = min(450.0, 0.95 * nyq)
-    if high <= 20.0:
-        return y
-    b, a = butter(4, [20.0 / nyq, high / nyq], btype="bandpass")
-    y = filtfilt_safe(b, a, y)
-    for f0 in (60.0, 120.0):
-        if f0 < nyq - 1:
-            b, a = iirnotch(w0=f0 / nyq, Q=30.0)
-            y = filtfilt_safe(b, a, y)
-    return y
+# preprocess_emg is the single source of truth in fatigue_monitor.py.
+# Imported here so all callers (emg_util_yaml_runner, compute(), etc.) use
+# the same filter parameters as FatigueMonitor.push_swing() and Android.
+from fatigue_monitor import preprocess_emg  # noqa: F401, E402
 
 def envelope(x: np.ndarray, fs: float, cutoff_hz: float = 3.6) -> np.ndarray:
     x = np.asarray(x, dtype=float)
