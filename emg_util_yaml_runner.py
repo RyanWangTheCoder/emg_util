@@ -54,21 +54,7 @@ def load_config(path: str) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def robust_zscore(x: np.ndarray, baseline_mask: np.ndarray, eps: float = 1e-9):
-    x = np.asarray(x, dtype=float)
-    baseline_mask = np.asarray(baseline_mask, dtype=bool)
-    xb = x[baseline_mask]
-    xb = xb[np.isfinite(xb)]
-    if len(xb) < 10:
-        xb = x[np.isfinite(x)]
-    med = float(np.median(xb)) if len(xb) else float(np.nanmedian(x))
-    mad = float(np.median(np.abs(xb - med))) if len(xb) else float(np.nanmedian(np.abs(x - med)))
-    scale = 1.4826 * mad
-    if not np.isfinite(scale) or scale < eps:
-        scale = float(np.nanstd(xb)) if len(xb) else float(np.nanstd(x))
-    if not np.isfinite(scale) or scale < eps:
-        scale = 1.0
-    return (x - med) / (scale + eps), med, scale
+# robust_zscore() removed — use core.robust_zscore() (defined in emg_util.py)
 
 
 
@@ -440,7 +426,7 @@ def detect_swings_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 
     total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else baseline_s
     b_s = min(baseline_s, max(0.2 * total_s, 0.5))
-    z, _, _ = robust_zscore(mag, t_rel_s <= b_s)
+    z, _, _ = core.robust_zscore(mag, t_rel_s <= b_s)
 
     active = z > z_thr
     if min_consec > 1:
@@ -554,14 +540,11 @@ def per_swing_emg_features(swings: pd.DataFrame, emg_idx: List[Tuple[str, int, i
         if raw_pad.size >= 32:
             proc = core.preprocess_emg(raw_pad, fs)
             mnf, mdf = core.mnf_mdf(proc, fs)
-            mav = float(np.mean(np.abs(proc)))
-            rms = float(np.sqrt(np.mean(proc * proc)))
-            wl = float(np.sum(np.abs(np.diff(proc))))
-            s = proc - float(np.mean(proc))
-            zc = float(np.sum(((s[:-1] * s[1:]) < 0) & (np.abs(s[:-1] - s[1:]) > zc_thr))) if s.size > 2 else np.nan
-            a = s[1:-1] - s[:-2]
-            b = s[1:-1] - s[2:]
-            ssc = float(np.sum((a * b > 0) & (np.abs(a) > ssc_thr) & (np.abs(b) > ssc_thr))) if s.size > 3 else np.nan
+            mav = core.feat_mav(proc)
+            rms = core.feat_rms(proc)
+            wl = core.feat_wl(proc)
+            zc = core.feat_zc(proc, thr=zc_thr)
+            ssc = core.feat_ssc(proc, thr=ssc_thr)
         else:
             mnf = mdf = mav = rms = wl = zc = ssc = np.nan
 
@@ -588,37 +571,25 @@ def per_swing_emg_features(swings: pd.DataFrame, emg_idx: List[Tuple[str, int, i
 
 
 def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float, cfg: Dict[str, Any]) -> pd.DataFrame:
+    """Wrapper: extracts params from cfg and delegates to core.select_baseline_swings()."""
     b = cfg.get('baseline', {})
-    warm_min = float(b.get('warmup_skip_min', 5))
     warm_sw = int(b.get('warmup_skip_swings', 0))
-    N = int(b.get('baseline_swings', 20))
-    sw = swings.sort_values('t_peak_ms').reset_index(drop=True)
-    cutoff = float(session_t0_ms) + warm_min * 60.0 * 1000.0
-    sw2 = sw[sw['t_peak_ms'] >= cutoff].reset_index(drop=True)
-    if len(sw2) < max(3, N // 2):
-        sw2 = sw
-    if warm_sw > 0:
-        sw2 = sw2.iloc[warm_sw:].reset_index(drop=True)
-    return sw2.iloc[:N].reset_index(drop=True)
+    return core.select_baseline_swings(
+        swings, session_t0_ms,
+        warmup_skip_min=float(b.get('warmup_skip_min', 5)),
+        warmup_skip_swings=warm_sw if warm_sw > 0 else None,
+        baseline_swings=int(b.get('baseline_swings', 20)),
+    )
 
 
 def baseline_from_features(df: pd.DataFrame) -> Dict[str, float]:
-    base: Dict[str, float] = {}
-    for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg']:
-        if k in df.columns:
-            base[k] = float(np.nanmedian(df[k].to_numpy(dtype=float)))
-    return base
+    """Wrapper: delegates to core.compute_baseline_from_swing_features()."""
+    return core.compute_baseline_from_swing_features(df)
 
 
 def apply_deltas(df: pd.DataFrame, base: Dict[str, float], prefix: str = '') -> pd.DataFrame:
-    out = df.copy()
-    if not base:
-        return out
-    if 'mdf' in out.columns and base.get('mdf', 0):
-        out[prefix + 'mdf_drop_pct'] = (base['mdf'] - out['mdf']) / base['mdf'] * 100.0
-    if 'rms' in out.columns and base.get('rms', 0):
-        out[prefix + 'rms_increase_pct'] = (out['rms'] - base['rms']) / base['rms'] * 100.0
-    return out
+    """Wrapper: delegates to core.apply_baseline_deltas()."""
+    return core.apply_baseline_deltas(df, base, prefix=prefix)
 
 
 def segment_bouts(swings: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
@@ -1060,14 +1031,11 @@ def per_swing_emg_features_stitched(
         if raw_pad.size >= 32:
             proc = core.preprocess_emg(raw_pad, fs)
             mnf, mdf = core.mnf_mdf(proc, fs)
-            mav = float(np.mean(np.abs(proc)))
-            rms = float(np.sqrt(np.mean(proc * proc)))
-            wl = float(np.sum(np.abs(np.diff(proc))))
-            s = proc - float(np.mean(proc))
-            zc = float(np.sum(((s[:-1] * s[1:]) < 0) & (np.abs(s[:-1] - s[1:]) > zc_thr))) if s.size > 2 else np.nan
-            a = s[1:-1] - s[:-2]
-            b = s[1:-1] - s[2:]
-            ssc = float(np.sum((a * b > 0) & (np.abs(a) > ssc_thr) & (np.abs(b) > ssc_thr))) if s.size > 3 else np.nan
+            mav = core.feat_mav(proc)
+            rms = core.feat_rms(proc)
+            wl = core.feat_wl(proc)
+            zc = core.feat_zc(proc, thr=zc_thr)
+            ssc = core.feat_ssc(proc, thr=ssc_thr)
         else:
             mnf = mdf = mav = rms = wl = zc = ssc = np.nan
 
