@@ -800,7 +800,8 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
                       silent=True)
         
         if bool(pl.get('do_fatigue', False)):
-            core.analyze_fatigue(res.feats, save_dir=out_dir)
+            warmup_skip = float(cfg.get('baseline', {}).get('warmup_skip_min', 10.0))
+            core.analyze_fatigue(res.feats, save_dir=out_dir, warmup_skip_min=warmup_skip)
 
     # 5. Final Session Summary
     with open(os.path.join(out_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
@@ -973,14 +974,20 @@ def per_swing_emg_features_stitched(
     swings: pd.DataFrame,
     emg_df: pd.DataFrame,
     cfg: Dict[str, Any],
+    imu_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
-    """Compute per-swing EMG features from stitched in-memory EMG data.
+    """Compute per-swing EMG + IMU features from stitched in-memory data.
 
     Args:
         swings:  swing windows with t_start_ms / t_end_ms in absolute ms
-                 (i.e. abs_us / 1000, where abs_us=0 is session start)
         emg_df:  stitched EMG DataFrame with abs_us and raw columns
         cfg:     config dict
+        imu_df:  optional stitched IMU DataFrame (ts_ms, ax, ay, az, gx, gy, gz)
+                 When provided, adds per-swing accelerometer features:
+                   imu_mean_acc_dyn  — mean |acc_mag - 1g| (effort/impact proxy)
+                   imu_peak_acc_dyn  — peak |acc_mag - 1g|
+                 Note: gyro features are omitted because gyro saturates at FSR=250 dps
+                 for tennis swings. Increase gyro_fsr_dps to 1000+ in firmware to unlock.
     """
     fs = float(cfg.get('session', {}).get('emg_fs_hz', 2000.0))
     pad_ms = float(cfg.get('swing_detection', {}).get('mdf_pad_ms', 300.0))
@@ -991,6 +998,18 @@ def per_swing_emg_features_stitched(
     emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
     abs_us_arr = emg_sorted['abs_us'].to_numpy(dtype=np.int64)
     raw_arr = emg_sorted['raw'].to_numpy(dtype=float)
+
+    # Pre-sort IMU by ts_ms for fast binary-search indexing
+    imu_ts_arr = None
+    imu_acc_dyn = None
+    if imu_df is not None and len(imu_df) > 0:
+        imu_s = imu_df.dropna(subset=['ts_ms']).sort_values('ts_ms').reset_index(drop=True)
+        imu_ts_arr = imu_s['ts_ms'].to_numpy(dtype=float)
+        ax = imu_s['ax'].to_numpy(dtype=float)
+        ay = imu_s['ay'].to_numpy(dtype=float)
+        az = imu_s['az'].to_numpy(dtype=float)
+        acc_mag = np.sqrt(ax**2 + ay**2 + az**2)
+        imu_acc_dyn = np.abs(acc_mag - 1.0)  # remove gravity (assumes physical units in g)
 
     rows = []
     n = int(len(swings))
@@ -1039,6 +1058,17 @@ def per_swing_emg_features_stitched(
         else:
             mnf = mdf = mav = rms = wl = zc = ssc = np.nan
 
+        # Per-swing IMU accelerometer features
+        imu_mean_acc_dyn = np.nan
+        imu_peak_acc_dyn = np.nan
+        if imu_ts_arr is not None:
+            ia0 = int(np.searchsorted(imu_ts_arr, t0_ms, side='left'))
+            ia1 = int(np.searchsorted(imu_ts_arr, t1_ms, side='right'))
+            seg_acc = imu_acc_dyn[ia0:ia1]
+            if seg_acc.size > 0:
+                imu_mean_acc_dyn = float(np.nanmean(seg_acc))
+                imu_peak_acc_dyn = float(np.nanmax(seg_acc))
+
         rows.append({
             'swing_id': int(r['swing_id']),
             't_start_ms': t0_ms,
@@ -1046,6 +1076,8 @@ def per_swing_emg_features_stitched(
             't_end_ms': t1_ms,
             'imu_peak_z': float(r.get('peak_z', np.nan)),
             'imu_peak_mag': float(r.get('peak_mag', np.nan)),
+            'imu_mean_acc_dyn': imu_mean_acc_dyn,
+            'imu_peak_acc_dyn': imu_peak_acc_dyn,
             'emg_env_mean': env_mean,
             'emg_env_peak': env_peak,
             'emg_iemg': iemg,
@@ -1081,7 +1113,11 @@ def _plot_fatigue_trend_stitched(
 
     t_s = swing_feat_df['t_peak_ms'].to_numpy(float) / 1000.0
 
-    fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+    # Determine available subplots
+    has_drop = 'swing_mdf_drop_pct' in swing_feat_df.columns
+    has_acc = 'swing_acc_drop_pct' in swing_feat_df.columns
+    n_rows = 2 + int(has_drop) + int(has_acc)
+    fig, axes = plt.subplots(n_rows, 1, figsize=(14, 4 * n_rows), sharex=True)
 
     for ax, col, ylabel, color in [
         (axes[0], 'mdf', 'MDF (Hz)', 'steelblue'),
@@ -1112,13 +1148,68 @@ def _plot_fatigue_trend_stitched(
         ax.grid(True, alpha=0.3)
         ax.legend(loc='best', fontsize=8)
 
+    # Third subplot: MDF drop % relative to active-swing baseline
+    subplot_idx = 2
+    if has_drop:
+        ax3 = axes[subplot_idx]
+        subplot_idx += 1
+        drop = swing_feat_df['swing_mdf_drop_pct'].to_numpy(float)
+        ax3.scatter(t_s, drop, s=8, alpha=0.5, color='purple', label='MDF drop %')
+        win = min(20, max(3, len(drop) // 10))
+        if len(drop) >= win:
+            from numpy.lib.stride_tricks import sliding_window_view
+            try:
+                dw = sliding_window_view(drop, win)
+                tw = t_s[win - 1:]
+                ax3.plot(tw, np.nanmedian(dw, axis=1), lw=1.5, color='purple',
+                         alpha=0.9, label='MDF drop trend')
+            except Exception:
+                pass
+        ax3.axhline(0.0,  color='k',      ls='-',  lw=1.0, alpha=0.5, label='baseline (0%)')
+        ax3.axhline(12.0, color='orange', ls='--', lw=1.0, alpha=0.7, label='mild fatigue (+12%)')
+        ax3.axhline(20.0, color='red',    ls='--', lw=1.0, alpha=0.7, label='significant (+20%)')
+        for rt in reconnection_times_s:
+            ax3.axvline(rt, color='gray', ls='--', lw=1.0, alpha=0.7)
+        ax3.set_ylabel('MDF drop % (↑ = fatigue)')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=8)
+
+    # Fourth subplot: acc_drop_pct (IMU accelerometer fatigue indicator)
+    # acc_drop_pct > 0 means swing force decreased relative to baseline → fatigue
+    # Note: gyro is saturated at FSR=250 dps; acc_dyn is the reliable IMU fatigue signal.
+    if has_acc:
+        ax4 = axes[subplot_idx]
+        acc_drop = swing_feat_df['swing_acc_drop_pct'].to_numpy(float)
+        ax4.scatter(t_s, acc_drop, s=8, alpha=0.5, color='teal', label='acc drop %')
+        win = min(20, max(3, len(acc_drop) // 10))
+        if len(acc_drop) >= win:
+            from numpy.lib.stride_tricks import sliding_window_view
+            try:
+                dw = sliding_window_view(acc_drop, win)
+                tw = t_s[win - 1:]
+                ax4.plot(tw, np.nanmedian(dw, axis=1), lw=1.5, color='teal',
+                         alpha=0.9, label='acc drop trend')
+            except Exception:
+                pass
+        ax4.axhline(0.0,  color='k',      ls='-',  lw=1.0, alpha=0.5, label='baseline (0%)')
+        ax4.axhline(10.0, color='orange', ls='--', lw=1.0, alpha=0.7, label='mild (-10%)')
+        ax4.axhline(20.0, color='red',    ls='--', lw=1.0, alpha=0.7, label='significant (-20%)')
+        for rt in reconnection_times_s:
+            ax4.axvline(rt, color='gray', ls='--', lw=1.0, alpha=0.7)
+        ax4.set_ylabel('Acc drop % (↑ = less force)')
+        ax4.grid(True, alpha=0.3)
+        ax4.legend(loc='best', fontsize=8)
+
+    axes[-1].set_xlabel('time (s)')
+
     # Annotate reconnection times on top axis
     if reconnection_times_s:
         for rt in reconnection_times_s:
             axes[0].text(rt, axes[0].get_ylim()[1], f' {rt/60:.1f}min',
                          fontsize=7, color='gray', va='top', rotation=90)
 
-    axes[1].set_xlabel('time (s)')
+    if not has_drop and not has_acc:
+        axes[1].set_xlabel('time (s)')
     fig.suptitle('Fatigue trend — full tennis session (dashed = BLE reconnection)', fontsize=11)
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
@@ -1311,7 +1402,7 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         return out_dir
 
     # --- Full mode: per-swing EMG features ---
-    swing_feat_df = per_swing_emg_features_stitched(swings, emg_df, cfg)
+    swing_feat_df = per_swing_emg_features_stitched(swings, emg_df, cfg, imu_df=imu_df)
 
     # Baseline: first N swings of the full session (abs_us starts at 0)
     base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
@@ -1359,7 +1450,8 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         )
 
         if bool(pl.get('do_fatigue', False)):
-            core.analyze_fatigue(res.feats, save_dir=out_dir)
+            warmup_skip = float(cfg.get('baseline', {}).get('warmup_skip_min', 10.0))
+            core.analyze_fatigue(res.feats, save_dir=out_dir, warmup_skip_min=warmup_skip)
 
     # Fatigue trend plot with reconnection markers
     _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg)

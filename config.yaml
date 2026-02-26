@@ -6,8 +6,8 @@ session:
   emg_fs_hz: 2000
   imu_fs_fallback_hz: 200
   use_physical_units: true
-  acc_fsr_default_g: 2
-  gyro_fsr_default_dps: 250
+  acc_fsr_default_g: 4      # matches firmware IMU_ACC_FSR_G=4 (was 2, saturated)
+  gyro_fsr_default_dps: 1000  # matches firmware IMU_GYRO_FSR_DPS=1000 (was 250, saturated)
   out_dir: out
   # Optional human-readable label for this tennis session (used in plot titles)
   label: ''

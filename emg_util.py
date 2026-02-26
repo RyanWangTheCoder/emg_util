@@ -236,7 +236,8 @@ def compute(emg_imu: pd.DataFrame, emg_fs_hz: float, win_sec: float = 1.0, step_
 # Fatigue Analysis
 # -----------------------------
 
-def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
+def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str],
+                    warmup_skip_min: float = 0.0):
     """Fatigue trend analysis.
 
     Backward/forward compatible with different feature column naming schemes.
@@ -250,6 +251,13 @@ def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
       - time: t_center / time_s
       - MDF : mdf / MDF
       - MNF : mnf / MNF
+
+    Args:
+        feats:            windowed feature DataFrame
+        save_dir:         output directory for CSV + PNG
+        warmup_skip_min:  minutes to skip at session start before computing baseline.
+                          Prevents warm-up period from contaminating the baseline MDF.
+                          Matches the swing-level baseline.warmup_skip_min config value.
     """
 
     if feats is None or len(feats) < 10:
@@ -280,12 +288,29 @@ def analyze_fatigue(feats: pd.DataFrame, save_dir: Optional[str]):
     mnf = pd.to_numeric(feats[mnf_col], errors='coerce').to_numpy(dtype=float)
 
     total_sec = float(np.nanmax(t))
-    baseline_idx = max(1, int(len(feats) * 0.1))
 
-    baseline_MDF = float(np.nanmean(mdf[:baseline_idx]))
-    baseline_MNF = float(np.nanmean(mnf[:baseline_idx]))
-    final_MDF = float(np.nanmean(mdf[-baseline_idx:]))
-    final_MNF = float(np.nanmean(mnf[-baseline_idx:]))
+    # Baseline: skip warm-up period, then use first 10% of remaining windows
+    if warmup_skip_min > 0.0:
+        t_min = float(np.nanmin(t))
+        cutoff_s = t_min + float(warmup_skip_min) * 60.0
+        post_mask = t >= cutoff_s
+        if np.sum(post_mask) >= 10:
+            mdf_post = mdf[post_mask]
+            mnf_post = mnf[post_mask]
+            baseline_idx = max(1, int(len(mdf_post) * 0.1))
+            baseline_MDF = float(np.nanmean(mdf_post[:baseline_idx]))
+            baseline_MNF = float(np.nanmean(mnf_post[:baseline_idx]))
+        else:
+            baseline_idx = max(1, int(len(feats) * 0.1))
+            baseline_MDF = float(np.nanmean(mdf[:baseline_idx]))
+            baseline_MNF = float(np.nanmean(mnf[:baseline_idx]))
+    else:
+        baseline_idx = max(1, int(len(feats) * 0.1))
+        baseline_MDF = float(np.nanmean(mdf[:baseline_idx]))
+        baseline_MNF = float(np.nanmean(mnf[:baseline_idx]))
+
+    final_MDF = float(np.nanmean(mdf[-max(1, int(len(feats) * 0.1)):]))
+    final_MNF = float(np.nanmean(mnf[-max(1, int(len(feats) * 0.1)):]))
 
     MDF_drop_pct = 100.0 * (baseline_MDF - final_MDF) / baseline_MDF if baseline_MDF else np.nan
     MNF_drop_pct = 100.0 * (baseline_MNF - final_MNF) / baseline_MNF if baseline_MNF else np.nan
@@ -906,7 +931,12 @@ def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float,
                            warmup_skip_min: float = 5.0,
                            warmup_skip_swings: int | None = None,
                            baseline_swings: int = 20) -> pd.DataFrame:
-    """Select baseline swings after warm-up skip (time-based default) and optional swing-count skip."""
+    """Select baseline swings after warm-up skip (time-based default) and optional swing-count skip.
+
+    Prefers swings during active (work) periods (in_active==1) when available,
+    falling back to all post-warmup swings if there are not enough active-period swings.
+    This prevents rest-period swings (lower MDF) from contaminating the baseline.
+    """
     if swings is None or len(swings) == 0:
         return swings
     sw = swings.sort_values('t_peak_ms').reset_index(drop=True)
@@ -916,6 +946,11 @@ def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float,
         sw2 = sw
     if warmup_skip_swings is not None and warmup_skip_swings > 0:
         sw2 = sw2.iloc[int(warmup_skip_swings):].reset_index(drop=True)
+    # Prefer active-period swings for baseline; fall back to all if not enough
+    if 'in_active' in sw2.columns:
+        active = sw2[sw2['in_active'] == 1].reset_index(drop=True)
+        if len(active) >= max(3, baseline_swings // 2):
+            sw2 = active
     return sw2.iloc[:int(baseline_swings)].reset_index(drop=True)
 
 
@@ -924,7 +959,7 @@ def compute_baseline_from_swing_features(swing_feats: pd.DataFrame) -> dict:
     base = {}
     if swing_feats is None or len(swing_feats) == 0:
         return base
-    for k in ['mdf','rms','mav','wl','emg_env_mean','emg_iemg']:
+    for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg', 'imu_mean_acc_dyn']:
         if k in swing_feats.columns:
             base[k] = float(np.nanmedian(swing_feats[k].to_numpy(dtype=float)))
     return base
@@ -947,7 +982,13 @@ def compute_baseline_from_windows(win_feats: pd.DataFrame, baseline_window_sec: 
 
 
 def apply_baseline_deltas(df: pd.DataFrame, base: dict, prefix: str = '') -> pd.DataFrame:
-    """Add baseline-relative percentage deltas for MDF drop and RMS increase."""
+    """Add baseline-relative percentage deltas for MDF drop, RMS increase, and acc drop.
+
+    Columns added (when baseline value is available):
+      {prefix}mdf_drop_pct       — positive = fatigue (MDF decreased)
+      {prefix}rms_increase_pct   — positive = higher effort (RMS increased)
+      {prefix}acc_drop_pct       — positive = fatigue/less force (acc_dyn decreased)
+    """
     out = df.copy()
     if not base:
         return out
@@ -955,6 +996,14 @@ def apply_baseline_deltas(df: pd.DataFrame, base: dict, prefix: str = '') -> pd.
         out[prefix + 'mdf_drop_pct'] = (base['mdf'] - out['mdf']) / base['mdf'] * 100.0
     if 'rms' in out.columns and 'rms' in base and base['rms'] not in (0, None) and np.isfinite(base['rms']):
         out[prefix + 'rms_increase_pct'] = (out['rms'] - base['rms']) / base['rms'] * 100.0
+    if ('imu_mean_acc_dyn' in out.columns and 'imu_mean_acc_dyn' in base
+            and base['imu_mean_acc_dyn'] not in (0, None)
+            and np.isfinite(base['imu_mean_acc_dyn'])):
+        # acc_drop_pct > 0 means acc_dyn decreased (less force = fatigue)
+        out[prefix + 'acc_drop_pct'] = (
+            (base['imu_mean_acc_dyn'] - out['imu_mean_acc_dyn'])
+            / base['imu_mean_acc_dyn'] * 100.0
+        )
     return out
 
 
