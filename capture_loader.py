@@ -246,8 +246,8 @@ def load_emg_concat(paths: List[str], usecols: Optional[List[str]] = None) -> pd
 
 def load_imu_concat(paths: List[str],
                     use_physical_units: bool = True,
-                    acc_fsr_default_g: float = 2.0,
-                    gyro_fsr_default_dps: float = 250.0,
+                    acc_fsr_default_g: float = 4.0,    # matches firmware IMU_ACC_FSR_G=4
+                    gyro_fsr_default_dps: float = 1000.0,  # matches firmware IMU_GYRO_FSR_DPS=1000
                     usecols: Optional[List[str]] = None) -> pd.DataFrame:
     """Load and concatenate IMU CSVs, sorted by dev_us.
 
@@ -326,8 +326,8 @@ def _parse_session_datetime(session_id: str):
 def load_session_stitched(
     sessions: Dict[str, 'SessionFiles'],
     use_physical_units: bool = True,
-    acc_fsr_default_g: float = 2.0,
-    gyro_fsr_default_dps: float = 250.0,
+    acc_fsr_default_g: float = 4.0,    # matches firmware IMU_ACC_FSR_G=4
+    gyro_fsr_default_dps: float = 1000.0,  # matches firmware IMU_GYRO_FSR_DPS=1000
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[float], List[str]]:
     """Load all BLE connections in a folder as one stitched tennis session.
 

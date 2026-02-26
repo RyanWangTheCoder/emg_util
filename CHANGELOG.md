@@ -9,6 +9,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-02-25] — IMU FSR raised: gyro 250→1000 dps, acc 2→4 g (anti-saturation)
+
+### Changed (`myoware_imu_v2/myoware_imu_v2.ino`)
+- `IMU_GYRO_FSR_DPS`: 250 → **1000** dps
+  - Tennis swings peak at ~500–1000 dps. FSR=250 saturated on every hard swing,
+    clipping `gx/gy/gz` at ±32767 and making gyro-based swing detection unreliable.
+- `IMU_ACC_FSR_G`: 2 → **4** g
+  - `imu_peak_acc_dyn` was showing median=2.464g (at the 2g ceiling). FSR=4g
+    doubles the range while keeping 12-bit resolution at 0.122 mg/LSB.
+- Both FSR codes are transmitted in every IMU meta frame (`FLAG_IMU_META_V2`),
+  so the Python decoder applies the correct physical-unit scaling automatically.
+  No decoder changes needed when changing these values.
+
+### Changed (fallback defaults — updated to match new firmware)
+- `btCentral.py` lines 493-494: `cur_acc_fsr_g = 2` → `4`, `cur_gyro_fsr_dps = 250` → `1000`
+  - Used when a capture file has no FSR meta (old firmware or missing FLAG_IMU_META_V2).
+- `emg_util/capture_loader.py` `load_imu_concat()` and `load_session_stitched()`:
+  `acc_fsr_default_g=2.0` → `4.0`, `gyro_fsr_default_dps=250.0` → `1000.0`
+- `emg_util/config.yaml`: `acc_fsr_default_g: 2` → `4`, `gyro_fsr_default_dps: 250` → `1000`
+- `emg_util/config_fast.yaml`: same as above
+- `emg_util/tennis_analysis_cloud.ipynb` Cell 5 `CLOUD_CONFIG`:
+  `acc_fsr_default_g: 2` → `4`, `gyro_fsr_default_dps: 250` → `1000`
+
+### Note: Android `btcentral_offline_decode.py` — no change needed
+- The FSR lookup tables (`ACC_FSR_CODE_TO_G`, `GYRO_FSR_CODE_TO_DPS`) are correct
+  (they map all 4 FSR codes). The decoder reads FSR from the frame and writes it to
+  CSV; no hardcoded defaults exist in the Android decoder.
+
+---
+
+## [2026-02-25] — Per-swing IMU accelerometer features + acc_drop_pct fatigue indicator
+
+### Added (`emg_util_yaml_runner.py`)
+- `per_swing_emg_features_stitched()` now accepts optional `imu_df` parameter.
+  When provided, computes per-swing IMU accelerometer features:
+  - `imu_mean_acc_dyn` — mean `|acc_mag - 1g|` within swing window (effort/impact proxy)
+  - `imu_peak_acc_dyn` — peak `|acc_mag - 1g|` within swing window
+  - Note: gyro features omitted — gyro saturates at FSR=250 dps for tennis swings.
+    Increase `gyro_fsr_dps` to 1000+ in firmware to unlock gyro-based features.
+- `_plot_fatigue_trend_stitched()` now adds a 4th subplot (`acc_drop_pct`) when
+  `swing_acc_drop_pct` is present in `swing_features.csv`.
+  - Teal scatter + rolling median trend line
+  - Reference lines: 0% (baseline), +10% (mild), +20% (significant)
+
+### Added (`emg_util.py`)
+- `compute_baseline_from_swing_features()` now includes `imu_mean_acc_dyn` in the
+  baseline dict (median of baseline swings).
+- `apply_baseline_deltas()` now computes `{prefix}acc_drop_pct`:
+  - `acc_drop_pct > 0` means swing force decreased relative to baseline (fatigue signal)
+  - Only added when `imu_mean_acc_dyn` is present in both the DataFrame and baseline dict.
+
+### Changed (`analyze_tennis_session()`)
+- Full mode now passes `imu_df` to `per_swing_emg_features_stitched()`.
+
+### Verified (log0207 session, 71 min, 6 BLE connections)
+- `swing_features.csv`: 653 swings, all new columns present
+  - `imu_mean_acc_dyn`: median=0.869g (not saturated, reliable fatigue signal)
+  - `imu_peak_acc_dyn`: median=2.464g (saturated at 2g FSR — expected)
+  - `swing_acc_drop_pct`: median=+2.4% (slight force decrease over session)
+- `baseline.json`: `imu_mean_acc_dyn=0.8991g` captured in baseline
+- `fatigue_trend.png`: 4-subplot layout (MDF, RMS, MDF drop%, acc drop%)
+
+---
+
 ## [2026-02-25] — `preprocess_emg` single source of truth in `fatigue_monitor.py`
 
 ### Changed (`fatigue_monitor.py`)
