@@ -9,6 +9,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-02-25] — `preprocess_emg` single source of truth in `fatigue_monitor.py`
+
+### Changed (`fatigue_monitor.py`)
+- Renamed `_preprocess_emg` → `preprocess_emg` (public API).
+  - `_preprocess_emg` kept as a private alias for internal use within the module.
+- Updated docstring to document the 50 Hz low cutoff rationale and the public API contract.
+- **`fatigue_monitor.py` is now the single source of truth for the EMG bandpass filter
+  parameters** (50–450 Hz + 60/120 Hz notch). All callers import from here.
+
+### Changed (`emg_util.py`)
+- Removed duplicate `preprocess_emg` function definition (~20 lines).
+- Added `from fatigue_monitor import preprocess_emg` — all callers (`compute()`,
+  `emg_util_yaml_runner.py`, etc.) now use the same filter as `FatigueMonitor.push_swing()`.
+
+### Changed (`emg_util_nopandas.py` — Android)
+- Removed duplicate `preprocess_emg` function definition that still had the **old 20 Hz**
+  low cutoff — it was never updated when `fatigue_monitor.py` was changed to 50 Hz.
+- Added `preprocess_emg` to the existing `from fatigue_monitor import FatigueMonitor, preprocess_emg`.
+
+### Motivation
+Three copies of `preprocess_emg` existed with diverging filter parameters:
+- `fatigue_monitor.py`: 50 Hz (correct, updated)
+- `emg_util.py`: 50 Hz (duplicate, now removed)
+- `emg_util_nopandas.py`: **20 Hz** (stale, now removed)
+
+The Android path was silently using a different filter than the PC path, producing
+inconsistent MDF/RMS features between offline PC analysis and on-device real-time
+monitoring. This is now fixed.
+
+**Maintenance rule:** to change the EMG filter, edit only `emg_util/fatigue_monitor.py`,
+then run:
+```
+copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py
+```
+
+---
+
+## [2026-02-25] — EMG bandpass low cutoff raised from 20 Hz to 50 Hz
+
+### Changed (`fatigue_monitor.py`)
+- `preprocess_emg`: low cutoff raised from **20 Hz → 50 Hz**.
+  - Rationale: MyoWare sensor hardware bandpass is 50–500 Hz. Using 20 Hz in software
+    passes motion artifact (5–20 Hz) that the hardware already rejects, inflating RMS
+    and distorting MDF estimates.
+  - Guard `if high <= 50.0: return y` updated accordingly.
+
+---
+
 ## [2026-02-25] — Extract FatigueMonitor to canonical `fatigue_monitor.py`
 
 ### Added
