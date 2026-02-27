@@ -36,11 +36,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Add py_scripts directory to path for plotter tests
-# Path: emg_util/tests/ -> ../../arduino/py_scripts/
-py_scripts_dir = Path(__file__).parent.parent.parent / "arduino" / "py_scripts"
-if py_scripts_dir.exists() and str(py_scripts_dir.resolve()) not in sys.path:
-    sys.path.insert(0, str(py_scripts_dir.resolve()))
+# sensordata_plotter.py is now in emg_util/ (same as parent directory)
+# No additional path setup needed since parent is already in sys.path
 
 import emg_util as core
 import emg_util_yaml_runner as runner
@@ -550,12 +547,6 @@ class TestPlotterOffline:
     
     def test_plotter_import(self):
         """Test that sensordata_plotter.py can be imported."""
-        # Add py_scripts to path (use absolute path)
-        py_scripts_dir = Path(__file__).parent.parent.parent / "py_scripts"
-        py_scripts_abs = str(py_scripts_dir.resolve())
-        if py_scripts_abs not in sys.path:
-            sys.path.insert(0, py_scripts_abs)
-        
         try:
             import sensordata_plotter
             assert hasattr(sensordata_plotter, 'run_offline')
@@ -565,11 +556,6 @@ class TestPlotterOffline:
     
     def test_butter_lpf_initialization(self):
         """Test ButterLPF filter initialization."""
-        py_scripts_dir = Path(__file__).parent.parent.parent / "py_scripts"
-        py_scripts_abs = str(py_scripts_dir.resolve())
-        if py_scripts_abs not in sys.path:
-            sys.path.insert(0, py_scripts_abs)
-        
         try:
             from sensordata_plotter import ButterLPF
         except ImportError:
@@ -586,11 +572,6 @@ class TestPlotterOffline:
     
     def test_butter_lpf_filtering(self):
         """Test ButterLPF filter operation."""
-        py_scripts_dir = Path(__file__).parent.parent.parent / "py_scripts"
-        py_scripts_abs = str(py_scripts_dir.resolve())
-        if py_scripts_abs not in sys.path:
-            sys.path.insert(0, py_scripts_abs)
-        
         try:
             from sensordata_plotter import ButterLPF
         except ImportError:
@@ -612,11 +593,6 @@ class TestPlotterOffline:
     
     def test_plotter_with_regression_data(self, regression_data):
         """Test plotter can process regression EMG data."""
-        py_scripts_dir = Path(__file__).parent.parent.parent / "py_scripts"
-        py_scripts_abs = str(py_scripts_dir.resolve())
-        if py_scripts_abs not in sys.path:
-            sys.path.insert(0, py_scripts_abs)
-        
         try:
             from sensordata_plotter import ButterLPF
         except ImportError:
@@ -667,14 +643,6 @@ class TestPlotterOffline:
     
     def test_plotter_fatigue_integration(self, regression_data):
         """Test plotter's fatigue monitoring integration."""
-        py_scripts_dir = Path(__file__).parent.parent.parent / "py_scripts"
-        sys.path.insert(0, str(py_scripts_dir))
-        
-        # Test that fatigue_monitor can be imported from emg_util
-        emg_util_dir = Path(__file__).parent.parent
-        if str(emg_util_dir) not in sys.path:
-            sys.path.insert(0, str(emg_util_dir))
-        
         try:
             from fatigue_monitor import FatigueMonitor
             
