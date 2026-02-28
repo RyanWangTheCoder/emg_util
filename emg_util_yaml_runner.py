@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""emg_util_yaml_runner.py
+"""an.py
 
 YAML-driven EMG+IMU analysis runner for the NEW btCentral.py capture format.
 
