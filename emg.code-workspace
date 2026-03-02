@@ -3,8 +3,8 @@
     { "name": "data capture", "path": "../arduino/py_scripts" },
     { "name": "data analysis", "path": "./" },
     { "name": "arduino", "path": "../arduino/myoware_imu_v2" },
-    { "name": "Android Ble", "path": "../btLeApp/FastBleLib/src" },
-    { "name": "Android app", "path": "../btLeApp/app/src" }
+    { "name": "Android bleApp", "path": "../btLeApp/FastBleLib" },
+    { "name": "Athelet app", "path": "../btLeApp/app" }
   ],
   "settings": {
     "window.openFilesInNewWindow": "off",

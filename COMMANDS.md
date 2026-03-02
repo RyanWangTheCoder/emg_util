@@ -119,18 +119,33 @@ python emg_util_yaml_runner.py --config config.yaml --log-dir path\to\logs --out
 Analyze previously captured data files:
 
 ```bash
-# Basic offline analysis
+# Basic offline analysis (EMG only)
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000
 
 # Saturation check with custom Y-axis range
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095 --max-points 100000
 
-# With IMU data overlay
+# With IMU data overlay (EMG + IMU on one figure)
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --imu-file imu_log_20260131_235524_20260131_235538_000
+
+# IMU-only plot (from an IMU CSV file; pass the name without the .csv extension)
+python sensordata_plotter.py --mode offline --imu-file imu_log_20260131_235524_20260131_235538_000
 
 # Custom sample rates
 python sensordata_plotter.py --mode offline --emg-file mydata --emg-sr 2000 --imu-sr 200
 ```
+
+**How to interpret the IMU figure (offline IMU-only or IMU overlay):**
+
+- **Top plot: Acceleration (g)**
+  - `ax`, `ay`, `az`: 3-axis accelerometer channels in units of g.
+  - `acc_mag`: total acceleration magnitude (sqrt(ax² + ay² + az²)).
+  - Typical behavior: `acc_mag` should sit near **1.0 g** when stationary (gravity), with spikes/variation indicating motion.
+
+- **Bottom plot: Rotation (dps)**
+  - `gx`, `gy`, `gz`: 3-axis gyroscope channels in degrees/second (dps).
+  - `gyro_mag`: total rotation magnitude (sqrt(gx² + gy² + gz²)).
+  - Typical behavior: near-zero when stationary; sharp peaks correspond to fast rotations (e.g., swings/reps). These peaks are what the analysis uses for swing detection.
 
 **Common Options:**
 - `--mode offline`: Enable offline analysis mode

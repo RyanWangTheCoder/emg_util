@@ -9,6 +9,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-02] — Fix: plotter stuck after BLE reconnect (`sensordata_plotter.py`)
+
+### Fixed (`sensordata_plotter.py`)
+- **Plot frozen/stuck after BLE disconnect + reconnect.**
+  - **Root cause**: when `btCentral.py` reconnects it sends a new `emg_meta` packet
+    with `seg=0`. The device's `dev_us` hardware timer resets to 0 on reconnect.
+    The old code only reset the `FatigueMonitor` on `seg=0`, but left `t0_dev_us`
+    pointing at the old (large) timestamp from the previous session.
+    Every new `dev_us` value was therefore a large negative number relative to
+    `t0_dev_us`, so `prune()` immediately discarded every incoming sample and the
+    rolling-window plot appeared frozen.
+  - **Fix** (inside the `emg_meta` / `seg=0` handler in `update()`):
+    - `t0_dev_us = None` — forces re-anchor to the first new packet's timestamp.
+    - `raw_buf`, `env_dev_buf`, `env_lpf_buf`, `imu_buf` cleared — removes stale
+      pre-disconnect data so the rolling window starts fresh.
+    - `recent_raw_dev_us` cleared — prevents sr-inference from mixing old/new timestamps.
+    - `env_filter` re-created (if `emg_sr_hz` is known) — clears IIR state so the
+      LPF does not carry stale history into the new session.
+    - `in_peak` and `peak_gyro_mag` reset — fixes a pre-existing minor bug where a
+      peak in progress at disconnect time would leave `in_peak=True` indefinitely.
+  - **No behaviour change for normal operation**: the guard `meta_seg == 0 and
+    t0_dev_us is not None` is identical to the original; first connection
+    (`t0_dev_us is None`) and segment rotations (`seg ≥ 1`) are unaffected.
+    `swing_count`, `fatigue_result`, and `last_vitals` are intentionally NOT reset
+    (session-level state that should survive a BLE reconnect).
+
+---
+
 ## [2026-02-25] — IMU FSR raised: gyro 250→1000 dps, acc 2→4 g (anti-saturation)
 
 ### Changed (`myoware_imu_v2/myoware_imu_v2.ino`)
