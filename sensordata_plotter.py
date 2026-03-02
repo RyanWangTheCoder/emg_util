@@ -266,36 +266,74 @@ def run_live(args: argparse.Namespace) -> None:
         fat_thread.start()
 
     # -----------------------------------------------------------------------
-    # Figure layout: 2 subplots normally, 3 with fatigue
-    # ax_emg and ax_imu share x-axis (rolling time window)
-    # ax_fat has independent x-axis (swing index)
+    # Figure layout:
+    #   Without fatigue: 3 rows  (raw, env_compare, imu)
+    #   With fatigue:    4 rows  (raw, env_compare, imu, fat)
+    #
+    # ax_raw, ax_env, ax_imu share x-axis (rolling time window).
+    # ax_fat has independent x-axis (swing index).
+    #
+    # ENV comparison subplot (ax_env):
+    #   - Orange solid  : ENV_hw  — MyoWare hardware analog envelope (quality/validity indicator)
+    #   - Green dashed  : ENV_sw  — abs(RAW) → Butterworth LPF (software computed, same concept)
+    #   - Red dotted    : saturation threshold (4000 counts)
+    #   - Gray dotted   : dead-signal threshold (50 counts)
     # -----------------------------------------------------------------------
     if fatigue_enabled:
-        fig = plt.figure(figsize=(12, 11))
-        ax_emg = fig.add_subplot(3, 1, 1)
-        ax_imu = fig.add_subplot(3, 1, 2, sharex=ax_emg)
-        ax_fat = fig.add_subplot(3, 1, 3)   # independent x-axis: swing #
+        fig = plt.figure(figsize=(12, 14))
+        gs = fig.add_gridspec(4, 1, hspace=0.50)
+        ax_raw = fig.add_subplot(gs[0])
+        ax_env = fig.add_subplot(gs[1], sharex=ax_raw)
+        ax_imu = fig.add_subplot(gs[2], sharex=ax_raw)
+        ax_fat = fig.add_subplot(gs[3])   # independent x-axis: swing #
     else:
-        fig, (ax_emg, ax_imu) = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+        fig = plt.figure(figsize=(11, 10))
+        gs = fig.add_gridspec(3, 1, hspace=0.50)
+        ax_raw = fig.add_subplot(gs[0])
+        ax_env = fig.add_subplot(gs[1], sharex=ax_raw)
+        ax_imu = fig.add_subplot(gs[2], sharex=ax_raw)
         ax_fat = None
 
-    # EMG subplot
-    (ln_raw,)     = ax_emg.plot([], [], lw=0.8, label='RAW')
-    (ln_env_dev,) = ax_emg.plot([], [], lw=1.2, label='ENV_device')
-    (ln_env_lpf,) = ax_emg.plot([], [], lw=1.4, label='ENV_lpf(abs(RAW))')
+    ax_emg = ax_raw  # backward-compat alias (title_text / status still reference ax_emg)
 
-    title_text = ax_emg.set_title('Realtime monitoring (dev_us timebase)')
-    ax_emg.set_ylabel('ADC (counts)')
-    ax_emg.set_ylim(0, float(args.emg_ymax))
-    ax_emg.grid(True, alpha=0.3)
-    ax_emg.legend(loc='upper right', fontsize=8)
+    # --- RAW EMG subplot ---
+    (ln_raw,) = ax_raw.plot([], [], lw=0.8, color='steelblue', label='RAW')
+    title_text = ax_raw.set_title('Realtime monitoring (dev_us timebase)')
+    ax_raw.set_ylabel('ADC (counts)')
+    ax_raw.set_ylim(0, float(args.emg_ymax))
+    ax_raw.grid(True, alpha=0.3)
+    ax_raw.legend(loc='upper right', fontsize=8)
 
-    # Fatigue text annotation (bottom-left of EMG plot)
+    # --- ENV comparison subplot ---
+    (ln_env_dev,) = ax_env.plot([], [], lw=1.4, color='tab:orange',
+                                label='ENV_hw  (MyoWare hardware analog envelope)')
+    (ln_env_lpf,) = ax_env.plot([], [], lw=1.4, color='tab:green', ls='--',
+                                label='ENV_sw  (abs(RAW) → Butterworth LPF)')
+    # Quality threshold reference lines
+    _sat_thr  = 4000.0 * float(args.emg_ymax) / 4095.0
+    _dead_thr =   50.0 * float(args.emg_ymax) / 4095.0
+    ax_env.axhline(_sat_thr,  color='red',        ls=':', lw=1.2, alpha=0.75,
+                   label='Saturation  (>4000 = clipped)')
+    ax_env.axhline(_dead_thr, color='dimgray',    ls=':', lw=1.2, alpha=0.75,
+                   label='Dead signal (<50  = no contact)')
+    ax_env.set_ylabel('ADC (counts)')
+    ax_env.set_ylim(0, float(args.emg_ymax))
+    ax_env.set_title('ENV comparison — HW (MyoWare) vs SW (abs(RAW)→LPF)  |  quality/validity check')
+    ax_env.grid(True, alpha=0.3)
+    ax_env.legend(loc='upper right', fontsize=7, ncol=2)
+    # Quality status annotation (top-left of ENV subplot)
+    env_quality_ann = ax_env.text(
+        0.01, 0.97, 'Quality: --',
+        transform=ax_env.transAxes, va='top', fontsize=9, fontfamily='monospace',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow', alpha=0.88, edgecolor='gray'),
+    )
+
+    # Fatigue text annotation (bottom-left of RAW plot)
     if fatigue_enabled:
-        fatigue_ann = ax_emg.text(
+        fatigue_ann = ax_raw.text(
             0.01, 0.04,
             'Fatigue: waiting for first swing...',
-            transform=ax_emg.transAxes,
+            transform=ax_raw.transAxes,
             va='bottom', fontsize=9, fontfamily='monospace',
             bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow',
                       alpha=0.88, edgecolor='gray'),
@@ -303,7 +341,7 @@ def run_live(args: argparse.Namespace) -> None:
     else:
         fatigue_ann = None
 
-    # IMU subplot
+    # --- IMU subplot ---
     (ln_imu,) = ax_imu.plot([], [], lw=1.2, label='acc_mag (g)')
     ax_imu.set_ylabel('g')
     if not fatigue_enabled:
@@ -529,6 +567,25 @@ def run_live(args: argparse.Namespace) -> None:
             xs = np.array([p[0] for p in env_dev_buf], dtype=float)
             ys = np.array([p[1] for p in env_dev_buf], dtype=float)
             ln_env_dev.set_data(xs, ys)
+            # --- Quality / validity check on HW ENV ---
+            recent = ys[-min(100, len(ys)):]   # last ~50 ms at 2 kHz
+            env_hw_max  = float(np.max(recent))
+            env_hw_mean = float(np.mean(recent))
+            if env_hw_max > 4000:
+                q_txt   = f'Quality: SATURATED  HW_ENV max={env_hw_max:.0f} > 4000  (gain too high / electrode short)'
+                q_color = 'red'
+                q_bg    = 'mistyrose'
+            elif env_hw_mean < 50:
+                q_txt   = f'Quality: DEAD SIGNAL  HW_ENV mean={env_hw_mean:.0f} < 50  (electrode off / no contact)'
+                q_color = 'dimgray'
+                q_bg    = 'lightgray'
+            else:
+                q_txt   = f'Quality: OK  HW_ENV mean={env_hw_mean:.0f}  max={env_hw_max:.0f}'
+                q_color = 'darkgreen'
+                q_bg    = 'honeydew'
+            env_quality_ann.set_text(q_txt)
+            env_quality_ann.set_color(q_color)
+            env_quality_ann.get_bbox_patch().set_facecolor(q_bg)
         if env_lpf_buf:
             xs = np.array([p[0] for p in env_lpf_buf], dtype=float)
             ys = np.array([p[1] for p in env_lpf_buf], dtype=float)
@@ -684,7 +741,7 @@ def run_live(args: argparse.Namespace) -> None:
                     ax_fat.set_ylim(lo, hi)
 
         # Collect artists for return (blit=False so not strictly needed, but good practice)
-        artists = [ln_raw, ln_env_dev, ln_env_lpf, ln_imu, status]
+        artists = [ln_raw, ln_env_dev, ln_env_lpf, ln_imu, status, env_quality_ann]
         if fatigue_ann is not None:
             artists.append(fatigue_ann)
         if ln_mdf_scatter is not None:
@@ -733,16 +790,52 @@ def run_offline(args: argparse.Namespace) -> None:
         env_filter = ButterLPF(fs_hz=float(args.sr_hz), cutoff_hz=float(args.cutoff_hz))
         env_lpf = np.array([env_filter.update(abs(x)) for x in raw], dtype=float)
 
-        fig, ax = plt.subplots(1, 1, figsize=(11, 5))
-        ax.plot(xs, raw,     lw=0.8, label='RAW')
-        ax.plot(xs, env,     lw=1.0, label='ENV_device')
-        ax.plot(xs, env_lpf, lw=1.2, label='ENV_lpf(abs(RAW))')
-        ax.set_title(f'Offline EMG: {args.emg_file}')
-        ax.set_xlabel('Time (s) (host_rx_ms)')
-        ax.set_ylabel('ADC (counts)')
-        ax.set_ylim(0, float(args.emg_ymax))
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right')
+        # --- Quality metrics (whole-file) ---
+        env_fin = env[np.isfinite(env)]
+        env_hw_max  = float(np.nanmax(env_fin))  if len(env_fin) else 0.0
+        env_hw_mean = float(np.nanmean(env_fin)) if len(env_fin) else 0.0
+        sat_pct  = float(np.mean(env > 4000) * 100.0)
+        dead_pct = float(np.mean(env < 50)   * 100.0)
+        if sat_pct > 5.0:
+            quality_str   = f'SATURATED  ({sat_pct:.1f}% samples > 4000 — gain too high / electrode short)'
+            quality_color = 'red'
+        elif dead_pct > 50.0:
+            quality_str   = f'DEAD SIGNAL  ({dead_pct:.1f}% samples < 50 — electrode off / no contact)'
+            quality_color = 'dimgray'
+        else:
+            quality_str   = f'OK  mean={env_hw_mean:.0f}  max={env_hw_max:.0f}  sat={sat_pct:.1f}%'
+            quality_color = 'darkgreen'
+
+        fig, (ax_r, ax_e) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+
+        # RAW subplot
+        ax_r.plot(xs, raw, lw=0.8, color='steelblue', label='RAW')
+        ax_r.set_title(f'Offline EMG — {os.path.basename(args.emg_file)}')
+        ax_r.set_ylabel('ADC (counts)')
+        ax_r.set_ylim(0, float(args.emg_ymax))
+        ax_r.grid(True, alpha=0.3)
+        ax_r.legend(loc='upper right')
+
+        # ENV comparison subplot
+        ax_e.plot(xs, env,     lw=1.2, color='tab:orange',
+                  label='ENV_hw  (MyoWare hardware analog envelope)')
+        ax_e.plot(xs, env_lpf, lw=1.2, color='tab:green', ls='--',
+                  label='ENV_sw  (abs(RAW) → Butterworth LPF)')
+        ax_e.axhline(4000, color='red',     ls=':', lw=1.2, alpha=0.75,
+                     label='Saturation  (>4000)')
+        ax_e.axhline(50,   color='dimgray', ls=':', lw=1.2, alpha=0.75,
+                     label='Dead signal (<50)')
+        ax_e.set_title(
+            f'ENV comparison — HW (MyoWare) vs SW (abs(RAW)→LPF)\n'
+            f'Quality: {quality_str}',
+            color=quality_color,
+        )
+        ax_e.set_xlabel('Time (s) (host_rx_ms)')
+        ax_e.set_ylabel('ADC (counts)')
+        ax_e.set_ylim(0, float(args.emg_ymax))
+        ax_e.grid(True, alpha=0.3)
+        ax_e.legend(loc='upper right', fontsize=8, ncol=2)
+
         plt.tight_layout()
         plt.show()
 
