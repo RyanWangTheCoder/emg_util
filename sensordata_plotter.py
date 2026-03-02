@@ -93,6 +93,7 @@ def parse_args() -> argparse.Namespace:
 
     # Offline
     ap.add_argument('--emg-file', default=None)
+    ap.add_argument('--imu-file', default=None)
     ap.add_argument('--max-points', type=int, default=400000)
     ap.add_argument('--sr-hz', type=float, default=2000.0)
 
@@ -390,14 +391,30 @@ def run_live(args: argparse.Namespace) -> None:
                             monitor.set_fs(sr)
                             print(f'[Fatigue] Updated fs={sr:.0f} Hz')
                         print(f'[Plotter] EMG meta: sr_hz={emg_sr_hz:.1f} ch={emg_ch}')
-                # Reset fatigue monitor on new BLE session (seg=0 after data already seen)
+                # Reset on new BLE session (seg=0 after data already seen).
                 # seg=0 means btCentral just started a new BLE connection / CSV rotation 0.
-                if (fatigue_enabled and monitor is not None
-                        and meta_seg == 0 and t0_dev_us is not None):
-                    monitor.reset()
-                    emg_fatigue_buf.clear()
-                    last_imu_trigger_t[0] = -999.0
-                    print('[Fatigue] New BLE session (seg=0) — monitor reset')
+                # The device timer resets to 0 on reconnect, so t0_dev_us and all rolling
+                # buffers must be cleared; otherwise new dev_us values are negative relative
+                # to the old t0_dev_us and prune() discards every incoming sample immediately,
+                # causing the plot to appear frozen/stuck.
+                if meta_seg == 0 and t0_dev_us is not None:
+                    print('[Plotter] New BLE session (seg=0) — resetting timebase and buffers')
+                    t0_dev_us = None
+                    raw_buf.clear()
+                    env_dev_buf.clear()
+                    env_lpf_buf.clear()
+                    imu_buf.clear()
+                    recent_raw_dev_us.clear()
+                    # Also reset the LPF so it doesn't carry stale state into the new session
+                    if emg_sr_hz is not None:
+                        env_filter = ButterLPF(fs_hz=emg_sr_hz, cutoff_hz=float(args.cutoff_hz))
+                    if fatigue_enabled and monitor is not None:
+                        monitor.reset()
+                        emg_fatigue_buf.clear()
+                        last_imu_trigger_t[0] = -999.0
+                        in_peak[0] = False
+                        peak_gyro_mag[0] = 0.0
+                        print('[Fatigue] New BLE session (seg=0) — monitor reset')
                 continue
 
             if k == 'vitals':
@@ -535,11 +552,21 @@ def run_live(args: argparse.Namespace) -> None:
         # --- Title: vitals + swing count ---
         if last_vitals:
             parts = []
-            if last_vitals.get('pct') is not None:
-                batt_str = f"BATTERY: {last_vitals['pct']}%"
-                if last_vitals.get('v') is not None:
-                    batt_str += f" ({last_vitals['v']:.2f}V)"
+
+            batt_pct = last_vitals.get('pct')
+            batt_v = last_vitals.get('v')
+            if batt_pct is not None:
+                batt_str = f"BATTERY: {int(batt_pct)}%"
+                if batt_v is not None:
+                    try:
+                        batt_str += f" ({float(batt_v):.2f}V)"
+                    except Exception:
+                        pass
                 parts.append(batt_str)
+            else:
+                # ESP32 firmware may not report battery; keep plotter alive.
+                parts.append("BATTERY: N/A")
+
             if last_vitals.get('spo2') is not None:
                 parts.append(f"SpO2: {last_vitals['spo2']}%")
             if last_vitals.get('hr') is not None:
@@ -547,11 +574,25 @@ def run_live(args: argparse.Namespace) -> None:
             # Add swing count
             if fatigue_enabled and swing_count[0] > 0:
                 parts.append(f"SWINGS: {swing_count[0]}")
+
             title_text.set_text('Realtime Monitoring | ' + ' | '.join(parts))
-            batt_pct = last_vitals.get('pct', 100)
-            batt_color = 'red' if batt_pct < 20 else ('orange' if batt_pct < 50 else 'green')
-            title_text.set_color(batt_color)
-            title_text.set_fontweight('bold')
+
+            # Only color-code if batt_pct is known
+            if batt_pct is None:
+                title_text.set_color('black')
+                title_text.set_fontweight('normal')
+            else:
+                try:
+                    batt_pct_i = int(batt_pct)
+                except Exception:
+                    batt_pct_i = None
+                if batt_pct_i is None:
+                    title_text.set_color('black')
+                    title_text.set_fontweight('normal')
+                else:
+                    batt_color = 'red' if batt_pct_i < 20 else ('orange' if batt_pct_i < 50 else 'green')
+                    title_text.set_color(batt_color)
+                    title_text.set_fontweight('bold')
         else:
             # Show swing count even without vitals
             swing_str = f" | SWINGS: {swing_count[0]}" if (fatigue_enabled and swing_count[0] > 0) else ""
@@ -657,52 +698,137 @@ def run_live(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Offline mode (unchanged)
+# Offline mode
 # ---------------------------------------------------------------------------
 
 def run_offline(args: argparse.Namespace) -> None:
-    if not args.emg_file:
-        raise SystemExit('Offline mode requires --emg-file')
+    if not args.emg_file and not args.imu_file:
+        raise SystemExit('Offline mode requires --emg-file or --imu-file')
 
-    t_ms, raw, env = [], [], []
-    with open(args.emg_file, 'r', encoding='utf-8') as f:
-        r = csv.DictReader(f)
-        for row in r:
-            try:
-                t  = int(row.get('host_rx_ms', '0'))
-                rw = float(row.get('raw', 'nan'))
-                ev = float(row.get('env', 'nan'))
-            except Exception:
-                continue
-            t_ms.append(t)
-            raw.append(rw)
-            env.append(ev)
-            if len(t_ms) >= int(args.max_points):
-                break
+    if args.emg_file:
+        t_ms, raw, env = [], [], []
+        with open(args.emg_file, 'r', encoding='utf-8') as f:
+            r = csv.DictReader(f)
+            for row in r:
+                try:
+                    t  = int(row.get('host_rx_ms', '0'))
+                    rw = float(row.get('raw', 'nan'))
+                    ev = float(row.get('env', 'nan'))
+                except Exception:
+                    continue
+                t_ms.append(t)
+                raw.append(rw)
+                env.append(ev)
+                if len(t_ms) >= int(args.max_points):
+                    break
 
-    if not t_ms:
-        raise SystemExit('No data read from EMG file')
+        if not t_ms:
+            raise SystemExit('No data read from EMG file')
 
-    t0 = t_ms[0]
-    xs  = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
-    raw = np.array(raw, dtype=float)
-    env = np.array(env, dtype=float)
+        t0 = t_ms[0]
+        xs  = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
+        raw = np.array(raw, dtype=float)
+        env = np.array(env, dtype=float)
 
-    env_filter = ButterLPF(fs_hz=float(args.sr_hz), cutoff_hz=float(args.cutoff_hz))
-    env_lpf = np.array([env_filter.update(abs(x)) for x in raw], dtype=float)
+        env_filter = ButterLPF(fs_hz=float(args.sr_hz), cutoff_hz=float(args.cutoff_hz))
+        env_lpf = np.array([env_filter.update(abs(x)) for x in raw], dtype=float)
 
-    fig, ax = plt.subplots(1, 1, figsize=(11, 5))
-    ax.plot(xs, raw,     lw=0.8, label='RAW')
-    ax.plot(xs, env,     lw=1.0, label='ENV_device')
-    ax.plot(xs, env_lpf, lw=1.2, label='ENV_lpf(abs(RAW))')
-    ax.set_title(f'Offline EMG: {args.emg_file}')
-    ax.set_xlabel('Time (s) (host_rx_ms)')
-    ax.set_ylabel('ADC (counts)')
-    ax.set_ylim(0, float(args.emg_ymax))
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='upper right')
-    plt.tight_layout()
-    plt.show()
+        fig, ax = plt.subplots(1, 1, figsize=(11, 5))
+        ax.plot(xs, raw,     lw=0.8, label='RAW')
+        ax.plot(xs, env,     lw=1.0, label='ENV_device')
+        ax.plot(xs, env_lpf, lw=1.2, label='ENV_lpf(abs(RAW))')
+        ax.set_title(f'Offline EMG: {args.emg_file}')
+        ax.set_xlabel('Time (s) (host_rx_ms)')
+        ax.set_ylabel('ADC (counts)')
+        ax.set_ylim(0, float(args.emg_ymax))
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='upper right')
+        plt.tight_layout()
+        plt.show()
+
+    if args.imu_file:
+        t_ms, ax_vals, ay_vals, az_vals, gx_vals, gy_vals, gz_vals = [], [], [], [], [], [], []
+        # Fallback FSR values if missing from CSV
+        acc_fsr_g = 4
+        gyro_fsr_dps = 1000
+        
+        with open(args.imu_file, 'r', encoding='utf-8') as f:
+            r = csv.DictReader(f)
+            for row in r:
+                try:
+                    t  = int(row.get('host_rx_ms', '0'))
+                    
+                    # Read FSR metadata if available in CSV row
+                    if 'acc_fsr_g' in row and row['acc_fsr_g']:
+                        acc_fsr_g = int(row['acc_fsr_g'])
+                    if 'gyro_fsr_dps' in row and row['gyro_fsr_dps']:
+                        gyro_fsr_dps = int(row['gyro_fsr_dps'])
+                        
+                    ax = float(row.get('ax', 'nan'))
+                    ay = float(row.get('ay', 'nan'))
+                    az = float(row.get('az', 'nan'))
+                    gx = float(row.get('gx', 'nan'))
+                    gy = float(row.get('gy', 'nan'))
+                    gz = float(row.get('gz', 'nan'))
+                except Exception:
+                    continue
+                t_ms.append(t)
+                ax_vals.append(ax)
+                ay_vals.append(ay)
+                az_vals.append(az)
+                gx_vals.append(gx)
+                gy_vals.append(gy)
+                gz_vals.append(gz)
+                if len(t_ms) >= int(args.max_points):
+                    break
+
+        if not t_ms:
+            raise SystemExit('No data read from IMU file')
+
+        # Convert raw LSB to physical units
+        acc_map = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
+        gyr_map = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
+        acc_lsb_per_g = acc_map.get(acc_fsr_g, 16384.0)
+        gyro_lsb_per_dps = gyr_map.get(gyro_fsr_dps, 131.0)
+
+        t0 = t_ms[0]
+        xs = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
+        
+        # Calculate magnitudes in physical units
+        ax_g = np.array(ax_vals, dtype=float) / acc_lsb_per_g
+        ay_g = np.array(ay_vals, dtype=float) / acc_lsb_per_g
+        az_g = np.array(az_vals, dtype=float) / acc_lsb_per_g
+        amag = np.sqrt(ax_g**2 + ay_g**2 + az_g**2)
+        
+        gx_dps = np.array(gx_vals, dtype=float) / gyro_lsb_per_dps
+        gy_dps = np.array(gy_vals, dtype=float) / gyro_lsb_per_dps
+        gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
+        gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+        
+        # Accel plot
+        ax1.plot(xs, amag, lw=1.2, color='black', label='acc_mag')
+        ax1.plot(xs, ax_g, lw=0.8, alpha=0.6, label='ax')
+        ax1.plot(xs, ay_g, lw=0.8, alpha=0.6, label='ay')
+        ax1.plot(xs, az_g, lw=0.8, alpha=0.6, label='az')
+        ax1.set_title(f'Offline IMU: {args.imu_file}\nFSR: {acc_fsr_g}g, {gyro_fsr_dps}dps')
+        ax1.set_ylabel('Acceleration (g)')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='upper right', ncol=4)
+        
+        # Gyro plot
+        ax2.plot(xs, gmag, lw=1.2, color='black', label='gyro_mag')
+        ax2.plot(xs, gx_dps, lw=0.8, alpha=0.6, label='gx')
+        ax2.plot(xs, gy_dps, lw=0.8, alpha=0.6, label='gy')
+        ax2.plot(xs, gz_dps, lw=0.8, alpha=0.6, label='gz')
+        ax2.set_xlabel('Time (s) (host_rx_ms)')
+        ax2.set_ylabel('Rotation (dps)')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='upper right', ncol=4)
+        
+        plt.tight_layout()
+        plt.show()
 
 
 # ---------------------------------------------------------------------------
