@@ -82,6 +82,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--fps', type=float, default=30.0)
 
     ap.add_argument('--emg-ymax', type=float, default=4095.0)
+    ap.add_argument('--raw-zoom', action='store_true',
+                    help='Enable dynamic Y-axis zoom for RAW plot (live mode) or +/-500 zoom (offline mode)')
     ap.add_argument('--cutoff-hz', type=float, default=3.6)
 
     # Meta inference
@@ -280,14 +282,14 @@ def run_live(args: argparse.Namespace) -> None:
     #   - Gray dotted   : dead-signal threshold (50 counts)
     # -----------------------------------------------------------------------
     if fatigue_enabled:
-        fig = plt.figure(figsize=(12, 14))
+        fig = plt.figure(figsize=(12, 14), layout='constrained')
         gs = fig.add_gridspec(4, 1, hspace=0.50)
         ax_raw = fig.add_subplot(gs[0])
         ax_env = fig.add_subplot(gs[1], sharex=ax_raw)
         ax_imu = fig.add_subplot(gs[2], sharex=ax_raw)
         ax_fat = fig.add_subplot(gs[3])   # independent x-axis: swing #
     else:
-        fig = plt.figure(figsize=(11, 10))
+        fig = plt.figure(figsize=(11, 10), layout='constrained')
         gs = fig.add_gridspec(3, 1, hspace=0.50)
         ax_raw = fig.add_subplot(gs[0])
         ax_env = fig.add_subplot(gs[1], sharex=ax_raw)
@@ -300,7 +302,10 @@ def run_live(args: argparse.Namespace) -> None:
     (ln_raw,) = ax_raw.plot([], [], lw=0.8, color='steelblue', label='RAW')
     title_text = ax_raw.set_title('Realtime monitoring (dev_us timebase)')
     ax_raw.set_ylabel('ADC (counts)')
-    ax_raw.set_ylim(0, float(args.emg_ymax))
+    if args.raw_zoom:
+        ax_raw.set_ylim((float(args.emg_ymax) / 2.0) - 500.0, (float(args.emg_ymax) / 2.0) + 500.0)
+    else:
+        ax_raw.set_ylim(0, float(args.emg_ymax))
     ax_raw.grid(True, alpha=0.3)
     ax_raw.legend(loc='upper right', fontsize=8)
 
@@ -563,6 +568,15 @@ def run_live(args: argparse.Namespace) -> None:
             xs = np.array([p[0] for p in raw_buf], dtype=float)
             ys = np.array([p[1] for p in raw_buf], dtype=float)
             ln_raw.set_data(xs, ys)
+            
+            if args.raw_zoom:
+                lo, hi = float(np.min(ys)), float(np.max(ys))
+                if hi - lo < 200.0:  # Prevent zooming in too tight on baseline noise
+                    mid = (hi + lo) / 2.0
+                    lo, hi = mid - 100.0, mid + 100.0
+                pad = 0.1 * (hi - lo)
+                ax_raw.set_ylim(max(0.0, lo - pad), min(float(args.emg_ymax), hi + pad))
+                
         if env_dev_buf:
             xs = np.array([p[0] for p in env_dev_buf], dtype=float)
             ys = np.array([p[1] for p in env_dev_buf], dtype=float)
@@ -596,15 +610,17 @@ def run_live(args: argparse.Namespace) -> None:
             xs = np.array([p[0] for p in imu_buf], dtype=float)
             ys = np.array([p[1] for p in imu_buf], dtype=float)
             ln_imu.set_data(xs, ys)
-            lo, hi = float(np.min(ys)), float(np.max(ys))
-            if hi <= lo:
-                hi = lo + 0.1
-            pad = 0.1 * (hi - lo)
-            ax_imu.set_ylim(lo - pad, hi + pad)
+            # Fixed absolute scale (0 to 4g minimum) to preserve intensity context,
+            # but allows expanding upward if the swing exceeds 4g.
+            hi = max(4.0, float(np.max(ys)))
+            ax_imu.set_ylim(0, hi * 1.05)
 
-        # Shared x-axis for EMG + IMU (rolling window)
-        xlim_lo = max(0.0, now_t - max(emg_win, imu_win))
-        ax_imu.set_xlim(xlim_lo, now_t)   # propagates to ax_emg via sharex
+                # Shared x-axis for EMG + IMU (rolling window)
+        # Guard against now_t == 0.0 (no data yet) which would produce identical
+        # low/high xlims and trigger a matplotlib "singular transformation" warning.
+        if now_t > 0.0:
+            xlim_lo = max(0.0, now_t - max(emg_win, imu_win))
+            ax_imu.set_xlim(xlim_lo, now_t)   # propagates to ax_emg via sharex
 
         # --- Title: vitals + swing count ---
         if last_vitals:
@@ -750,7 +766,6 @@ def run_live(args: argparse.Namespace) -> None:
 
     interval_ms = max(10, int(1000.0 / float(args.fps)))
     _ani = FuncAnimation(fig, update, interval=interval_ms, blit=False, cache_frame_data=False)
-    plt.tight_layout()
     plt.show()
 
 
@@ -812,7 +827,10 @@ def run_offline(args: argparse.Namespace) -> None:
         ax_r.plot(xs, raw, lw=0.8, color='steelblue', label='RAW')
         ax_r.set_title(f'Offline EMG — {os.path.basename(args.emg_file)}')
         ax_r.set_ylabel('ADC (counts)')
-        ax_r.set_ylim(0, float(args.emg_ymax))
+        if args.raw_zoom:
+            ax_r.set_ylim((float(args.emg_ymax) / 2.0) - 500.0, (float(args.emg_ymax) / 2.0) + 500.0)
+        else:
+            ax_r.set_ylim(0, float(args.emg_ymax))
         ax_r.grid(True, alpha=0.3)
         ax_r.legend(loc='upper right')
 

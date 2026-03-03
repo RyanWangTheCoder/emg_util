@@ -57,6 +57,9 @@ Visualize EMG and IMU data in real-time during capture:
 # Basic live mode with auto sample rate detection
 python sensordata_plotter.py --mode live --infer-sr
 
+# Live mode with dynamic RAW signal zoom (highly recommended for resting noise inspection)
+python sensordata_plotter.py --mode live --infer-sr --raw-zoom
+
 # Live mode with fatigue monitoring
 python sensordata_plotter.py --mode live --fatigue --imu-thr-dps 150 --fatigue-warmup-min 0
 
@@ -70,6 +73,7 @@ python sensordata_plotter.py --mode live --udp-port 5005
 **Common Options:**
 - `--mode live`: Enable real-time visualization
 - `--infer-sr`: Auto-detect sample rate from incoming data
+- `--raw-zoom`: Enable dynamic Y-axis zooming for the RAW signal plot
 - `--fatigue`: Enable fatigue monitoring
 - `--imu-thr-dps`: IMU threshold in degrees/second for swing detection (default: 150)
 - `--fatigue-warmup-min`: Warmup period in minutes before fatigue tracking (default: 0)
@@ -122,6 +126,9 @@ Analyze previously captured data files:
 # Basic offline analysis (EMG only)
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000
 
+# Offline analysis with RAW signal zoomed in (+/- 500 counts from DC bias)
+python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --raw-zoom
+
 # Saturation check with custom Y-axis range
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095 --max-points 100000
 
@@ -152,6 +159,7 @@ python sensordata_plotter.py --mode offline --emg-file mydata --emg-sr 2000 --im
 - `--emg-file`: EMG CSV file (without .csv extension)
 - `--imu-file`: IMU CSV file (optional, without .csv extension)
 - `--emg-ymax`: Maximum Y-axis value for EMG plot (useful for saturation check)
+- `--raw-zoom`: Zooms the RAW subplot Y-axis to +/- 500 counts around the midpoint
 - `--max-points`: Maximum number of points to plot (for performance)
 - `--emg-sr`: EMG sample rate in Hz (default: 2000)
 - `--imu-sr`: IMU sample rate in Hz (default: 200)
