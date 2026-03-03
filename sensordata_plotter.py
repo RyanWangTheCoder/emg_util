@@ -138,6 +138,15 @@ class ButterLPF:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _compute_env_sw_scale(env_hw_max: float, env_sw_max: float) -> float:
+    """Scale factor to match ENV_sw's dynamic range to ENV_hw's.
+
+    Returns max(ENV_hw) / max(ENV_sw), or 1.0 if ENV_sw is near zero.
+    Used identically in live mode (wrapped in EMA) and offline mode (applied once).
+    """
+    return (env_hw_max / env_sw_max) if env_sw_max > 1.0 else 1.0
+
+
 def infer_sr_from_dev_us(dev_us_list, min_hz: float, max_hz: float):
     if len(dev_us_list) < 3:
         return None
@@ -167,6 +176,7 @@ def run_live(args: argparse.Namespace) -> None:
     env_dev_buf = deque()
     env_lpf_buf = deque()
     imu_buf = deque()
+    gyro_buf = deque()   # gyro magnitude (dps) — separate from imu_buf (acc, g)
 
     # Track recent raw dev_us to infer sr_hz if needed
     recent_raw_dev_us = deque(maxlen=200)
@@ -176,6 +186,12 @@ def run_live(args: argparse.Namespace) -> None:
     emg_ch = None
     env_filter = None
     last_vitals = {}
+
+    # DC offset tracker: slow LPF (0.1 Hz) to estimate RAW's true midpoint.
+    # MyoWare DC bias shifts center from theoretical 2048 to ~1830-1843.
+    # Initialized to 1843 (typical observed value) to minimize convergence time.
+    # alpha = 1 - exp(-2pi * 0.1 / sr_hz); set when sr_hz is known.
+    raw_dc_state = {'lpf': 1843.0, 'alpha': None}
 
     emg_win = float(args.emg_window_sec)
     imu_win = float(args.imu_window_sec) if args.imu_window_sec is not None else emg_win
@@ -203,7 +219,7 @@ def run_live(args: argparse.Namespace) -> None:
         'history': [],   # list of {t_peak_ms, mdf, mdf_drop_pct, fatigue_level}
     }
     emg_fatigue_buf = deque(maxlen=EMG_FATIGUE_BUF_SIZE)
-    
+
     # Peak detection state (matches Android implementation)
     last_imu_trigger_t = [-999.0]   # mutable container (avoids nonlocal float)
     imu_thr_dps = float(args.imu_thr_dps)
@@ -346,13 +362,26 @@ def run_live(args: argparse.Namespace) -> None:
     else:
         fatigue_ann = None
 
-    # --- IMU subplot ---
-    (ln_imu,) = ax_imu.plot([], [], lw=1.2, label='acc_mag (g)')
-    ax_imu.set_ylabel('g')
+    # --- IMU subplot: acc_mag (left Y-axis, blue) + gyro_mag (right Y-axis, red) ---
+    # acc_mag (g) shows total acceleration including gravity (~1g at rest).
+    # gyro_mag (dps) shows rotation rate — the primary indicator of movement intensity.
+    # At rest: gyro_mag ≈ 0 dps.  During a tennis swing: gyro_mag → 500–1000 dps.
+    (ln_imu,) = ax_imu.plot([], [], lw=1.2, color='tab:blue', label='acc_mag (g)')
+    ax_imu_gyro = ax_imu.twinx()   # secondary Y-axis shares x-axis with ax_imu
+    (ln_gyro,) = ax_imu_gyro.plot([], [], lw=1.2, color='tab:red', alpha=0.85,
+                                   label='gyro_mag (dps)')
+    ax_imu.set_ylabel('g', color='tab:blue')
+    ax_imu.tick_params(axis='y', labelcolor='tab:blue')
+    ax_imu_gyro.set_ylabel('dps', color='tab:red')
+    ax_imu_gyro.tick_params(axis='y', labelcolor='tab:red')
+    ax_imu_gyro.set_ylim(0, 1000)
     if not fatigue_enabled:
         ax_imu.set_xlabel('Time (s) (device dev_us)')
     ax_imu.grid(True, alpha=0.3)
-    ax_imu.legend(loc='upper right', fontsize=8)
+    # Combined legend for both axes
+    _imu_lines = [ln_imu, ln_gyro]
+    ax_imu.legend(_imu_lines, [l.get_label() for l in _imu_lines],
+                  loc='upper right', fontsize=8)
 
     # MDF trend subplot (fatigue only)
     ln_mdf_scatter = ln_mdf_trend = None
@@ -379,18 +408,25 @@ def run_live(args: argparse.Namespace) -> None:
     # Prune old samples from rolling buffers
     # -----------------------------------------------------------------------
     def prune(now_t: float) -> None:
-        while raw_buf     and (now_t - raw_buf[0][0])     > emg_win:
+        while raw_buf and (now_t - raw_buf[0][0]) > emg_win:
             raw_buf.popleft()
         while env_dev_buf and (now_t - env_dev_buf[0][0]) > emg_win:
             env_dev_buf.popleft()
         while env_lpf_buf and (now_t - env_lpf_buf[0][0]) > emg_win:
             env_lpf_buf.popleft()
-        while imu_buf     and (now_t - imu_buf[0][0])     > imu_win:
+        while imu_buf and (now_t - imu_buf[0][0]) > imu_win:
             imu_buf.popleft()
+        while gyro_buf and (now_t - gyro_buf[0][0]) > imu_win:
+            gyro_buf.popleft()
 
     # -----------------------------------------------------------------------
     # Animation update callback
     # -----------------------------------------------------------------------
+    # ENV_sw scale factor: updated each frame so ENV_sw's dynamic range matches
+    # ENV_hw's. ENV_hw (hardware) has higher gain than RAW; after DC removal
+    # ENV_sw is much smaller. EMA (tau ≈ 20 frames) prevents rapid changes.
+    _env_sw_scale = [1.0]
+
     def update(_frame):
         nonlocal t0_dev_us, emg_sr_hz, emg_ch, env_filter, last_vitals
         last_seg = None
@@ -447,6 +483,7 @@ def run_live(args: argparse.Namespace) -> None:
                     env_dev_buf.clear()
                     env_lpf_buf.clear()
                     imu_buf.clear()
+                    gyro_buf.clear()
                     recent_raw_dev_us.clear()
                     # Also reset the LPF so it doesn't carry stale state into the new session
                     if emg_sr_hz is not None:
@@ -497,8 +534,17 @@ def run_live(args: argparse.Namespace) -> None:
                         env_filter = ButterLPF(fs_hz=emg_sr_hz, cutoff_hz=float(args.cutoff_hz))
                         print(f'[Plotter] Inferred EMG sr_hz={emg_sr_hz:.0f} (no meta yet)')
 
+                # Update DC offset tracker (slow LPF, 0.1 Hz cutoff)
+                if raw_dc_state['alpha'] is None and emg_sr_hz is not None:
+                    import math
+                    raw_dc_state['alpha'] = 1.0 - math.exp(-2.0 * math.pi * 0.1 / emg_sr_hz)
+                if raw_dc_state['alpha'] is not None:
+                    raw_dc_state['lpf'] += raw_dc_state['alpha'] * (r - raw_dc_state['lpf'])
+
                 if env_filter is not None:
-                    env_lpf_buf.append((t_sec, env_filter.update(abs(r))))
+                    # Use tracked DC center — makes envelope symmetric and correct
+                    # abs(r) gives DC level (~1843); abs(r - dc) gives true envelope (~0 at rest)
+                    env_lpf_buf.append((t_sec, env_filter.update(abs(r - raw_dc_state['lpf']))))
 
             elif k == 'env':
                 e = msg.get('env')
@@ -511,6 +557,9 @@ def run_live(args: argparse.Namespace) -> None:
                 if a is None:
                     continue
                 imu_buf.append((t_sec, float(a)))
+                g = msg.get('gmag')
+                if g is not None:
+                    gyro_buf.append((t_sec, float(g)))
 
                 # Peak detection: only trigger on the HIGHEST point of the swing
                 # This prevents double-counting backswing + forward swing
@@ -518,7 +567,7 @@ def run_live(args: argparse.Namespace) -> None:
                     gmag = msg.get('gmag')
                     if gmag is not None:
                         gmag = float(gmag)
-                        
+
                         if gmag >= imu_thr_dps:
                             if not in_peak[0]:
                                 # Start of new peak
@@ -568,7 +617,7 @@ def run_live(args: argparse.Namespace) -> None:
             xs = np.array([p[0] for p in raw_buf], dtype=float)
             ys = np.array([p[1] for p in raw_buf], dtype=float)
             ln_raw.set_data(xs, ys)
-            
+
             if args.raw_zoom:
                 lo, hi = float(np.min(ys)), float(np.max(ys))
                 if hi - lo < 200.0:  # Prevent zooming in too tight on baseline noise
@@ -576,7 +625,7 @@ def run_live(args: argparse.Namespace) -> None:
                     lo, hi = mid - 100.0, mid + 100.0
                 pad = 0.1 * (hi - lo)
                 ax_raw.set_ylim(max(0.0, lo - pad), min(float(args.emg_ymax), hi + pad))
-                
+
         if env_dev_buf:
             xs = np.array([p[0] for p in env_dev_buf], dtype=float)
             ys = np.array([p[1] for p in env_dev_buf], dtype=float)
@@ -600,22 +649,48 @@ def run_live(args: argparse.Namespace) -> None:
             env_quality_ann.set_text(q_txt)
             env_quality_ann.set_color(q_color)
             env_quality_ann.get_bbox_patch().set_facecolor(q_bg)
+        # Scale ENV_sw to match ENV_hw's dynamic range.
+        # _compute_env_sw_scale() is the shared formula (same as offline mode).
+        # EMA (tau ≈ 20 frames) smooths rapid changes in the rolling window.
+        if env_dev_buf and env_lpf_buf:
+            _new_scale = _compute_env_sw_scale(
+                float(np.max([p[1] for p in env_dev_buf])),
+                float(np.max([p[1] for p in env_lpf_buf])),
+            )
+            _env_sw_scale[0] = 0.95 * _env_sw_scale[0] + 0.05 * _new_scale
+
         if env_lpf_buf:
             xs = np.array([p[0] for p in env_lpf_buf], dtype=float)
-            ys = np.array([p[1] for p in env_lpf_buf], dtype=float)
+            ys = np.array([p[1] * _env_sw_scale[0] for p in env_lpf_buf], dtype=float)
             ln_env_lpf.set_data(xs, ys)
 
-        # --- Update IMU line ---
+        # Auto-scale ENV subplot Y-axis based on ENV_hw (ENV_sw is now scaled to match).
+        _env_y_max = 200.0
+        if env_dev_buf:
+            _env_y_max = max(_env_y_max,
+                             float(np.max([p[1] for p in env_dev_buf])) * 1.25)
+        ax_env.set_ylim(0, _env_y_max)
+        # Update title to show current scale factor so user knows ENV_sw is scaled
+        ax_env.set_title(
+            f'ENV comparison — HW vs SW (abs(RAW-DC)→LPF ×{_env_sw_scale[0]:.1f})  |  quality check')
+
+        # --- Update IMU lines (acc_mag left-axis + gyro_mag right-axis) ---
         if imu_buf:
             xs = np.array([p[0] for p in imu_buf], dtype=float)
             ys = np.array([p[1] for p in imu_buf], dtype=float)
             ln_imu.set_data(xs, ys)
-            # Fixed absolute scale (0 to 4g minimum) to preserve intensity context,
-            # but allows expanding upward if the swing exceeds 4g.
+            # Fixed absolute scale (0 to 4g minimum); expands if swing exceeds 4g.
             hi = max(4.0, float(np.max(ys)))
             ax_imu.set_ylim(0, hi * 1.05)
+        if gyro_buf:
+            xs = np.array([p[0] for p in gyro_buf], dtype=float)
+            ys = np.array([p[1] for p in gyro_buf], dtype=float)
+            ln_gyro.set_data(xs, ys)
+            # Auto-scale gyro: minimum 200 dps so baseline is visible; expands for fast swings.
+            hi_g = max(200.0, float(np.max(ys)) * 1.1)
+            ax_imu_gyro.set_ylim(0, hi_g)
 
-                # Shared x-axis for EMG + IMU (rolling window)
+        # Shared x-axis for EMG + IMU (rolling window)
         # Guard against now_t == 0.0 (no data yet) which would produce identical
         # low/high xlims and trigger a matplotlib "singular transformation" warning.
         if now_t > 0.0:
@@ -757,7 +832,7 @@ def run_live(args: argparse.Namespace) -> None:
                     ax_fat.set_ylim(lo, hi)
 
         # Collect artists for return (blit=False so not strictly needed, but good practice)
-        artists = [ln_raw, ln_env_dev, ln_env_lpf, ln_imu, status, env_quality_ann]
+        artists = [ln_raw, ln_env_dev, ln_env_lpf, ln_imu, ln_gyro, status, env_quality_ann]
         if fatigue_ann is not None:
             artists.append(fatigue_ann)
         if ln_mdf_scatter is not None:
@@ -802,8 +877,19 @@ def run_offline(args: argparse.Namespace) -> None:
         raw = np.array(raw, dtype=float)
         env = np.array(env, dtype=float)
 
+        # DC offset: subtract mean of raw to get true envelope (0 at rest, not ~1843).
+        # MyoWare DC bias shifts center from theoretical 2048 to ~1830-1843.
+        # abs(x) gives DC level; abs(x - mean) gives symmetric envelope amplitude.
+        raw_dc_offline = float(np.mean(raw))
         env_filter = ButterLPF(fs_hz=float(args.sr_hz), cutoff_hz=float(args.cutoff_hz))
-        env_lpf = np.array([env_filter.update(abs(x)) for x in raw], dtype=float)
+        env_lpf = np.array([env_filter.update(abs(x - raw_dc_offline)) for x in raw], dtype=float)
+        # Scale ENV_sw to match ENV_hw's dynamic range (whole-file ratio).
+        # Uses the same _compute_env_sw_scale() helper as live mode.
+        _env_sw_scale_off = _compute_env_sw_scale(
+            float(np.nanmax(env[np.isfinite(env)])) if np.any(np.isfinite(env)) else 1.0,
+            float(np.max(env_lpf)) if np.max(env_lpf) > 0 else 1.0,
+        )
+        env_lpf = env_lpf * _env_sw_scale_off
 
         # --- Quality metrics (whole-file) ---
         env_fin = env[np.isfinite(env)]
@@ -844,13 +930,16 @@ def run_offline(args: argparse.Namespace) -> None:
         ax_e.axhline(50,   color='dimgray', ls=':', lw=1.2, alpha=0.75,
                      label='Dead signal (<50)')
         ax_e.set_title(
-            f'ENV comparison — HW (MyoWare) vs SW (abs(RAW)→LPF)\n'
+            f'ENV comparison — HW (MyoWare) vs SW (abs(RAW-DC)→LPF ×{_env_sw_scale_off:.1f})\n'
             f'Quality: {quality_str}',
             color=quality_color,
         )
         ax_e.set_xlabel('Time (s) (host_rx_ms)')
         ax_e.set_ylabel('ADC (counts)')
-        ax_e.set_ylim(0, float(args.emg_ymax))
+        # Auto-scale to show both ENV_hw and ENV_sw clearly (ENV_sw is now scaled to match ENV_hw).
+        _env_off_max = max(200.0,
+                           float(np.nanmax(env[np.isfinite(env)])) * 1.25 if len(env_fin) else 200.0)
+        ax_e.set_ylim(0, _env_off_max)
         ax_e.grid(True, alpha=0.3)
         ax_e.legend(loc='upper right', fontsize=8, ncol=2)
 
@@ -862,19 +951,19 @@ def run_offline(args: argparse.Namespace) -> None:
         # Fallback FSR values if missing from CSV
         acc_fsr_g = 4
         gyro_fsr_dps = 1000
-        
+
         with open(args.imu_file, 'r', encoding='utf-8') as f:
             r = csv.DictReader(f)
             for row in r:
                 try:
                     t  = int(row.get('host_rx_ms', '0'))
-                    
+
                     # Read FSR metadata if available in CSV row
                     if 'acc_fsr_g' in row and row['acc_fsr_g']:
                         acc_fsr_g = int(row['acc_fsr_g'])
                     if 'gyro_fsr_dps' in row and row['gyro_fsr_dps']:
                         gyro_fsr_dps = int(row['gyro_fsr_dps'])
-                        
+
                     ax = float(row.get('ax', 'nan'))
                     ay = float(row.get('ay', 'nan'))
                     az = float(row.get('az', 'nan'))
@@ -904,20 +993,20 @@ def run_offline(args: argparse.Namespace) -> None:
 
         t0 = t_ms[0]
         xs = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
-        
+
         # Calculate magnitudes in physical units
         ax_g = np.array(ax_vals, dtype=float) / acc_lsb_per_g
         ay_g = np.array(ay_vals, dtype=float) / acc_lsb_per_g
         az_g = np.array(az_vals, dtype=float) / acc_lsb_per_g
         amag = np.sqrt(ax_g**2 + ay_g**2 + az_g**2)
-        
+
         gx_dps = np.array(gx_vals, dtype=float) / gyro_lsb_per_dps
         gy_dps = np.array(gy_vals, dtype=float) / gyro_lsb_per_dps
         gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
         gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
-        
+
         # Accel plot
         ax1.plot(xs, amag, lw=1.2, color='black', label='acc_mag')
         ax1.plot(xs, ax_g, lw=0.8, alpha=0.6, label='ax')
@@ -927,7 +1016,7 @@ def run_offline(args: argparse.Namespace) -> None:
         ax1.set_ylabel('Acceleration (g)')
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc='upper right', ncol=4)
-        
+
         # Gyro plot
         ax2.plot(xs, gmag, lw=1.2, color='black', label='gyro_mag')
         ax2.plot(xs, gx_dps, lw=0.8, alpha=0.6, label='gx')
@@ -937,7 +1026,7 @@ def run_offline(args: argparse.Namespace) -> None:
         ax2.set_ylabel('Rotation (dps)')
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='upper right', ncol=4)
-        
+
         plt.tight_layout()
         plt.show()
 

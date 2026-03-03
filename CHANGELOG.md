@@ -9,6 +9,102 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-03] — Feature: Add gyro_mag to live IMU subplot (`sensordata_plotter.py`)
+
+### Changed (`sensordata_plotter.py`)
+- **IMU subplot (live mode) now shows both `acc_mag` and `gyro_mag`.**
+  - **Root cause of "slow variations":** `acc_mag` (total acceleration magnitude) always
+    includes gravity (~1g at rest). The dynamic range visible on the 0–4g axis is only
+    1–3g, and the signal changes slowly because gravity dominates. `gyro_mag` (rotation
+    rate in dps) is 0 at rest and spikes to 500–1000 dps during a tennis swing — it is
+    the primary indicator of movement intensity.
+  - **Fix:** Added `gyro_buf = deque()` alongside `imu_buf`. Each `imu` packet now also
+    appends `gmag` to `gyro_buf`. A secondary Y-axis (`ax_imu_gyro = ax_imu.twinx()`)
+    plots `gyro_mag` in red (right axis, dps) while `acc_mag` remains in blue (left axis, g).
+  - **Auto-scaling:** `ax_imu_gyro` Y-axis starts at 200 dps minimum and expands to
+    `max(gmag) × 1.1` each frame — so fast swings fill the subplot.
+  - **Combined legend:** both `acc_mag (g)` and `gyro_mag (dps)` shown in one legend box.
+  - **BLE reconnect:** `gyro_buf.clear()` added to the `seg=0` reset block.
+  - **`prune()`:** `gyro_buf` pruned with the same `imu_win` window as `imu_buf`.
+  - **`artists`:** `ln_gyro` added to the returned artists list.
+
+---
+
+## [2026-03-03] — Fix: ENV_sw DC offset bug in `sensordata_plotter.py`
+
+### Fixed (`sensordata_plotter.py`)
+- **`ENV_sw` (software envelope) was computing the DC level, not the true envelope.**
+  - **Root cause:** MyoWare RAW ADC values are unsigned and biased — the signal
+    oscillates around ~1830–1843 (not the theoretical 2048). `abs(r)` always returns
+    ~1843 (the DC level), so the Butterworth LPF converged to ~1843 at rest instead
+    of ~0. The `ENV_sw` line appeared as a nearly flat line near the top of the plot,
+    making the HW vs SW envelope comparison meaningless.
+  - **Fix (live mode):** Added `raw_dc_state` — a slow LPF (0.1 Hz) that tracks the
+    RAW DC midpoint in real time. Initialized to 1843 (typical observed value) to
+    minimize the ~10s convergence delay. Envelope is now `abs(r - raw_dc_state['lpf'])`.
+  - **Fix (offline mode):** Subtract the whole-file mean before computing the envelope:
+    `raw_dc_offline = np.mean(raw)`, then `abs(x - raw_dc_offline)` for each sample.
+    Instant — no convergence delay.
+  - **Before:** `env_filter.update(abs(r))` → LPF ≈ 1843 at rest (DC level, useless)
+  - **After:** `env_filter.update(abs(r - dc))` → LPF ≈ 0 at rest, ~40+ during contraction
+
+### Changed (`sensordata_plotter.py`)
+- **Live mode** (`run_live()`):
+  - Added `raw_dc_state = {'lpf': 1843.0, 'alpha': None}` — DC tracker state dict
+  - `alpha` is computed once when `emg_sr_hz` is known: `1 - exp(-2π × 0.1 / sr_hz)`
+  - DC tracker updates on every `raw` packet: `lpf += alpha * (r - lpf)`
+  - `env_filter.update(abs(r - raw_dc_state['lpf']))` — correct envelope
+  - DC tracker reset to `{'lpf': 1843.0, 'alpha': None}` on new BLE session (`seg=0`)
+
+- **Offline mode** (`run_offline()`):
+  - `raw_dc_offline = float(np.mean(raw))` — whole-file DC estimate
+  - `env_lpf = [env_filter.update(abs(x - raw_dc_offline)) for x in raw]`
+
+### Also fixed: ENV_sw scaled to match ENV_hw dynamic range (live + offline)
+- **Root cause of "ENV_sw too small":** After DC removal, `abs(RAW-DC)` is the true
+  AC amplitude (~0–100 counts), while ENV_hw (hardware output) has higher gain
+  (~0–500 counts). The two signals are not directly comparable in absolute amplitude.
+- **Shared helper:** `_compute_env_sw_scale(env_hw_max, env_sw_max)` — module-level
+  function, single source of truth for the formula `max(ENV_hw) / max(ENV_sw)`.
+  Returns 1.0 if ENV_sw is near zero (avoids division by zero at startup).
+- **Fix (live mode):** `_env_sw_scale` (EMA, tau ≈ 20 frames) wraps
+  `_compute_env_sw_scale()` called each frame with rolling-window maxima.
+  ENV_sw is multiplied by this factor before plotting. Scale factor shown in
+  subplot title: `ENV_sw (abs(RAW-DC)→LPF ×N.N)`.
+- **Fix (offline mode):** `_compute_env_sw_scale()` called once with whole-file
+  maxima. `env_lpf *= _env_sw_scale_off` before plotting. Scale factor shown in
+  subplot title.
+- **Interpretation:** The comparison is now qualitative (shape/timing match), not
+  quantitative (absolute amplitude). Both signals should rise and fall together
+  during muscle contractions.
+- **Code unification:** The EMA is the only live-specific detail; the core formula
+  `max(ENV_hw) / max(ENV_sw)` is identical in both modes via the shared helper.
+
+### Also fixed: ENV subplot Y-axis auto-scaling (live + offline)
+- After the DC fix, `ENV_sw` values are in the 0–300 range while the Y-axis was
+  fixed at 0–4095, making `ENV_sw` appear as a nearly invisible line near the bottom.
+- **Live mode:** `_env_y_max` is computed each frame as `max(200, max(ENV_hw) × 1.25, max(ENV_sw) × 1.25)`.
+  The ENV subplot Y-axis now auto-scales to show both signals clearly.
+- **Offline mode:** `_env_off_max = max(200, max(ENV_hw) × 1.25, max(ENV_sw) × 1.25)`.
+  Same logic applied once before `plt.show()`.
+- The saturation (4000) and dead-signal (50) reference lines remain drawn; they will
+  be off-screen when the signal is small, which is correct (no saturation present).
+
+### Expected behavior after fix
+| Condition | `ENV_sw` value | Visible on plot? |
+|---|---|---|
+| At rest (muscle relaxed) | ~0–10 counts | Near bottom of plot ✓ |
+| Light contraction | ~20–50 counts | Clearly visible ✓ |
+| Strong contraction | ~100–300 counts | Tracks ENV_hw shape ✓ |
+| Saturation | ~500+ counts | Matches ENV_hw saturation ✓ |
+
+### Note: same fix applied to Android `SessionCaptureActivity.java`
+- Added `rawDcLpf = 1843f` + `rawDcAlpha = alphaForCutoff(0.1f, ENV_PLOT_HZ)`
+- `decodeEmgBatch()`: `rawDcLpf += rawDcAlpha * (raw - rawDcLpf)` then `abs(raw - rawDcLpf)`
+- `renderPlots()`: uses `rawDcLpf` as `rawCenter` for RAW zoom normalization
+
+---
+
 ## [2026-03-02] — Feature: Add dynamic RAW zoom & fix IMU scaling (`sensordata_plotter.py`)
 
 ### Added (`sensordata_plotter.py`)
