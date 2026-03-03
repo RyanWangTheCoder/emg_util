@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-02] — Feature: Add dynamic RAW zoom & fix IMU scaling (`sensordata_plotter.py`)
+
+### Added (`sensordata_plotter.py`)
+- Added `--raw-zoom` argument to optionally zoom the RAW subplot Y-axis.
+  - In **offline mode**, it zooms the Y-axis to `+/- 500` counts around the DC bias midpoint (`emg_ymax / 2.0`), which is ideal for inspecting low-gain resting-state noise.
+  - In **live mode**, it enables **dynamic Y-axis zooming** that automatically tracks the min/max of the rolling `raw_buf` (with a minimum padding of 100 counts to prevent extreme magnification of the baseline noise floor). This ensures the RAW signal optimally fills the screen regardless of the sensor gain setting or muscle effort.
+
+### Changed (`sensordata_plotter.py`)
+- **IMU Subplot Scaling Fixed:** Removed dynamic zooming from the IMU (accelerometer) subplot. It now uses a fixed absolute minimum scale (0 to 4g) to preserve the visual sense of activity intensity. The axis will dynamically expand upwards only if extreme acceleration exceeds the 4g threshold, preventing data clipping while maintaining an absolute visual baseline.
+
+---
+
 ## [2026-03-02] — Fix: plotter stuck after BLE reconnect (`sensordata_plotter.py`)
 
 ### Fixed (`sensordata_plotter.py`)
