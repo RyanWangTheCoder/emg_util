@@ -142,6 +142,56 @@ python sensordata_plotter.py --mode offline --imu-file imu_log_20260131_235524_2
 python sensordata_plotter.py --mode offline --emg-file mydata --emg-sr 2000 --imu-sr 200
 ```
 
+### Offline Fatigue Replay (CSV → Live Pipeline)
+
+Replay a captured session through the **same** fatigue analysis pipeline as live mode.
+Requires both `--emg-file` and `--imu-file`. Produces the 4-subplot figure (RAW, ENV, IMU, MDF trend).
+
+```bash
+# Instant replay — all data fed at once, animation scrolls to end, then stops
+python sensordata_plotter.py --mode offline --fatigue \
+    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --imu-thr-dps 150 --fatigue-baseline-swings 5
+
+# Instant replay + freeze x-axis at end to show full session (recommended)
+python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
+    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --imu-thr-dps 150 --fatigue-baseline-swings 5
+
+# Real-time replay at 1× speed (watch session unfold in real time)
+python sensordata_plotter.py --mode offline --fatigue --replay-speed 1.0 \
+    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --imu-thr-dps 150
+
+# Real-time replay at 4× speed
+python sensordata_plotter.py --mode offline --fatigue --replay-speed 4.0 --replay-no-scroll \
+    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --imu-thr-dps 150 --fatigue-baseline-swings 5
+
+# With explicit emg_util path (if running from a different directory)
+python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
+    --emg-file path\to\emg_log.csv --imu-file path\to\imu_log.csv \
+    --emg-util-path C:\wangx\ftc\emg_util
+```
+
+**How it works:**
+- `CsvReplayFeeder` reads both CSV files, converts IMU raw LSB → physical units (g, dps), merges by `dev_us` timestamp, and feeds JSON messages into the same queue that `run_live()` drains
+- All fatigue logic is reused exactly: 2600-sample EMG ring buffer, gyro peak detection, `FatigueMonitor.push_swing()`, MDF trend subplot
+- `--replay-speed 0` (default) = instant dump (all data fed immediately, animation catches up in a few frames)
+- `--replay-speed N` = throttle to N× real-time speed (1.0 = real time, 2.0 = 2× speed)
+- `--replay-no-scroll` = after replay finishes, freeze x-axis to show full session (expands `emg_window_sec` to session duration so no data is pruned)
+
+**Replay-specific Options:**
+- `--replay-speed`: Speed multiplier (default: 0 = instant)
+- `--replay-no-scroll`: Freeze x-axis at end to show full session
+- `--fatigue-baseline-swings`: Number of swings for baseline (default: 20; use 5 for short sessions)
+- `--imu-thr-dps`: Gyro threshold for swing detection (default: 150 dps)
+- `--sr-hz`: EMG sample rate used for FatigueMonitor and LPF (default: 2000)
+
 **How to interpret the IMU figure (offline IMU-only or IMU overlay):**
 
 - **Top plot: Acceleration (g)**
@@ -289,6 +339,16 @@ python emg_util_yaml_runner.py --config config.yaml --log-dir logs_new\
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095
 ```
 
+### Workflow 4: Offline Fatigue Replay of a Captured Session
+
+```bash
+# Replay a 20-minute session with fatigue analysis (instant, full-session view)
+python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
+    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --imu-thr-dps 150 --fatigue-baseline-swings 5
+```
+
 ### Workflow 3: Quick Saturation Check
 
 ```bash
@@ -397,4 +457,4 @@ C:\wangx\ftc\
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-03-03
