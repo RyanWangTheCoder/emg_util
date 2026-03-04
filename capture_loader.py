@@ -32,9 +32,11 @@ import numpy as np
 import pandas as pd
 
 
-# Filename patterns produced by btCentral.py
-_RE_EMG = re.compile(r"^emg_log_(\d{8}_\d{6})_(\d{8}_\d{6})_(\d{3})\.csv$")
-_RE_IMU = re.compile(r"^imu_log_(\d{8}_\d{6})_(\d{8}_\d{6})_(\d{3})\.csv$")
+# Filename patterns produced by btCentral.py.
+# open_id may be YYYYMMDD_HHMMSS (old) or YYYYMMDD_HHMMSS_mmm (new — millisecond
+# suffix added to avoid rare same-second rotation collisions).
+_RE_EMG = re.compile(r"^emg_log_(\d{8}_\d{6})_(\d{8}_\d{6}(?:_\d{3})?)_(\d{3})\.csv$")
+_RE_IMU = re.compile(r"^imu_log_(\d{8}_\d{6})_(\d{8}_\d{6}(?:_\d{3})?)_(\d{3})\.csv$")
 
 
 @dataclass

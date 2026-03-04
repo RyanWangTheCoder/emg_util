@@ -21,8 +21,24 @@ Fatigue monitoring (--fatigue):
   - Displays: text annotation on EMG plot + 3rd MDF trend subplot
   - FatigueMonitor is imported from fatigue_monitor.py (--emg-util-path points to emg_util/ dir)
 
-Usage:
+Usage (live with fatigue):
   python sensordata_plotter.py --mode live --fatigue --imu-thr-dps 150 --fatigue-warmup-min 0
+
+Offline fatigue replay (--mode offline --fatigue):
+  Reads EMG + IMU CSV files, feeds them through the same run_live() pipeline via CsvReplayFeeder.
+  All fatigue logic (ring buffer, peak detection, FatigueMonitor, MDF trend) is reused exactly.
+
+  Instant replay (all data at once, animation scrolls to end):
+    python sensordata_plotter.py --mode offline --fatigue \\
+        --emg-file logs/emg_log_*.csv --imu-file logs/imu_log_*.csv
+
+  Instant replay + freeze x-axis at end to show full session:
+    python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \\
+        --emg-file logs/emg_log_*.csv --imu-file logs/imu_log_*.csv
+
+  Real-time replay at 2× speed:
+    python sensordata_plotter.py --mode offline --fatigue --replay-speed 2.0 \\
+        --emg-file logs/emg_log_*.csv --imu-file logs/imu_log_*.csv
 """
 
 import argparse
@@ -33,6 +49,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 from collections import deque
 
 import numpy as np
@@ -113,6 +130,14 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--fatigue-baseline-swings', type=int, default=20,
                     help='Number of swings to collect for baseline (default 20)')
 
+    # CSV replay (--mode offline --fatigue)
+    ap.add_argument('--replay-speed', type=float, default=0.0,
+                    help='CSV replay speed multiplier (0=instant dump, 1.0=realtime, 2.0=2×). '
+                         'Only used with --mode offline --fatigue.')
+    ap.add_argument('--replay-no-scroll', action='store_true',
+                    help='After CSV replay finishes, freeze x-axis to show full session. '
+                         'Only used with --mode offline --fatigue.')
+
     return ap.parse_args()
 
 
@@ -167,10 +192,15 @@ def infer_sr_from_dev_us(dev_us_list, min_hz: float, max_hz: float):
 # Live mode
 # ---------------------------------------------------------------------------
 
-def run_live(args: argparse.Namespace) -> None:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((args.listen_host, int(args.listen_port)))
-    sock.setblocking(False)
+def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
+    if recv_fn is None:
+        # Normal live UDP mode
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((args.listen_host, int(args.listen_port)))
+        sock.setblocking(False)
+        def recv_fn():
+            data, _addr = sock.recvfrom(8192)
+            return data
 
     raw_buf = deque()
     env_dev_buf = deque()
@@ -435,8 +465,8 @@ def run_live(args: argparse.Namespace) -> None:
         # Drain all pending UDP packets
         while True:
             try:
-                data, _addr = sock.recvfrom(8192)
-            except BlockingIOError:
+                data = recv_fn()
+            except (BlockingIOError, queue.Empty):
                 break
             except Exception:
                 break
@@ -694,8 +724,12 @@ def run_live(args: argparse.Namespace) -> None:
         # Guard against now_t == 0.0 (no data yet) which would produce identical
         # low/high xlims and trigger a matplotlib "singular transformation" warning.
         if now_t > 0.0:
-            xlim_lo = max(0.0, now_t - max(emg_win, imu_win))
-            ax_imu.set_xlim(xlim_lo, now_t)   # propagates to ax_emg via sharex
+            if feeder is not None and feeder.done and getattr(args, 'replay_no_scroll', False):
+                # Replay finished + --replay-no-scroll: show full session
+                ax_imu.set_xlim(0.0, feeder.total_t_sec * 1.05)
+            else:
+                xlim_lo = max(0.0, now_t - max(emg_win, imu_win))
+                ax_imu.set_xlim(xlim_lo, now_t)   # propagates to ax_emg via sharex
 
         # --- Title: vitals + swing count ---
         if last_vitals:
@@ -845,12 +879,177 @@ def run_live(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# CSV Replay Feeder  (--mode offline --fatigue)
+# ---------------------------------------------------------------------------
+
+class CsvReplayFeeder:
+    """Reads EMG + IMU CSV files and feeds JSON-encoded messages into a queue,
+    mimicking the UDP stream produced by btCentral.py.
+
+    Supports instant replay (speed=0) and real-time / N× replay (speed > 0).
+    Call load() first to pre-load files, then start() to begin feeding.
+    """
+
+    def __init__(self, emg_file, imu_file, sr_hz: float, speed: float = 0.0):
+        self.emg_file = emg_file
+        self.imu_file = imu_file
+        self.sr_hz = float(sr_hz)
+        self.speed = float(speed)
+        self.q = queue.Queue(maxsize=0)   # unlimited — feeder fills as fast as possible
+        self._thread = None
+        self._done = False
+        self.total_t_sec = 0.0
+        self._all_rows = []   # populated by load()
+
+    # ------------------------------------------------------------------
+    def load(self) -> None:
+        """Pre-load both CSV files into memory and merge by dev_us.
+        Must be called before start().
+        """
+        rows = []
+
+        # EMG rows: (dev_us, 'emg', raw, env)
+        if self.emg_file:
+            with open(self.emg_file, 'r', encoding='utf-8') as f:
+                for row in csv.DictReader(f):
+                    try:
+                        du = int(row['dev_us'])
+                        rw = float(row['raw'])
+                        ev = float(row['env'])
+                    except Exception:
+                        continue
+                    rows.append((du, 'emg', rw, ev))
+
+        # IMU rows: (dev_us, 'imu', amag_g, gmag_dps)
+        if self.imu_file:
+            acc_fsr_g = 4
+            gyro_fsr_dps = 1000
+            acc_map = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
+            gyr_map = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
+            with open(self.imu_file, 'r', encoding='utf-8') as f:
+                for row in csv.DictReader(f):
+                    try:
+                        du = int(row['dev_us'])
+                        if row.get('acc_fsr_g'):
+                            acc_fsr_g = int(row['acc_fsr_g'])
+                        if row.get('gyro_fsr_dps'):
+                            gyro_fsr_dps = int(row['gyro_fsr_dps'])
+                        ax = float(row['ax']); ay = float(row['ay']); az = float(row['az'])
+                        gx = float(row['gx']); gy = float(row['gy']); gz = float(row['gz'])
+                        acc_lsb = acc_map.get(acc_fsr_g, 8192.0)
+                        gyr_lsb = gyr_map.get(gyro_fsr_dps, 32.8)
+                        amag = (ax * ax + ay * ay + az * az) ** 0.5 / acc_lsb
+                        gmag = (gx * gx + gy * gy + gz * gz) ** 0.5 / gyr_lsb
+                    except Exception:
+                        continue
+                    rows.append((du, 'imu', amag, gmag))
+
+        rows.sort(key=lambda r: r[0])
+        self._all_rows = rows
+
+        if rows:
+            t0 = rows[0][0]
+            t_end = rows[-1][0]
+            self.total_t_sec = (t_end - t0) / 1_000_000.0
+
+    # ------------------------------------------------------------------
+    @property
+    def done(self) -> bool:
+        """True once the feeder thread has finished AND the queue is drained."""
+        return self._done and self.q.empty()
+
+    # ------------------------------------------------------------------
+    def recv(self) -> bytes:
+        """Returns next JSON-encoded message bytes, or raises queue.Empty."""
+        return self.q.get_nowait()
+
+    # ------------------------------------------------------------------
+    def start(self) -> None:
+        """Start background feeder thread. Call load() first."""
+        self._thread = threading.Thread(target=self._feed, daemon=True, name='csv_replay')
+        self._thread.start()
+
+    # ------------------------------------------------------------------
+    def _feed(self) -> None:
+        rows = self._all_rows
+        if not rows:
+            self._done = True
+            return
+
+        t0_dev = rows[0][0]
+        sr = int(self.sr_hz)
+
+        # Inject emg_meta first so run_live() initialises LPF + FatigueMonitor
+        meta = json.dumps({
+            'k': 'emg_meta', 'sr_hz': sr, 'ch': 3,
+            'adc_bits': 12, 'ymax': 4095, 'seg': 0,
+        }).encode('utf-8')
+        self.q.put(meta)
+
+        wall_t0 = time.time()
+
+        for du, kind, a, b in rows:
+            if self.speed > 0.0:
+                # Throttle to simulate real-time (or N× speed)
+                dev_elapsed = (du - t0_dev) / 1_000_000.0
+                wall_elapsed = time.time() - wall_t0
+                target = dev_elapsed / self.speed
+                if target > wall_elapsed:
+                    time.sleep(target - wall_elapsed)
+
+            if kind == 'emg':
+                self.q.put(json.dumps({
+                    'k': 'raw', 'dev_us': du, 'raw': a, 'seg': 0,
+                }).encode('utf-8'))
+                self.q.put(json.dumps({
+                    'k': 'env', 'dev_us': du, 'env': b, 'seg': 0,
+                }).encode('utf-8'))
+            else:  # imu
+                self.q.put(json.dumps({
+                    'k': 'imu', 'dev_us': du, 'amag': a, 'gmag': b, 'seg': 0,
+                }).encode('utf-8'))
+
+        self._done = True
+
+
+# ---------------------------------------------------------------------------
 # Offline mode
 # ---------------------------------------------------------------------------
 
 def run_offline(args: argparse.Namespace) -> None:
     if not args.emg_file and not args.imu_file:
         raise SystemExit('Offline mode requires --emg-file or --imu-file')
+
+    # ── Fatigue offline: drive run_live() via CSV replay feeder ─────────────
+    if getattr(args, 'fatigue', False):
+        if not args.emg_file or not args.imu_file:
+            raise SystemExit(
+                '--fatigue offline mode requires both --emg-file and --imu-file')
+        util_path = args.emg_util_path
+        if util_path is None:
+            util_path = os.path.normpath(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), '..', '..', 'emg_util'))
+        if not _try_import_fatigue_monitor(util_path):
+            raise SystemExit(
+                '--fatigue requires fatigue_monitor.py (use --emg-util-path to point to its directory)')
+        feeder = CsvReplayFeeder(
+            args.emg_file, args.imu_file,
+            float(args.sr_hz),
+            float(getattr(args, 'replay_speed', 0.0)),
+        )
+        feeder.load()
+        print(f'[Replay] Session: {feeder.total_t_sec:.1f}s | '
+              f'{len(feeder._all_rows)} rows | speed='
+              f'{"instant" if feeder.speed == 0.0 else f"{feeder.speed}x"}')
+        if getattr(args, 'replay_no_scroll', False):
+            # Expand window to full session so prune() keeps all data
+            args.emg_window_sec = feeder.total_t_sec + 1.0
+            if args.imu_window_sec is None:
+                args.imu_window_sec = feeder.total_t_sec + 1.0
+        feeder.start()
+        run_live(args, recv_fn=feeder.recv, feeder=feeder)
+        return
+    # ────────────────────────────────────────────────────────────────────────
 
     if args.emg_file:
         t_ms, raw, env = [], [], []
