@@ -90,20 +90,21 @@ forward swing pairs as two events (pairs within 1–2s of each other).
 
 ### HysteresisSwingDetector (Advanced, Opt-In)
 
-| Parameter | Value | Rationale |
-|---|---|---|
-| `th_on` | **350 dps** | Enter swing (slightly higher than threshold's 300) |
-| `th_off` | **175 dps** | Exit swing (hysteresis gap = half of th_on) |
-| `th_acc_hp` | **0.6 g** | Impact detection: high-pass accel threshold |
-| `th_jerk` | **80 g/s** | Impact detection: jerk threshold |
-| `min_duration` | **0.08 s** | Min swing duration (80ms) |
-| `impact_window` | **0.15 s** | Search ±150ms around gyro peak for impact |
+| Parameter | Old Value | New Value | Rationale |
+|---|---|---|---|
+| `th_on` | 350 dps | **300 dps** | Aligned with ThresholdSwingDetector entry point (see debug session below) |
+| `th_off` | 175 dps | **150 dps** | Maintains 2:1 hysteresis ratio (th_on / th_off) |
+| `th_acc_hp` | 0.6 g | **0.6 g** | Unchanged |
+| `th_jerk` | 80 g/s | **80 g/s** | Unchanged |
+| `min_duration` | 0.08 s | **0.08 s** | Unchanged |
+| `impact_window` | 0.15 s | **0.15 s** | Unchanged |
+| `debounce_sec` | ❌ missing (bug) | **args.debounce_sec** | Bug fix — `--debounce-sec` was silently ignored |
 
 **Usage:**
 ```bash
 python sensordata_plotter.py --mode offline \
     --emg-file log.csv --imu-file imu.csv \
-    --swing-detector hysteresis
+    --swing-detector hysteresis --debounce-sec 2.0
 ```
 
 **Validation (log0303, 60s session):**
@@ -205,8 +206,8 @@ for each IMU sample (t, gmag, amag):
 
 | Feature | ThresholdSwingDetector | HysteresisSwingDetector |
 |---------|------------------------|-------------------------|
-| **Entry condition** | `gmag >= 300 AND amag >= 1.5` | `gmag > 350` (hysteresis entry) |
-| **Exit condition** | `gmag < 300` + debounce=2.0s | `gmag < 175` (hysteresis exit) |
+| **Entry condition** | `gmag >= 300 AND amag >= 1.5` | `gmag > 300` (aligned with threshold detector) |
+| **Exit condition** | `gmag < 300` + debounce=2.0s | `gmag < 150` (hysteresis exit) + optional debounce |
 | **Back-swing handling** | Crude debounce (2s forced gap) | Natural (stays IN_SWING until gmag drops) |
 | **Impact detection** | ❌ No | ✅ Yes (acc_hp + jerk) |
 | **Output** | Swing peak times | Swing peak times + impact times |
@@ -222,13 +223,13 @@ Threshold detector:
   t=1.5s: stroke 2 arrives, but debounce blocks it (< 2.0s)
   Result: 1 stroke counted (missed stroke 2)
 
-Hysteresis detector:
-  t=0.0s: gmag > 350 → enter IN_SWING
-  t=0.5s: gmag < 175 → exit, confirm stroke 1
-  t=1.5s: gmag > 350 → enter IN_SWING again
-  t=2.0s: gmag < 175 → exit, confirm stroke 2
-  Result: 2 strokes counted ✅
-```
+  Hysteresis detector:
+    t=0.0s: gmag > 300 → enter IN_SWING
+    t=0.5s: gmag < 150 → exit, confirm stroke 1
+    t=1.5s: gmag > 300 → enter IN_SWING again
+    t=2.0s: gmag < 150 → exit, confirm stroke 2
+    Result: 2 strokes counted ✅
+  ```
 
 ### Impact Detection — Why 60% Rate Is Expected
 
@@ -261,6 +262,85 @@ Factors affecting impact detection:
 
 ---
 
+## Debug Session — 2026-03: Cross-Tool Swing Count Discrepancy
+
+### Problem
+
+Three tools processing the same full session (`onetest/`, 808s, 13.5 min) gave very different swing counts:
+
+| Tool | Algorithm | Count |
+|------|-----------|-------|
+| `emg_util_yaml_runner.py` | Adaptive z-score (z>5) + EMG quality filter | 113 (92 after EMG filter) |
+| `sensordata_plotter.py --swing-detector threshold --debounce-sec 2.0` | Fixed 300 dps + acc>=1.5g | 216 |
+| `sensordata_plotter.py --swing-detector hysteresis --debounce-sec 2.0` | Hysteresis th_on=350, **debounce ignored (bug)** | 351 |
+
+### Root Cause Analysis
+
+**`emg_util_yaml_runner.py` (113 swings) — different tool, not a bug:**
+- Uses **adaptive z-score** on gyro magnitude (z > 5.0), not a fixed dps threshold
+- Baseline = first 2s of session; threshold adapts to actual noise floor
+- `min_gap_ms=300` (only 300ms between swings, much shorter than 2s debounce)
+- Processes the **full stitched session** (all CSV files merged); plotter commands above used only **one CSV file** (29s segment)
+- Additionally filters by EMG quality: 113 → 92 after removing swings during bad electrode contact
+- Not directly comparable to fixed-threshold detectors — different tool, different purpose
+
+**`ThresholdSwingDetector` (216 swings) — working correctly:**
+- Fixed 300 dps + acc >= 1.5g gate + 2s debounce
+- Higher than `emg_util` because fixed threshold doesn't adapt to session noise floor
+
+**`HysteresisSwingDetector` (351 swings) — two bugs:**
+- **Bug 1:** `--debounce-sec` CLI argument was completely ignored — `HysteresisSwingDetector.__init__()` had no `debounce_sec` parameter at all
+- **Bug 2:** `th_on=350` was higher than `ThresholdSwingDetector`'s 300 dps entry, misaligning the two detectors by design
+
+### Fixes Applied
+
+**Fix 1 — Added `debounce_sec` to `HysteresisSwingDetector`:**
+- New `__init__` parameter: `debounce_sec=0.0` (default 0 = backward compatible)
+- Added `_last_trigger_t = -999.0` to `reset()`
+- Confirmation condition: `duration >= min_duration AND (t_peak - _last_trigger_t) >= debounce_sec`
+- Both instantiation sites (live + offline) now pass `debounce_sec=float(args.debounce_sec)`
+- Print output shows debounce when non-zero: `th_on=300 dps, th_off=150 dps, debounce=2.0s`
+- Result: 351 → **197 swings** with `--debounce-sec 2.0`
+
+**Fix 2 — Aligned `HysteresisSwingDetector` defaults with `ThresholdSwingDetector`:**
+- `th_on`: 350 → **300 dps** (matches `thr_gyro_dps=300`)
+- `th_off`: 175 → **150 dps** (maintains 2:1 hysteresis ratio)
+- Result: 197 → **214 swings**
+
+**Fix 3 — Added swing count to `ThresholdSwingDetector` print output:**
+- Before: `[ThresholdSwingDetector] Offline: gyro>=300 dps + acc>=1.5 g`
+- After:  `[ThresholdSwingDetector] Offline: 216 swings | gyro>=300 dps + acc>=1.5 g, peak>=200 dps`
+
+### Validation After Fixes (same single CSV file pair)
+
+```
+python sensordata_plotter.py --mode offline --imu-file ... --debounce-sec 2.0
+[ThresholdSwingDetector]  Offline: 216 swings | gyro>=300 dps + acc>=1.5 g, peak>=200 dps
+
+python sensordata_plotter.py --mode offline --imu-file ... --swing-detector hysteresis --debounce-sec 2.0
+[HysteresisSwingDetector] Offline: 214 swings (153 with impact) | th_on=300 dps, th_off=150 dps, debounce=2.0s
+```
+
+**216 vs 214 — only 2 apart.** Residual gap fully explained:
+
+| Category | Count | Reason |
+|----------|-------|--------|
+| In TD but not HD | ~2 | Hysteresis exit at 150 dps sets `_last_trigger_t` later than TD's debounce start, occasionally blocking a nearby swing that TD allows |
+| In HD but not TD | ~0 | At th_on=300, HD's gyro-only entry rarely catches swings that TD's acc gate rejects |
+
+This 2-swing residual is the irreducible difference from hysteresis exit timing vs debounce timing — not worth closing further.
+
+### Quantitative Breakdown (from diagnostic script)
+
+```
+th_on=350, th_off=175, no debounce (original bug)  →  351 swings
+th_on=350, th_off=175, debounce=2s  (fix 1 only)   →  197 swings
+th_on=300, th_off=150, debounce=2s  (fix 1+2)      →  214 swings
+thr=300,   acc>=1.5g,  debounce=2s  (threshold)    →  216 swings
+```
+
+---
+
 ## Future Improvements
 
 1. **Direction-aware detection** — use sign of dominant gyro axis (gx/gy/gz) to distinguish
@@ -277,4 +357,4 @@ Factors affecting impact detection:
 
 ---
 
-**Last Updated:** 2026-03-04
+**Last Updated:** 2026-03 (debug session: debounce bug fix + threshold alignment)

@@ -305,7 +305,8 @@ class HysteresisSwingDetector:
 
     def __init__(self, th_on=700.0, th_off=350.0, th_acc_hp=1.0, th_jerk=150.0,
                  min_duration=0.08, impact_window=0.15,
-                 alpha_gyro=0.44, alpha_acc=0.136):
+                 alpha_gyro=0.44, alpha_acc=0.136,
+                 debounce_sec=0.0):
         """Initialize hysteresis detector.
 
         Args:
@@ -326,6 +327,7 @@ class HysteresisSwingDetector:
         self.impact_window = float(impact_window)
         self.alpha_gyro = float(alpha_gyro)
         self.alpha_acc = float(alpha_acc)
+        self.debounce_sec = float(debounce_sec)
         self.reset()
 
     def reset(self) -> None:
@@ -337,9 +339,11 @@ class HysteresisSwingDetector:
         self._peak_gyro = 0.0
         self._impact_t = None
 
-                # LPF state (only for accel high-pass)
+                        # LPF state (only for accel high-pass)
         self._acc_lp = 1.0  # init to gravity
         self._acc_hp_prev = 0.0
+
+        self._last_trigger_t = -999.0
 
         # Public API (compatible with ThresholdSwingDetector)
         self.swing_count = 0
@@ -396,11 +400,13 @@ class HysteresisSwingDetector:
                     if self._impact_t is None:  # first impact only
                         self._impact_t = t_sec
 
-            # Exit swing (use raw gmag, not LPF)
+                        # Exit swing (use raw gmag, not LPF)
             if gmag < self.th_off:
                 duration = t_sec - self._swing_start_t
-                if duration >= self.min_duration:
+                if (duration >= self.min_duration and
+                        (self._t_peak - self._last_trigger_t) >= self.debounce_sec):
                     # Confirmed swing
+                    self._last_trigger_t = self._t_peak
                     self.swing_count += 1
                     self.swing_times.append(self._t_peak)
                     self.impact_times.append(self._impact_t)
@@ -542,16 +548,16 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
         'history': [],   # list of {t_peak_ms, mdf, mdf_drop_pct, fatigue_level}
     }
     emg_fatigue_buf = deque(maxlen=EMG_FATIGUE_BUF_SIZE)
-
-    # Swing detection — modular detector (always active; used for swing count + fatigue trigger)
+    # Swing detection modular detector (always active; used for swing count + fatigue trigger)
     if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
         swing_detector = HysteresisSwingDetector(
-            th_on=350.0,   # enter swing (slightly higher than threshold's 300)
-            th_off=175.0,  # exit swing (half of th_on for good hysteresis)
-            th_acc_hp=0.6,  # lowered from 1.0 to catch softer impacts
-            th_jerk=80.0,   # lowered from 150 to catch softer impacts
+            th_on=300.0,   # aligned with ThresholdSwingDetector's thr_gyro_dps=300
+            th_off=150.0,  # half of th_on for good hysteresis gap
+            th_acc_hp=0.6,
+            th_jerk=80.0,
             min_duration=0.08,
             impact_window=0.15,
+            debounce_sec=float(getattr(args, 'debounce_sec', 0.0)),
         )
     else:
         swing_detector = ThresholdSwingDetector(
@@ -577,9 +583,10 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                 baseline_swings=int(args.fatigue_baseline_swings),
             )
             fatigue_q = queue.Queue(maxsize=1)
-                        # Print detector-specific info
+            # Print detector-specific info
             if isinstance(swing_detector, HysteresisSwingDetector):
-                thr_str = f'th_on={swing_detector.th_on:.0f} dps, th_off={swing_detector.th_off:.0f} dps'
+                thr_str = (f'th_on={swing_detector.th_on:.0f} dps, th_off={swing_detector.th_off:.0f} dps'
+                           + (f', debounce={swing_detector.debounce_sec:.1f}s' if swing_detector.debounce_sec > 0 else ''))
             else:
                 thr_str = f'thr={swing_detector.thr_gyro_dps:.0f} dps'
             print(f'[Fatigue] Enabled | {thr_str} | '
@@ -1510,16 +1517,17 @@ def run_offline(args: argparse.Namespace) -> None:
         gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
         gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
 
-                                                                        # Swing detection on pre-loaded IMU data (same detector as live mode)
+        # Swing detection on pre-loaded IMU data (same detector as live mode)
         imu_t0_ms = t_ms[0]
         if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
             _detector = HysteresisSwingDetector(
-                th_on=350.0,
-                th_off=175.0,
+                th_on=300.0,   # aligned with ThresholdSwingDetector's thr_gyro_dps=300
+                th_off=150.0,  # half of th_on for good hysteresis gap
                 th_acc_hp=0.6,
                 th_jerk=80.0,
                 min_duration=0.08,
                 impact_window=0.15,
+                debounce_sec=float(getattr(args, 'debounce_sec', 0.0)),
             )
         else:
             _detector = ThresholdSwingDetector(
@@ -1534,11 +1542,13 @@ def run_offline(args: argparse.Namespace) -> None:
         detector_name = 'HysteresisSwingDetector' if isinstance(_detector, HysteresisSwingDetector) else 'ThresholdSwingDetector'
         if isinstance(_detector, HysteresisSwingDetector):
             n_impacts = sum(1 for it in _detector.impact_times if it is not None)
-            _mode_str = f'{n_swings} swings ({n_impacts} with impact) | th_on={_detector.th_on:.0f} dps, th_off={_detector.th_off:.0f} dps'
+            _debounce_str = f', debounce={_detector.debounce_sec:.1f}s' if _detector.debounce_sec > 0 else ''
+            _mode_str = f'{n_swings} swings ({n_impacts} with impact) | th_on={_detector.th_on:.0f} dps, th_off={_detector.th_off:.0f} dps{_debounce_str}'
         else:
-            _mode_str = (f'gyro>={_detector.thr_gyro_dps:.0f} dps + acc>={_detector.thr_acc_g:.1f} g'
-            if _detector.mode == 'gyro_and_acc'
-            else f'gyro>={_detector.thr_gyro_dps:.0f} dps, peak>={_detector.min_peak_gyro_dps:.0f} dps')
+            _thr_desc = (f'gyro>={_detector.thr_gyro_dps:.0f} dps + acc>={_detector.thr_acc_g:.1f} g'
+                        if _detector.mode == 'gyro_and_acc'
+                        else f'gyro>={_detector.thr_gyro_dps:.0f} dps')
+            _mode_str = f'{n_swings} swings | {_thr_desc}, peak>={_detector.min_peak_gyro_dps:.0f} dps'
         print(f'[{detector_name}] Offline: {_mode_str}')
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
