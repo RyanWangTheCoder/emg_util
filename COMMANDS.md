@@ -61,7 +61,7 @@ python sensordata_plotter.py --mode live --infer-sr
 python sensordata_plotter.py --mode live --infer-sr --raw-zoom
 
 # Live mode with fatigue monitoring
-python sensordata_plotter.py --mode live --fatigue --imu-thr-dps 150 --fatigue-warmup-min 0
+python sensordata_plotter.py --mode live --fatigue --fatigue-warmup-min 0
 
 # Explicit EMG utility path (if not in default location)
 python sensordata_plotter.py --mode live --fatigue --emg-util-path C:\wangx\ftc\emg_util
@@ -75,7 +75,9 @@ python sensordata_plotter.py --mode live --udp-port 5005
 - `--infer-sr`: Auto-detect sample rate from incoming data
 - `--raw-zoom`: Enable dynamic Y-axis zooming for the RAW signal plot
 - `--fatigue`: Enable fatigue monitoring
-- `--imu-thr-dps`: IMU threshold in degrees/second for swing detection (default: 150)
+- `--imu-thr-dps`: Gyro threshold for swing detection in dps (default: **300**)
+- `--swing-detect-mode`: `gyro_and_acc` (default, robust) or `gyro_only`
+- `--debounce-sec`: Min seconds between swings (default: **2.0**; prevents back-swing + forward swing double-count)
 - `--fatigue-warmup-min`: Warmup period in minutes before fatigue tracking (default: 0)
 - `--emg-util-path`: Path to emg_util directory (default: C:\wangx\ftc\emg_util)
 - `--udp-port`: UDP port for receiving data (default: 5005)
@@ -132,14 +134,27 @@ python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_2
 # Saturation check with custom Y-axis range
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095 --max-points 100000
 
-# With IMU data overlay (EMG + IMU on one figure)
-python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --imu-file imu_log_20260131_235524_20260131_235538_000
+# EMG + IMU with swing detection (tuned defaults: gyro_and_acc, 300 dps, 2s debounce)
+# --max-points 1000 = 5s of IMU @ 200 Hz; EMG auto-scaled to 10000 rows @ 2000 Hz
+python sensordata_plotter.py --mode offline \
+    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv
 
-# IMU-only plot (from an IMU CSV file; pass the name without the .csv extension)
-python sensordata_plotter.py --mode offline --imu-file imu_log_20260131_235524_20260131_235538_000
+# EMG + IMU, first 5 seconds only (max-points = IMU rows; EMG auto-scaled)
+python sensordata_plotter.py --mode offline \
+    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv \
+    --max-points 1000
 
-# Custom sample rates
-python sensordata_plotter.py --mode offline --emg-file mydata --emg-sr 2000 --imu-sr 200
+# EMG + IMU, tune swing detection (override defaults)
+python sensordata_plotter.py --mode offline \
+    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv \
+    --swing-detect-mode gyro_and_acc --imu-thr-dps 150 --debounce-sec 2.0
+
+# IMU-only plot (swing detection only, no EMG)
+python sensordata_plotter.py --mode offline \
+    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv
 ```
 
 ### Offline Fatigue Replay (CSV → Live Pipeline)
@@ -150,27 +165,27 @@ Requires both `--emg-file` and `--imu-file`. Produces the 4-subplot figure (RAW,
 ```bash
 # Instant replay — all data fed at once, animation scrolls to end, then stops
 python sensordata_plotter.py --mode offline --fatigue \
-    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
-    --imu-thr-dps 150 --fatigue-baseline-swings 5
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --fatigue-baseline-swings 5
 
 # Instant replay + freeze x-axis at end to show full session (recommended)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
-    --imu-thr-dps 150 --fatigue-baseline-swings 5
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --fatigue-baseline-swings 5
 
 # Real-time replay at 1× speed (watch session unfold in real time)
 python sensordata_plotter.py --mode offline --fatigue --replay-speed 1.0 \
-    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
-    --imu-thr-dps 150
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+   
 
 # Real-time replay at 4× speed
 python sensordata_plotter.py --mode offline --fatigue --replay-speed 4.0 --replay-no-scroll \
-    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
-    --imu-thr-dps 150 --fatigue-baseline-swings 5
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --fatigue-baseline-swings 5
 
 # With explicit emg_util path (if running from a different directory)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
@@ -189,7 +204,9 @@ python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
 - `--replay-speed`: Speed multiplier (default: 0 = instant)
 - `--replay-no-scroll`: Freeze x-axis at end to show full session
 - `--fatigue-baseline-swings`: Number of swings for baseline (default: 20; use 5 for short sessions)
-- `--imu-thr-dps`: Gyro threshold for swing detection (default: 150 dps)
+- `--imu-thr-dps`: Gyro threshold for swing detection (default: **300 dps**)
+- `--swing-detect-mode`: `gyro_and_acc` (default) or `gyro_only`
+- `--debounce-sec`: Min seconds between swings (default: **2.0**)
 - `--sr-hz`: EMG sample rate used for FatigueMonitor and LPF (default: 2000)
 
 **How to interpret the IMU figure (offline IMU-only or IMU overlay):**
@@ -210,9 +227,13 @@ python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
 - `--imu-file`: IMU CSV file (optional, without .csv extension)
 - `--emg-ymax`: Maximum Y-axis value for EMG plot (useful for saturation check)
 - `--raw-zoom`: Zooms the RAW subplot Y-axis to +/- 500 counts around the midpoint
-- `--max-points`: Maximum number of points to plot (for performance)
-- `--emg-sr`: EMG sample rate in Hz (default: 2000)
-- `--imu-sr`: IMU sample rate in Hz (default: 200)
+- `--max-points`: Max **IMU** rows to load (0=unlimited); EMG rows auto-scaled to same wall-clock duration
+- `--imu-sr-hz`: IMU sample rate in Hz for auto-scaling (default: 200). e.g. `--max-points 1000` at 200 Hz = 5 s -> auto-loads 10 000 EMG rows at 2000 Hz
+- `--sr-hz`: EMG sample rate in Hz (default: 2000)
+- `--swing-detect-mode`: `gyro_and_acc` (default) or `gyro_only`
+- `--imu-thr-dps`: Gyro threshold in dps (default: **300**)
+- `--imu-thr-acc-g`: Accel threshold in g for `gyro_and_acc` mode (default: 1.5)
+- `--debounce-sec`: Min seconds between swings (default: **2.0**)
 
 **Saturation Check:**
 - Use `--emg-ymax 4095` to check if signal is clipping at ADC maximum
@@ -326,7 +347,7 @@ print(result["mdf"])            # Median frequency
 python btCentral.py --name MyoW1 --outdir logs_new --rotate-min 20 --udp-enable
 
 # Terminal 2: Start real-time visualization with fatigue monitoring
-python sensordata_plotter.py --mode live --fatigue --imu-thr-dps 150 --fatigue-warmup-min 0
+python sensordata_plotter.py --mode live --fatigue --fatigue-warmup-min 0
 ```
 
 ### Workflow 2: Offline Analysis
@@ -344,9 +365,9 @@ python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_2
 ```bash
 # Replay a 20-minute session with fatigue analysis (instant, full-session view)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file ..\arduino\py_scripts\log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file ..\arduino\py_scripts\log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
-    --imu-thr-dps 150 --fatigue-baseline-swings 5
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --fatigue-baseline-swings 5
 ```
 
 ### Workflow 3: Quick Saturation Check
@@ -457,4 +478,8 @@ C:\wangx\ftc\
 
 ---
 
-**Last Updated:** 2026-03-03
+- **Swing Detection Tuning:** See `SWING_DETECTION.md` for tuning history and rationale
+
+---
+
+**Last Updated:** 2026-03-04

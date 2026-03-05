@@ -16,13 +16,13 @@ UDP messages expected (JSON):
 
 Fatigue monitoring (--fatigue):
   - Maintains a 2600-sample ring buffer of raw EMG at full rate (1300ms @ 2000Hz, +/-300ms MDF padding)
-  - Triggers on IMU gyro magnitude >= --imu-thr-dps (default 150 dps) with 300ms debounce
+  - Triggers on IMU gyro magnitude >= --imu-thr-dps (default 300 dps) with 2.0s debounce
   - Calls FatigueMonitor.push_swing() in a background thread (same class as Android)
   - Displays: text annotation on EMG plot + 3rd MDF trend subplot
   - FatigueMonitor is imported from fatigue_monitor.py (--emg-util-path points to emg_util/ dir)
 
 Usage (live with fatigue):
-  python sensordata_plotter.py --mode live --fatigue --imu-thr-dps 150 --fatigue-warmup-min 0
+  python sensordata_plotter.py --mode live --fatigue --fatigue-warmup-min 0
 
 Offline fatigue replay (--mode offline --fatigue):
   Reads EMG + IMU CSV files, feeds them through the same run_live() pipeline via CsvReplayFeeder.
@@ -113,8 +113,32 @@ def parse_args() -> argparse.Namespace:
     # Offline
     ap.add_argument('--emg-file', default=None)
     ap.add_argument('--imu-file', default=None)
-    ap.add_argument('--max-points', type=int, default=400000)
+    ap.add_argument('--max-points', type=int, default=0,
+                    help='Max IMU rows to load (0=unlimited). '
+                         'EMG rows are auto-scaled to cover the same duration '
+                         'based on --sr-hz (EMG) and --imu-sr-hz (IMU). '
+                         'Example: --max-points 1000 at 200 Hz IMU = 5 s, '
+                         'auto-loads 10000 EMG rows at 2000 Hz.')
+    ap.add_argument('--imu-sr-hz', type=float, default=200.0,
+                    help='IMU sample rate in Hz (default 200). '
+                         'Used only to auto-scale EMG max-points from --max-points.')
     ap.add_argument('--sr-hz', type=float, default=2000.0)
+
+    # Swing detection (applies to both live and offline modes)
+    ap.add_argument('--swing-detect-mode', choices=['gyro_only', 'gyro_and_acc'],
+                    default='gyro_and_acc',
+                    help='Swing trigger mode: gyro_and_acc (default — requires both gyro AND acc '
+                         'thresholds, rejects slow drift and table bumps) '
+                         'or gyro_only (original — gyro threshold only)')
+    ap.add_argument('--imu-thr-acc-g', type=float, default=1.5,
+                    help='Accel magnitude trigger threshold in g for gyro_and_acc mode '
+                         '(default 1.5; at rest ≈ 1.0g due to gravity; '
+                         'only used when --swing-detect-mode gyro_and_acc)')
+    ap.add_argument('--debounce-sec', type=float, default=2.0,
+                    help='Min seconds between two confirmed swings (default 2.0). '
+                         'Prevents back-swing + forward swing being counted as two separate events. '
+                         'A full tennis stroke (back-swing → contact → follow-through) '
+                         'typically spans 1.5–2.5 s.')
 
     # Fatigue monitoring
     ap.add_argument('--fatigue', action='store_true',
@@ -122,8 +146,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--emg-util-path', default=None,
                     help='Path to directory containing emg_util.py '
                          '(default: ../../emg_util relative to this script)')
-    ap.add_argument('--imu-thr-dps', type=float, default=150.0,
-                    help='Gyro magnitude trigger threshold in dps (default 150)')
+    ap.add_argument('--imu-thr-dps', type=float, default=300.0,
+                    help='Gyro magnitude trigger threshold in dps (default 300). '
+                         'At 150 dps too many false positives from arm repositioning; '
+                         '300 dps targets only real strokes.')
     ap.add_argument('--fatigue-warmup-min', type=float, default=0.0,
                     help='Warmup skip before baseline collection in minutes '
                          '(default 0 = start immediately; use 5.0 for real sessions)')
@@ -139,6 +165,117 @@ def parse_args() -> argparse.Namespace:
                          'Only used with --mode offline --fatigue.')
 
     return ap.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# SwingDetector — modular peak-detection state machine
+# ---------------------------------------------------------------------------
+
+class SwingDetector:
+    """IMU-based swing peak detector.
+
+    Supports two trigger modes:
+      'gyro_only'    — trigger when gmag >= thr_gyro_dps  (original behaviour)
+      'gyro_and_acc' — trigger when gmag >= thr_gyro_dps AND amag >= thr_acc_g
+                       (more robust: rejects slow drift and table bumps)
+
+    Works sample-by-sample (live mode via update()) or in batch over a
+    pre-loaded array (offline mode via detect_batch()).
+
+    Attributes set after each confirmed swing:
+      swing_count        — total swings confirmed this session
+      swing_times        — list of confirmed peak times (seconds)
+      last_peak_gyro_mag — gyro magnitude at the most recently confirmed peak
+    """
+
+    def __init__(self, thr_gyro_dps: float = 150.0, thr_acc_g: float = 1.5,
+                 debounce_sec: float = 1.0, mode: str = 'gyro_and_acc',
+                 min_peak_gyro_dps: float = 200.0):
+        self.thr_gyro_dps      = float(thr_gyro_dps)
+        self.thr_acc_g         = float(thr_acc_g)
+        self.debounce_sec      = float(debounce_sec)
+        self.mode              = mode   # 'gyro_only' | 'gyro_and_acc'
+        self.min_peak_gyro_dps = float(min_peak_gyro_dps)  # peak must reach this to confirm
+        self.reset()
+
+    # ------------------------------------------------------------------
+    def reset(self) -> None:
+        """Reset all state.  Call on new BLE session (seg=0)."""
+        self._in_peak           = False
+        self._peak_gyro_mag     = 0.0
+        self._peak_time_sec     = 0.0
+        self._last_trigger_t    = -999.0
+        self.swing_count        = 0
+        self.swing_times: list  = []
+        self.last_peak_gyro_mag = 0.0
+
+    # ------------------------------------------------------------------
+    def _above_threshold(self, gmag: float, amag: float = None) -> bool:
+        if self.mode == 'gyro_and_acc' and amag is not None:
+            return gmag >= self.thr_gyro_dps and amag >= self.thr_acc_g
+        return gmag >= self.thr_gyro_dps
+
+    # ------------------------------------------------------------------
+    def update(self, t_sec: float, gmag: float, amag: float = None):
+        """Feed one sample.
+
+        Returns confirmed peak t_sec (float) when a swing is confirmed,
+        otherwise returns None.  Also updates self.last_peak_gyro_mag on
+        confirmation so callers can pass it to FatigueMonitor.push_swing().
+
+        Args:
+            t_sec: sample time in seconds
+            gmag:  gyro magnitude in dps
+            amag:  accel magnitude in g (optional; used when mode='gyro_and_acc')
+        """
+        above = self._above_threshold(gmag, amag)
+
+        if above:
+            if not self._in_peak:
+                self._in_peak       = True
+                self._peak_gyro_mag = gmag
+                self._peak_time_sec = t_sec
+            elif gmag > self._peak_gyro_mag:
+                self._peak_gyro_mag = gmag
+                self._peak_time_sec = t_sec
+        elif self._in_peak:
+            # Fell below threshold — end of peak.
+            # Confirm only if debounce OK AND peak reached min_peak_gyro_dps.
+            # min_peak_gyro_dps rejects noise/drift that barely crosses thr_gyro_dps
+            # (e.g. gyro oscillating 148-182 dps at rest gives 37 false swings).
+            self._in_peak = False
+            if ((self._peak_time_sec - self._last_trigger_t) >= self.debounce_sec and
+                    self._peak_gyro_mag >= self.min_peak_gyro_dps):
+                confirmed_t              = self._peak_time_sec
+                self._last_trigger_t     = confirmed_t
+                self.swing_count        += 1
+                self.swing_times.append(confirmed_t)
+                self.last_peak_gyro_mag  = self._peak_gyro_mag
+                self._peak_gyro_mag      = 0.0
+                return confirmed_t
+            self._peak_gyro_mag = 0.0
+
+        return None
+
+    # ------------------------------------------------------------------
+    def detect_batch(self, xs, gmag_arr, amag_arr=None) -> list:
+        """Detect swings in pre-loaded arrays (offline mode).
+
+        Resets internal state first, then iterates all samples via update().
+
+        Args:
+            xs:       time array (seconds)
+            gmag_arr: gyro magnitude array (dps)
+            amag_arr: accel magnitude array (g), optional
+
+        Returns:
+            List of confirmed swing peak times in seconds.
+        """
+        self.reset()
+        for i in range(len(xs)):
+            amag = float(amag_arr[i]) if amag_arr is not None else None
+            self.update(float(xs[i]), float(gmag_arr[i]), amag)
+        return list(self.swing_times)
 
 
 # ---------------------------------------------------------------------------
@@ -250,13 +387,14 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
     }
     emg_fatigue_buf = deque(maxlen=EMG_FATIGUE_BUF_SIZE)
 
-    # Peak detection state (matches Android implementation)
-    last_imu_trigger_t = [-999.0]   # mutable container (avoids nonlocal float)
-    imu_thr_dps = float(args.imu_thr_dps)
-    in_peak = [False]           # mutable: currently tracking a peak
-    peak_gyro_mag = [0.0]       # mutable: highest gyro value in current peak
-    peak_time_sec = [0.0]       # mutable: time of peak
-    swing_count = [0]           # mutable: total swings detected this session
+        # Swing detection — modular SwingDetector (always active; used for swing count + fatigue trigger)
+    swing_detector = SwingDetector(
+        thr_gyro_dps=float(args.imu_thr_dps),
+        thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
+        debounce_sec=1.0,
+        mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
+        min_peak_gyro_dps=200.0,  # peak must reach 200 dps to confirm (rejects noise/drift)
+    )
 
     if fatigue_enabled:
         util_path = args.emg_util_path
@@ -273,7 +411,7 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                 baseline_swings=int(args.fatigue_baseline_swings),
             )
             fatigue_q = queue.Queue(maxsize=1)
-            print(f'[Fatigue] Enabled | thr={imu_thr_dps:.0f} dps | '
+            print(f'[Fatigue] Enabled | thr={swing_detector.thr_gyro_dps:.0f} dps | '
                   f'warmup={args.fatigue_warmup_min} min | '
                   f'baseline={args.fatigue_baseline_swings} swings')
         else:
@@ -518,12 +656,10 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                     # Also reset the LPF so it doesn't carry stale state into the new session
                     if emg_sr_hz is not None:
                         env_filter = ButterLPF(fs_hz=emg_sr_hz, cutoff_hz=float(args.cutoff_hz))
+                    swing_detector.reset()
                     if fatigue_enabled and monitor is not None:
                         monitor.reset()
                         emg_fatigue_buf.clear()
-                        last_imu_trigger_t[0] = -999.0
-                        in_peak[0] = False
-                        peak_gyro_mag[0] = 0.0
                         print('[Fatigue] New BLE session (seg=0) — monitor reset')
                 continue
 
@@ -591,39 +727,22 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                 if g is not None:
                     gyro_buf.append((t_sec, float(g)))
 
-                # Peak detection: only trigger on the HIGHEST point of the swing
-                # This prevents double-counting backswing + forward swing
-                if fatigue_enabled and monitor is not None and fatigue_q is not None:
-                    gmag = msg.get('gmag')
-                    if gmag is not None:
-                        gmag = float(gmag)
-
-                        if gmag >= imu_thr_dps:
-                            if not in_peak[0]:
-                                # Start of new peak
-                                in_peak[0] = True
-                                peak_gyro_mag[0] = gmag
-                                peak_time_sec[0] = t_sec
-                            else:
-                                # Already in peak - update if this is higher
-                                if gmag > peak_gyro_mag[0]:
-                                    peak_gyro_mag[0] = gmag
-                                    peak_time_sec[0] = t_sec
-                        elif in_peak[0]:
-                            # Dropped below threshold - end of peak
-                            # Trigger detection at the peak point (if debounce allows)
-                            if (peak_time_sec[0] - last_imu_trigger_t[0]) >= 1.0:
-                                last_imu_trigger_t[0] = peak_time_sec[0]
-                                swing_count[0] += 1  # Increment swing counter
-                                snap = list(emg_fatigue_buf)   # snapshot (copy)
-                                if len(snap) >= 32:
-                                    t_peak_ms = peak_time_sec[0] * 1000.0
-                                    try:
-                                        fatigue_q.put_nowait((snap, t_peak_ms, peak_gyro_mag[0]))
-                                    except queue.Full:
-                                        pass   # drop if fatigue thread is still busy
-                            in_peak[0] = False
-                            peak_gyro_mag[0] = 0.0
+                # Swing detection via SwingDetector (always active — gyro+acc or gyro-only).
+                # Returns confirmed peak t_sec when a swing is confirmed, else None.
+                _gmag_val = msg.get('gmag')
+                if _gmag_val is not None:
+                    confirmed_t = swing_detector.update(t_sec, float(_gmag_val), float(a))
+                    # Fatigue trigger: snapshot EMG ring buffer at confirmed swing peak
+                    if confirmed_t is not None and fatigue_enabled and \
+                            monitor is not None and fatigue_q is not None:
+                        snap = list(emg_fatigue_buf)   # snapshot (copy)
+                        if len(snap) >= 32:
+                            t_peak_ms = confirmed_t * 1000.0
+                            try:
+                                fatigue_q.put_nowait(
+                                    (snap, t_peak_ms, swing_detector.last_peak_gyro_mag))
+                            except queue.Full:
+                                pass   # drop if fatigue thread is still busy
 
             elif k == 'battery':
                 pct = msg.get('pct')
@@ -753,9 +872,9 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                 parts.append(f"SpO2: {last_vitals['spo2']}%")
             if last_vitals.get('hr') is not None:
                 parts.append(f"HR: {last_vitals['hr']:.1f} bpm")
-            # Add swing count
-            if fatigue_enabled and swing_count[0] > 0:
-                parts.append(f"SWINGS: {swing_count[0]}")
+            # Add swing count (shown whenever swings have been detected, with or without --fatigue)
+            if swing_detector.swing_count > 0:
+                parts.append(f"SWINGS: {swing_detector.swing_count}")
 
             title_text.set_text('Realtime Monitoring | ' + ' | '.join(parts))
 
@@ -777,7 +896,7 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                     title_text.set_fontweight('bold')
         else:
             # Show swing count even without vitals
-            swing_str = f" | SWINGS: {swing_count[0]}" if (fatigue_enabled and swing_count[0] > 0) else ""
+            swing_str = f" | SWINGS: {swing_detector.swing_count}" if swing_detector.swing_count > 0 else ""
             title_text.set_text(f'Realtime Monitoring [Waiting for Vitals...]{swing_str}')
             title_text.set_color('black')
             title_text.set_fontweight('normal')
@@ -1051,6 +1170,20 @@ def run_offline(args: argparse.Namespace) -> None:
         return
     # ────────────────────────────────────────────────────────────────────────
 
+        # Shared between EMG and IMU blocks for cross-plot swing annotation
+    emg_t0_ms: int   = None   # host_rx_ms of first EMG sample (timebase alignment)
+    emg_axes         = None   # (ax_r, ax_e) for adding swing vlines after IMU detection
+    swing_times: list = []    # confirmed swing peak times in IMU timebase (sec)
+    imu_t0_ms: int   = None   # host_rx_ms of first IMU sample
+
+    # Auto-scale EMG max-points to match the same wall-clock duration as --max-points IMU rows.
+    # e.g. --max-points 1000 at 200 Hz IMU = 5 s → 10000 EMG rows at 2000 Hz.
+    _imu_max_points = int(args.max_points)
+    _emg_max_points = (
+        int(round(_imu_max_points * float(args.sr_hz) / float(args.imu_sr_hz)))
+        if _imu_max_points > 0 else 0
+    )
+
     if args.emg_file:
         t_ms, raw, env = [], [], []
         with open(args.emg_file, 'r', encoding='utf-8') as f:
@@ -1065,13 +1198,14 @@ def run_offline(args: argparse.Namespace) -> None:
                 t_ms.append(t)
                 raw.append(rw)
                 env.append(ev)
-                if len(t_ms) >= int(args.max_points):
+                if _emg_max_points > 0 and len(t_ms) >= _emg_max_points:
                     break
 
         if not t_ms:
             raise SystemExit('No data read from EMG file')
 
         t0 = t_ms[0]
+        emg_t0_ms = t_ms[0]
         xs  = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
         raw = np.array(raw, dtype=float)
         env = np.array(env, dtype=float)
@@ -1107,6 +1241,7 @@ def run_offline(args: argparse.Namespace) -> None:
             quality_color = 'darkgreen'
 
         fig, (ax_r, ax_e) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+        emg_axes = (ax_r, ax_e)
 
         # RAW subplot
         ax_r.plot(xs, raw, lw=0.8, color='steelblue', label='RAW')
@@ -1142,8 +1277,8 @@ def run_offline(args: argparse.Namespace) -> None:
         ax_e.grid(True, alpha=0.3)
         ax_e.legend(loc='upper right', fontsize=8, ncol=2)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        # NOTE: do NOT call plt.show() here — show both figures together below
 
     if args.imu_file:
         t_ms, ax_vals, ay_vals, az_vals, gx_vals, gy_vals, gz_vals = [], [], [], [], [], [], []
@@ -1178,7 +1313,7 @@ def run_offline(args: argparse.Namespace) -> None:
                 gx_vals.append(gx)
                 gy_vals.append(gy)
                 gz_vals.append(gz)
-                if len(t_ms) >= int(args.max_points):
+                if int(args.max_points) > 0 and len(t_ms) >= int(args.max_points):
                     break
 
         if not t_ms:
@@ -1204,6 +1339,22 @@ def run_offline(args: argparse.Namespace) -> None:
         gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
         gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
 
+                                # Swing detection on pre-loaded IMU data (same SwingDetector as live mode)
+        imu_t0_ms = t_ms[0]
+        _detector = SwingDetector(
+            thr_gyro_dps=float(args.imu_thr_dps),
+            thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
+            debounce_sec=float(getattr(args, 'debounce_sec', 1.0)),
+            mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
+            min_peak_gyro_dps=200.0,  # peak must reach 200 dps to confirm (rejects noise/drift)
+        )
+        swing_times = _detector.detect_batch(xs, gmag, amag)
+        n_swings = _detector.swing_count
+        _mode_str = (f'gyro>={_detector.thr_gyro_dps:.0f} dps + acc>={_detector.thr_acc_g:.1f} g'
+        if _detector.mode == 'gyro_and_acc'
+        else f'gyro>={_detector.thr_gyro_dps:.0f} dps, peak>={_detector.min_peak_gyro_dps:.0f} dps')
+        print(f'[SwingDetector] Offline: {n_swings} swings detected ({_mode_str})')
+
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
 
         # Accel plot
@@ -1211,7 +1362,7 @@ def run_offline(args: argparse.Namespace) -> None:
         ax1.plot(xs, ax_g, lw=0.8, alpha=0.6, label='ax')
         ax1.plot(xs, ay_g, lw=0.8, alpha=0.6, label='ay')
         ax1.plot(xs, az_g, lw=0.8, alpha=0.6, label='az')
-        ax1.set_title(f'Offline IMU: {args.imu_file}\nFSR: {acc_fsr_g}g, {gyro_fsr_dps}dps')
+        ax1.set_title(f'Offline IMU: {args.imu_file}\nFSR: {acc_fsr_g}g, {gyro_fsr_dps}dps  |  {n_swings} swings detected')
         ax1.set_ylabel('Acceleration (g)')
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc='upper right', ncol=4)
@@ -1226,8 +1377,33 @@ def run_offline(args: argparse.Namespace) -> None:
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='upper right', ncol=4)
 
-        plt.tight_layout()
-        plt.show()
+        # Swing annotations on IMU plots (purple dotted vlines at each confirmed peak)
+        if swing_times:
+            ax2.axhline(float(args.imu_thr_dps), color='purple', ls='--', lw=1.2, alpha=0.7,
+                        label=f'gyro thr ({args.imu_thr_dps:.0f} dps)')
+            for i, st in enumerate(swing_times):
+                ax2.axvline(st, color='purple', ls=':', lw=1.2, alpha=0.65,
+                            label='swing peak' if i == 0 else None)
+                ax1.axvline(st, color='purple', ls=':', lw=1.2, alpha=0.65)
+            ax2.legend(loc='upper right', ncol=4)
+
+        fig.tight_layout()
+        # NOTE: do NOT call plt.show() here — show both figures together below
+
+    # Cross-annotate EMG plots with swing times from IMU detection (if both files loaded)
+    if emg_axes is not None and swing_times:
+        _ax_r, _ax_e = emg_axes
+        # Adjust swing times from IMU timebase to EMG timebase using host_rx_ms offset
+        _offset_sec = (imu_t0_ms - emg_t0_ms) / 1000.0
+        for i, st in enumerate(swing_times):
+            _st_emg = st + _offset_sec
+            _ax_r.axvline(_st_emg, color='purple', ls=':', lw=1.2, alpha=0.65,
+                          label='swing peak' if i == 0 else None)
+            _ax_e.axvline(_st_emg, color='purple', ls=':', lw=1.2, alpha=0.65)
+        _ax_r.legend(loc='upper right')
+
+    # Show all figures (EMG + IMU) together so both are visible simultaneously
+    plt.show()
 
 
 # ---------------------------------------------------------------------------
