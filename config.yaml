@@ -18,10 +18,10 @@ features:
   ssc_thr: 0.01
 swing_detection:
   use_gyro: true
-  baseline_s: 2.0
-  z_thr: 5.0
-  min_consec: 3
-  min_gap_ms: 300
+  thr_gyro_dps: 300       # fixed gyro threshold in dps (replaces z-score)
+  thr_acc_g: 0.0          # optional acc gate in g (0=disabled, 1.5=strict)
+  min_gap_ms: 2000        # min ms between swings -- matches plotter debounce=2s
+  # legacy z-score params (no longer used): baseline_s, z_thr, min_consec
   pre_ms: 250
   post_ms: 450
   mdf_pad_ms: 300
