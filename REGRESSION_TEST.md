@@ -2,9 +2,9 @@
 
 **Purpose:** Ensure consistent behavior of EMG analysis algorithms across code changes using real tennis session data.
 
-**Last Updated:** 2026-02-27  
-**Status:** ✅ **25/25 tests passing (100%)**  
-**Execution Time:** ~2 minutes (full suite), ~52 seconds (fast tests only)
+**Last Updated:** 2026-03-04  
+**Status:** ✅ **29/29 tests passing (100%)**  
+**Execution Time:** ~2.5 minutes (full suite), ~60 seconds (fast tests only)
 
 ---
 
@@ -13,11 +13,12 @@
 ### Final Achievement
 
 **✅ Complete Regression Test Suite**
-- **25 tests** across 8 test classes
+- **29 tests** across 9 test classes
 - **100% pass rate** - All tests passing
 - **10 test categories** for selective execution
 - **Zero warnings** with proper pytest configuration
 - **Cross-module coverage** - Tests both `emg_util` and `sensordata_plotter.py`
+- **Swing detector coverage** - Tests both ThresholdSwingDetector and HysteresisSwingDetector
 
 ### Test Categories
 
@@ -26,7 +27,7 @@ Tests are organized into **10 categories** using pytest markers:
 #### Functional Categories
 1. **`data_loading`** (4 tests) - Data loading and integrity tests
 2. **`signal_processing`** (4 tests) - Signal processing algorithm tests  
-3. **`swing_detection`** (2 tests) - Swing detection tests
+3. **`swing_detection`** (6 tests) - Swing detection tests (threshold + hysteresis detectors)
 4. **`fatigue`** (3 tests) - Fatigue analysis tests
 5. **`pipeline`** (1 test) - Full pipeline integration tests
 6. **`baseline`** (2 tests) - Regression baseline tests
@@ -34,8 +35,8 @@ Tests are organized into **10 categories** using pytest markers:
 8. **`plotter`** (6 tests) - Plotter offline mode tests
 
 #### Performance Categories
-9. **`fast`** (17 tests) - Fast tests (< 5 seconds each)
-10. **`slow`** (8 tests) - Slow tests (> 5 seconds each)
+9. **`fast`** (20 tests) - Fast tests (< 5 seconds each)
+10. **`slow`** (9 tests) - Slow tests (> 5 seconds each)
 
 ### Quick Start Examples
 
@@ -60,12 +61,13 @@ pytest tests/test_regression.py -m "signal_processing or fatigue"
 
 | Test Set | Tests | Time | Speed vs Full | Use Case |
 |----------|-------|------|---------------|----------|
-| **All tests** | 25 | ~2 min | 100% | Pre-commit, CI/CD |
-| **Fast tests** | 17 | ~52 sec | **68% faster** | Development, quick checks |
-| **Slow tests** | 8 | ~1 min | - | Integration validation |
-| **Signal processing** | 4 | ~15 sec | **87% faster** | Algorithm changes |
-| **Plotter** | 6 | ~10 sec | **92% faster** | Plotter changes |
-| **Data loading** | 4 | ~8 sec | **93% faster** | Data format changes |
+| **All tests** | 29 | ~2.5 min | 100% | Pre-commit, CI/CD |
+| **Fast tests** | 20 | ~60 sec | **60% faster** | Development, quick checks |
+| **Slow tests** | 9 | ~1.5 min | - | Integration validation |
+| **Swing detection** | 6 | ~20 sec | **87% faster** | Detector algorithm changes |
+| **Signal processing** | 4 | ~15 sec | **90% faster** | Algorithm changes |
+| **Plotter** | 6 | ~10 sec | **93% faster** | Plotter changes |
+| **Data loading** | 4 | ~8 sec | **95% faster** | Data format changes |
 
 ### What Was Fixed During Implementation
 
@@ -109,10 +111,13 @@ pytest tests/test_regression.py -m "signal_processing or fatigue"
 - MDF computation (median frequency in 20-450 Hz range)
 - Classic EMG features (MAV, RMS, WL, ZC, SSC)
 
-**Swing Detection (2 tests)**
+**Swing Detection (6 tests)**
 - IMU-based swing detection (gyro magnitude threshold)
 - Deterministic behavior (same input → same output)
 - Swing window boundaries (t_start_ms, t_peak_ms, t_end_ms)
+- ThresholdSwingDetector (simple threshold + debounce)
+- HysteresisSwingDetector (state machine + impact detection)
+- Impact detection validation (hysteresis detector)
 
 **Fatigue Analysis (3 tests)**
 - FatigueMonitor initialization and configuration
@@ -311,26 +316,43 @@ def test_preprocess_emg(self, loaded_session):
 
 ### Test 3: Swing Detection
 
-**Purpose:** Ensure swing detection is accurate and deterministic.
+**Purpose:** Ensure swing detection is accurate and deterministic for both detector types.
 
 **Tests:**
-- `test_detect_swings_from_imu` - IMU-based swing detection
+- `test_detect_swings_from_imu` - IMU-based swing detection (legacy)
 - `test_swing_detection_consistency` - Deterministic behavior
+- `test_threshold_detector_initialization` - ThresholdSwingDetector setup
+- `test_threshold_detector_basic_detection` - Threshold detector with synthetic data
+- `test_hysteresis_detector_initialization` - HysteresisSwingDetector setup
+- `test_hysteresis_detector_basic_detection` - Hysteresis detector with synthetic data
 
 **What It Catches:**
 - Swing detection failures
 - Non-deterministic behavior
 - Incorrect swing window boundaries
 - Missing swing metadata
+- Detector initialization errors
+- Impact detection failures (hysteresis)
+- Hysteresis state machine bugs
 
-**Key Assertion:**
+**Key Assertions:**
 ```python
-# Swing detection must be deterministic
-swings1 = core.detect_swing_windows_from_imu(imu_df, fs_imu=fs)
-swings2 = core.detect_swing_windows_from_imu(imu_df, fs_imu=fs)
-assert len(swings1) == len(swings2)
-for s1, s2 in zip(swings1, swings2):
-    assert s1["t_peak_ms"] == s2["t_peak_ms"]
+# Threshold detector: simple threshold + debounce
+detector = ThresholdSwingDetector(
+    thr_gyro_dps=300.0, thr_acc_g=1.5,
+    debounce_sec=2.0, mode='gyro_and_acc'
+)
+confirmed_t = detector.update(t_sec, gmag, amag)
+assert detector.swing_count == expected_count
+
+# Hysteresis detector: state machine + impact detection
+detector = HysteresisSwingDetector(
+    th_on=350.0, th_off=175.0,
+    th_acc_hp=0.6, th_jerk=80.0
+)
+confirmed_t = detector.update(t_sec, gmag, amag)
+assert detector.swing_count == expected_count
+assert detector.last_impact_time is not None  # Impact detected
 ```
 
 ---
