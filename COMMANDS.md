@@ -135,6 +135,7 @@ python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_2
 python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095 --max-points 100000
 
 # EMG + IMU with swing detection (tuned defaults: gyro_and_acc, 300 dps, 2s debounce)
+# Uses capture_loader for correct abs_us physical timeline (handles multi-connection sessions)
 # --max-points 1000 = 5s of IMU @ 200 Hz; EMG auto-scaled to 10000 rows @ 2000 Hz
 python sensordata_plotter.py --mode offline \
     --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
@@ -252,6 +253,7 @@ python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
 - `--mode offline`: Enable offline analysis mode
 - `--emg-file`: EMG CSV file (without .csv extension)
 - `--imu-file`: IMU CSV file (optional, without .csv extension)
+- `--log-dir`: Log directory with imu_log_*.csv files -- uses capture_loader.load_session_stitched() for correct abs_us physical timeline; handles multi-connection sessions, BLE dropouts, ESP32 resets. Overrides --imu-file for IMU data.
 - `--emg-ymax`: Maximum Y-axis value for EMG plot (useful for saturation check)
 - `--raw-zoom`: Zooms the RAW subplot Y-axis to +/- 500 counts around the midpoint
 - `--max-points`: Max **IMU** rows to load (0=unlimited); EMG rows auto-scaled to same wall-clock duration
@@ -330,7 +332,10 @@ import capture_loader as loader
 sessions = loader.discover_sessions("logs_new")
 
 # Load stitched session data
+# Returns abs_us-based ts_ms: dev_us within each connection, host_rx_ms gap between connections
+# Correctly handles BLE dropouts (dev_us continuous) and ESP32 resets (dev_us restarts)
 emg_df, imu_df, reconnection_times, capture_ids = loader.load_session_stitched(sessions)
+# imu_df columns: dev_us, abs_us, ts_ms (=abs_us/1000), ax..gz, session_id, capture_idx
 
 # Load individual capture
 emg_df, emg_meta = loader.load_emg_capture("logs_new/emg_log_20260131_235524_20260131_235538_000.csv")
@@ -412,7 +417,7 @@ python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_2
 
 Standard configuration with all features enabled:
 - Full feature extraction (MAV, RMS, WL, ZC, SSC, MNF, MDF)
-- Swing detection with gyroscope
+- Swing detection with gyroscope (fixed 300 dps threshold, 2s gap -- see SWING_DETECTION.md)
 - Fatigue analysis with baseline
 - All diagnostic plots
 - Health checks
@@ -509,4 +514,4 @@ C:\wangx\ftc\
 
 ---
 
-**Last Updated:** 2026-03-04
+**Last Updated:** 2026-03 (added --log-dir, abs_us timeline, swing detection config update)

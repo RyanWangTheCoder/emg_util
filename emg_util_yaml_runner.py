@@ -396,92 +396,100 @@ def segment_bouts_from_active(active_segs: pd.DataFrame, swings: pd.DataFrame, c
     return pd.DataFrame(bouts)
 
 def detect_swings_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
-    sd = cfg.get('swing_detection', {})
-    use_gyro = bool(sd.get('use_gyro', True))
-    baseline_s = float(sd.get('baseline_s', 2.0))
-    z_thr = float(sd.get('z_thr', 5.0))
-    min_consec = int(sd.get('min_consec', 3))
-    min_gap_ms = float(sd.get('min_gap_ms', 300.0))
-    pre_ms = float(sd.get('pre_ms', 250.0))
-    post_ms = float(sd.get('post_ms', 450.0))
+    """Detect swing windows from IMU using a fixed dps threshold.
+
+    Replaces the previous z-score approach. Diagnostic analysis showed the
+    z-score baseline (first 2s) was often corrupted by player movement, and
+    the rest floor statistics cannot reliably produce a threshold near 300 dps
+    for wrist-mounted sensors (rest ~20 dps, swings ~300-1700 dps, no bimodal gap).
+
+    The fixed threshold (default 300 dps) is now consistent with
+    ThresholdSwingDetector and HysteresisSwingDetector in sensordata_plotter.py.
+    Config keys: thr_gyro_dps (300), thr_acc_g (0=disabled), min_gap_ms (2000).
+    """
+    sd         = cfg.get("swing_detection", {})
+    use_gyro   = bool(sd.get("use_gyro", True))
+    thr_dps    = float(sd.get("thr_gyro_dps", 300.0))
+    thr_acc_g  = float(sd.get("thr_acc_g", 0.0))
+    min_gap_ms = float(sd.get("min_gap_ms", 2000.0))
+    pre_ms     = float(sd.get("pre_ms", 250.0))
+    post_ms    = float(sd.get("post_ms", 450.0))
+
+    _EMPTY = pd.DataFrame(columns=["swing_id", "t_start_ms", "t_peak_ms", "t_end_ms", "peak_z", "peak_mag"])
 
     if imu_df is None or len(imu_df) == 0:
-        return pd.DataFrame(columns=['swing_id', 't_start_ms', 't_peak_ms', 't_end_ms', 'peak_z', 'peak_mag'])
+        return _EMPTY
 
-    imu = imu_df.dropna(subset=['ts_ms']).sort_values('ts_ms', kind='mergesort').reset_index(drop=True)
+    imu = imu_df.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
     if len(imu) == 0:
-        return pd.DataFrame(columns=['swing_id', 't_start_ms', 't_peak_ms', 't_end_ms', 'peak_z', 'peak_mag'])
+        return _EMPTY
 
-    t_ms = imu['ts_ms'].to_numpy(dtype=float)
-    t0 = float(t_ms[0])
+    t_ms    = imu["ts_ms"].to_numpy(dtype=float)
+    t0      = float(t_ms[0])
     t_rel_s = (t_ms - t0) / 1000.0
     for i in range(1, len(t_rel_s)):
         if t_rel_s[i] <= t_rel_s[i - 1]:
             t_rel_s[i] = t_rel_s[i - 1] + 1e-9
 
+    # Data is already in physical units (dps / g) -- loader converts via use_physical_units=True
     if use_gyro:
-        mag = np.sqrt(imu['gx'].to_numpy(float) ** 2 + imu['gy'].to_numpy(float) ** 2 + imu['gz'].to_numpy(float) ** 2)
+        mag_dps = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2)
     else:
-        mag = np.sqrt(imu['ax'].to_numpy(float) ** 2 + imu['ay'].to_numpy(float) ** 2 + imu['az'].to_numpy(float) ** 2)
+        mag_dps = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
 
-    total_s = float(np.nanmax(t_rel_s)) if len(t_rel_s) else baseline_s
-    b_s = min(baseline_s, max(0.2 * total_s, 0.5))
-    z, _, _ = core.robust_zscore(mag, t_rel_s <= b_s)
+    # Optional acc gate (mirrors ThresholdSwingDetector gyro_and_acc mode)
+    if thr_acc_g > 0.0:
+        amag_g = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
+        above  = (mag_dps >= thr_dps) & (amag_g >= thr_acc_g)
+    else:
+        above = mag_dps >= thr_dps
 
-    active = z > z_thr
-    if min_consec > 1:
-        run = 0
-        flags = np.zeros_like(active, dtype=bool)
-        for i, v in enumerate(active):
-            run = run + 1 if v else 0
-            flags[i] = run >= min_consec
-        active = flags
-
+    # Find contiguous above-threshold regions, take peak within each
     peaks = []
     i = 0
-    while i < len(active):
-        if not active[i]:
+    n = len(above)
+    while i < n:
+        if not above[i]:
             i += 1
             continue
         j = i
-        while j < len(active) and active[j]:
+        while j < n and above[j]:
             j += 1
-        seg = slice(i, j)
-        k = int(i + np.nanargmax(z[seg]))
+        k = int(i + np.nanargmax(mag_dps[i:j]))
         peaks.append(k)
         i = j
 
     if not peaks:
-        return pd.DataFrame(columns=['swing_id', 't_start_ms', 't_peak_ms', 't_end_ms', 'peak_z', 'peak_mag'])
+        return _EMPTY
 
-    # enforce min gap
-    peaks = sorted(peaks, key=lambda k: t_ms[k])
-    kept = []
+    # Enforce min gap -- keep highest peak when two are within min_gap_ms
+    peaks  = sorted(peaks, key=lambda k: t_ms[k])
+    kept   = []
     last_t = -1e18
     for k in peaks:
         if (t_ms[k] - last_t) >= min_gap_ms:
             kept.append(k)
             last_t = t_ms[k]
-        else:
-            if kept and z[k] > z[kept[-1]]:
-                kept[-1] = k
-                last_t = t_ms[k]
+        elif kept and mag_dps[k] > mag_dps[kept[-1]]:
+            kept[-1] = k
+            last_t   = t_ms[k]
 
     rows = []
     for sid, k in enumerate(kept):
         tp = float(t_ms[k])
         rows.append({
-            'swing_id': int(sid),
-            't_start_ms': tp - pre_ms,
-            't_peak_ms': tp,
-            't_end_ms': tp + post_ms,
-            'peak_z': float(z[k]),
-            'peak_mag': float(mag[k]),
+            "swing_id":   int(sid),
+            "t_start_ms": tp - pre_ms,
+            "t_peak_ms":  tp,
+            "t_end_ms":   tp + post_ms,
+            "peak_z":     float(mag_dps[k]),  # dps value (replaces z-score)
+            "peak_mag":   float(mag_dps[k]),
         })
 
-    out = pd.DataFrame(rows).sort_values('t_start_ms').reset_index(drop=True)
-    out['swing_id'] = np.arange(len(out), dtype=int)
+    out = pd.DataFrame(rows).sort_values("t_start_ms").reset_index(drop=True)
+    out["swing_id"] = np.arange(len(out), dtype=int)
     return out
+
 
 
 def file_time_index(paths: List[str], time_col: str = 'dev_us') -> List[Tuple[str, int, int]]:
@@ -675,13 +683,17 @@ def analyze_single_session(session_id: str, files: Any, cfg: Dict[str, Any], out
     pd.DataFrame([s.__dict__ for s in sdata.imu_segments]).to_csv(os.path.join(out_dir, 'segment_summary_imu.csv'), index=False)
 
     sess_cfg = cfg.get('session', {})
-    
+
     # --- IMU Loading & Activity Gating ---
-    imu_df = loader.load_imu_concat(
-        files.imu_paths,
+    # Use load_session_stitched so abs_us-based ts_ms is the canonical time axis.
+    # This correctly handles BLE dropouts and ESP32 resets across multiple
+    # connections: within each connection dev_us gives accurate physical time;
+    # between connections host_rx_ms gap gives the correct inter-connection offset.
+    _, imu_df, _, _ = loader.load_session_stitched(
+        {session_id: files},
         use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
-        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2)),
-        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250))
+        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 4)),
+        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 1000))
     )
     
     active_segs = activity_segments_from_imu(imu_df, cfg)

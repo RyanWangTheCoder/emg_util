@@ -229,7 +229,7 @@ def load_emg_concat(paths: List[str], usecols: Optional[List[str]] = None) -> pd
     Adds derived ts_ms column.
     """
     if usecols is None:
-        usecols = ['dev_us', 'env', 'raw', 'ref']
+        usecols = ['dev_us', 'env', 'raw', 'ref', 'host_rx_ms']
     parts = []
     for p in paths:
         df = pd.read_csv(p, usecols=usecols, engine='python')
@@ -257,7 +257,7 @@ def load_imu_concat(paths: List[str],
     Adds derived ts_ms column.
     """
     if usecols is None:
-        usecols = ['dev_us', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'acc_fsr_g', 'gyro_fsr_dps']
+        usecols = ['dev_us', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'acc_fsr_g', 'gyro_fsr_dps', 'host_rx_ms']
     parts = []
     for p in paths:
         df = pd.read_csv(p, usecols=usecols, engine='python')
@@ -334,9 +334,22 @@ def load_session_stitched(
     """Load all BLE connections in a folder as one stitched tennis session.
 
     Each BLE connection has its own device clock (dev_us = microseconds since
-    device boot). This function uses the wall-clock session_id timestamps to
-    compute absolute time offsets, correctly handling device reboots between
-    BLE connections.
+    device boot). This function builds a reconstructed physical timeline (abs_us)
+    using a hybrid approach:
+
+    Within each connection:
+        Uses dev_us for intra-sample timing -- accurate physical time with no
+        BLE transmission jitter. dev_us is already 64-bit extended by
+        DeviceClockExtender on the host so 32-bit rollover (~71min) is handled.
+
+    Between connections:
+        Uses host_rx_ms gap between the last sample of connection N and the
+        first sample of connection N+1. This gives the actual BLE gap in
+        milliseconds and is correct regardless of whether the ESP32 reset or
+        not, and regardless of the DeviceClockExtender 71-min residual offset.
+
+    This is simpler and more robust than trying to detect BLE-dropout-only vs
+    ESP32-reset from dev_us continuity.
 
     The returned DataFrames have:
       - abs_us  : absolute microseconds from the start of the tennis session
@@ -358,27 +371,25 @@ def load_session_stitched(
                                after the first)
         capture_ids       : list of session_ids in chronological order
     """
-    # Sort BLE connections by wall-clock time
+    # Sort BLE connections by wall-clock time (session_id = YYYYMMDD_HHMMSS)
     sorted_items = sorted(sessions.items(), key=lambda x: _parse_session_datetime(x[0]))
     if not sorted_items:
         empty = pd.DataFrame()
         return empty, empty, [], []
-
-    first_dt = _parse_session_datetime(sorted_items[0][0])
 
     emg_parts: List[pd.DataFrame] = []
     imu_parts: List[pd.DataFrame] = []
     reconnection_times_s: List[float] = []
     capture_ids: List[str] = []
 
+    # Running abs_us end of the previous connection for each stream.
+    # Used to compute the inter-connection offset for the next connection.
+    emg_abs_end_us: int = 0          # abs_us of last EMG sample so far
+    imu_abs_end_us: int = 0          # abs_us of last IMU sample so far
+    emg_host_end_ms: Optional[float] = None   # host_rx_ms of last EMG sample
+    imu_host_end_ms: Optional[float] = None   # host_rx_ms of last IMU sample
+
     for i, (session_id, files) in enumerate(sorted_items):
-        session_dt = _parse_session_datetime(session_id)
-        # Wall-clock offset from session start in microseconds
-        wall_offset_us = int((session_dt - first_dt).total_seconds() * 1e6)
-
-        if i > 0:
-            reconnection_times_s.append(wall_offset_us / 1e6)
-
         capture_ids.append(session_id)
 
         # --- Load EMG ---
@@ -386,8 +397,23 @@ def load_session_stitched(
             emg = load_emg_concat(files.emg_paths)
             if len(emg) > 0:
                 dev_start = int(emg['dev_us'].min())
-                emg['abs_us'] = (wall_offset_us
-                                 + (emg['dev_us'].astype(np.int64) - dev_start))
+                # Intra-connection time: dev_us relative to this connection's start
+                dev_rel = emg['dev_us'].astype(np.int64) - dev_start
+                if i == 0:
+                    # First connection: abs_us starts at 0
+                    emg['abs_us'] = dev_rel
+                else:
+                    # Inter-connection gap from host_rx_ms (ms resolution).
+                    # Works for both BLE-dropout-only and ESP32-reset cases.
+                    host_start_ms = float(emg['host_rx_ms'].iloc[0]) if 'host_rx_ms' in emg.columns and emg['host_rx_ms'].notna().any() else None
+                    if host_start_ms is not None and emg_host_end_ms is not None:
+                        gap_us = max(0, int((host_start_ms - emg_host_end_ms) * 1000))
+                    else:
+                        gap_us = 0  # fallback: no gap (conservative)
+                    emg['abs_us'] = emg_abs_end_us + gap_us + dev_rel
+                    reconnection_times_s.append(float(emg_abs_end_us + gap_us) / 1e6)
+                emg_abs_end_us  = int(emg['abs_us'].max())
+                emg_host_end_ms = float(emg['host_rx_ms'].iloc[-1]) if 'host_rx_ms' in emg.columns and emg['host_rx_ms'].notna().any() else None
                 emg['session_id'] = session_id
                 emg['capture_idx'] = i
                 emg_parts.append(emg)
@@ -402,8 +428,21 @@ def load_session_stitched(
             )
             if len(imu) > 0:
                 dev_start_imu = int(imu['dev_us'].min())
-                imu['abs_us'] = (wall_offset_us
-                                 + (imu['dev_us'].astype(np.int64) - dev_start_imu))
+                dev_rel_imu   = imu['dev_us'].astype(np.int64) - dev_start_imu
+                if i == 0:
+                    imu['abs_us'] = dev_rel_imu
+                else:
+                    host_start_ms_imu = float(imu['host_rx_ms'].iloc[0]) if 'host_rx_ms' in imu.columns and imu['host_rx_ms'].notna().any() else None
+                    if host_start_ms_imu is not None and imu_host_end_ms is not None:
+                        gap_us_imu = max(0, int((host_start_ms_imu - imu_host_end_ms) * 1000))
+                    else:
+                        gap_us_imu = 0
+                    imu['abs_us'] = imu_abs_end_us + gap_us_imu + dev_rel_imu
+                    # Only append reconnection time once (use IMU if EMG not present)
+                    if not files.emg_paths:
+                        reconnection_times_s.append(float(imu_abs_end_us + gap_us_imu) / 1e6)
+                imu_abs_end_us  = int(imu['abs_us'].max())
+                imu_host_end_ms = float(imu['host_rx_ms'].iloc[-1]) if 'host_rx_ms' in imu.columns and imu['host_rx_ms'].notna().any() else None
                 imu['session_id'] = session_id
                 imu['capture_idx'] = i
                 imu_parts.append(imu)

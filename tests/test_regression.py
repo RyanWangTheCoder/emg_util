@@ -135,10 +135,99 @@ class TestDataLoading:
         assert len(imu_df) > 0, "IMU DataFrame is empty"
         assert "ts_ms" in imu_df.columns
         assert all(col in imu_df.columns for col in ["ax", "ay", "az", "gx", "gy", "gz"])
+        # abs_us is the reconstructed physical timeline from load_session_stitched
+        # (dev_us within connection, host_rx_ms gap between connections)
+        assert "abs_us" in imu_df.columns, "abs_us column missing -- load_session_stitched not used"
+        assert imu_df["abs_us"].is_monotonic_increasing, "abs_us should be monotonically increasing"
         
         # Check metadata
         assert isinstance(imu_meta, dict)
         assert "fs_hz" in imu_meta
+
+
+# ============================================================================
+# Test 1b: Stitched Loader Timeline Correctness
+# ============================================================================
+
+@pytest.mark.data_loading
+@pytest.mark.fast
+class TestStitchedLoader:
+    """Test load_session_stitched abs_us timeline correctness."""
+
+    def test_single_connection_abs_us_starts_at_zero(self, loaded_session):
+        """abs_us should start at 0 for a single-connection session."""
+        imu_df = loaded_session["imu_df"]
+        assert int(imu_df["abs_us"].iloc[0]) == 0, "abs_us should start at 0"
+
+    def test_abs_us_monotonic(self, loaded_session):
+        """abs_us must be monotonically non-decreasing."""
+        imu_df = loaded_session["imu_df"]
+        assert imu_df["abs_us"].is_monotonic_increasing
+
+    def test_ts_ms_equals_abs_us_over_1000(self, loaded_session):
+        """ts_ms must equal abs_us / 1000."""
+        imu_df = loaded_session["imu_df"]
+        import numpy as np
+        diff = (imu_df["abs_us"].values / 1000.0) - imu_df["ts_ms"].values
+        assert np.allclose(diff, 0, atol=1e-6), "ts_ms != abs_us/1000"
+
+    def test_ble_dropout_stitching(self, tmp_path):
+        """BLE dropout (dev_us continuous): gap preserved from dev_us."""
+        import csv, numpy as np
+        from capture_loader import load_session_stitched, SessionFiles
+
+        def make_imu(path, dev_start, host_start, n=5, step=5_000_000):
+            with open(path, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['dev_us','ax','ay','az','gx','gy','gz',
+                            'acc_fsr_g','gyro_fsr_dps','host_rx_ms'])
+                for k in range(n):
+                    w.writerow([dev_start + k*step, 0,0,8192, 0,0,0, 4, 1000,
+                                host_start + k*(step//1000)])
+
+        p1 = tmp_path / 'imu_log_20260101_100000_20260101_100000_000.csv'
+        p2 = tmp_path / 'imu_log_20260101_100010_20260101_100010_000.csv'
+        make_imu(p1, dev_start=0,          host_start=0)
+        make_imu(p2, dev_start=50_000_000, host_start=50_000)  # 5s BLE gap
+
+        sessions = {
+            '20260101_100000': SessionFiles('20260101_100000', [], [str(p1)], None),
+            '20260101_100010': SessionFiles('20260101_100010', [], [str(p2)], None),
+        }
+        _, imu, _, _ = load_session_stitched(sessions, use_physical_units=False)
+        abs_s = imu['abs_us'].values / 1e6
+        gap = abs_s[5] - abs_s[4]
+        assert abs(abs_s[-1] - 95) < 1, f"Expected span 0-95s, got {abs_s[-1]:.1f}s"
+        assert abs(gap - 5) < 1, f"Expected 5s BLE gap, got {gap:.1f}s"
+
+    def test_esp32_reset_stitching(self, tmp_path):
+        """ESP32 reset (dev_us restarts): gap from host_rx_ms."""
+        import csv, numpy as np
+        from capture_loader import load_session_stitched, SessionFiles
+
+        def make_imu(path, dev_start, host_start, n=5, step=5_000_000):
+            with open(path, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['dev_us','ax','ay','az','gx','gy','gz',
+                            'acc_fsr_g','gyro_fsr_dps','host_rx_ms'])
+                for k in range(n):
+                    w.writerow([dev_start + k*step, 0,0,8192, 0,0,0, 4, 1000,
+                                host_start + k*(step//1000)])
+
+        p1 = tmp_path / 'imu_log_20260101_110000_20260101_110000_000.csv'
+        p2 = tmp_path / 'imu_log_20260101_110030_20260101_110030_000.csv'
+        make_imu(p1, dev_start=0, host_start=0)
+        make_imu(p2, dev_start=0, host_start=75_000)  # reset + 30s wall gap
+
+        sessions = {
+            '20260101_110000': SessionFiles('20260101_110000', [], [str(p1)], None),
+            '20260101_110030': SessionFiles('20260101_110030', [], [str(p2)], None),
+        }
+        _, imu, _, _ = load_session_stitched(sessions, use_physical_units=False)
+        abs_s = imu['abs_us'].values / 1e6
+        gap = abs_s[5] - abs_s[4]
+        assert abs(abs_s[-1] - 120) < 1, f"Expected span 0-120s, got {abs_s[-1]:.1f}s"
+        assert abs(gap - 30) < 1, f"Expected 30s reset gap, got {gap:.1f}s"
 
 
 # ============================================================================
@@ -243,13 +332,12 @@ class TestSwingDetection:
         """Test IMU-based swing detection."""
         imu_df = loaded_session["imu_df"]
         
-        # Detect swings (returns DataFrame)
+        # Detect swings using fixed 300 dps threshold (z-score replaced 2026-03)
+        # Legacy params (baseline_s, z_thr, min_consec) are accepted but ignored
         swings_df = core.detect_swing_windows_from_imu(
             imu_df,
-            baseline_s=2.0,
-            z_thr=5.0,
-            min_consec=3,
-            min_gap_ms=300.0,
+            thr_gyro_dps=300.0,
+            min_gap_ms=2000.0,
             pre_ms=250.0,
             post_ms=450.0,
         )
@@ -268,9 +356,9 @@ class TestSwingDetection:
         """Test that swing detection is deterministic."""
         imu_df = loaded_session["imu_df"]
         
-        # Detect swings twice
-        swings1 = core.detect_swing_windows_from_imu(imu_df)
-        swings2 = core.detect_swing_windows_from_imu(imu_df)
+        # Detect swings twice with fixed threshold (deterministic)
+        swings1 = core.detect_swing_windows_from_imu(imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0)
+        swings2 = core.detect_swing_windows_from_imu(imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0)
         
         # Should be identical
         assert len(swings1) == len(swings2)
@@ -351,10 +439,10 @@ class TestSwingDetection:
         except ImportError:
             pytest.skip("sensordata_plotter not available")
         
-        # Initialize detector with default params
+        # Initialize detector with aligned defaults (th_on=300, th_off=150 since 2026-03)
         detector = HysteresisSwingDetector(
-            th_on=350.0,
-            th_off=175.0,
+            th_on=300.0,
+            th_off=150.0,
             th_acc_hp=0.6,
             th_jerk=80.0,
             min_duration=0.08,
@@ -362,8 +450,8 @@ class TestSwingDetection:
         )
         
         # Verify initialization
-        assert detector.th_on == 350.0
-        assert detector.th_off == 175.0
+        assert detector.th_on == 300.0
+        assert detector.th_off == 150.0
         assert detector.th_acc_hp == 0.6
         assert detector.th_jerk == 80.0
         assert detector.min_duration == 0.08
@@ -381,8 +469,8 @@ class TestSwingDetection:
             pytest.skip("sensordata_plotter not available")
         
         detector = HysteresisSwingDetector(
-            th_on=350.0,
-            th_off=175.0,
+            th_on=300.0,
+            th_off=150.0,
             th_acc_hp=0.6,
             th_jerk=80.0,
             min_duration=0.08,
@@ -448,8 +536,8 @@ class TestFatigueAnalysis:
         emg_df = loaded_session["emg_df"]
         imu_df = loaded_session["imu_df"]
         
-        # Detect swings (returns DataFrame)
-        swings_df = core.detect_swing_windows_from_imu(imu_df)
+        # Detect swings with fixed 300 dps threshold
+        swings_df = core.detect_swing_windows_from_imu(imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0)
         
         if len(swings_df) < 5:
             pytest.skip("Not enough swings for baseline test")
@@ -493,8 +581,8 @@ class TestFatigueAnalysis:
         """Test baseline swing selection."""
         imu_df = loaded_session["imu_df"]
         
-        # Detect swings (returns DataFrame)
-        swings_df = core.detect_swing_windows_from_imu(imu_df)
+        # Detect swings with fixed 300 dps threshold
+        swings_df = core.detect_swing_windows_from_imu(imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0)
         
         if len(swings_df) < 20:
             pytest.skip("Not enough swings for baseline selection test")
@@ -545,7 +633,9 @@ class TestFullPipeline:
             },
             "swing_detection": {
                 "use_gyro": True,
-                "z_thr": 5.0,
+                "thr_gyro_dps": 300.0,   # fixed threshold (z-score replaced 2026-03)
+                "thr_acc_g": 0.0,
+                "min_gap_ms": 2000,
             },
             "baseline": {
                 "mode": "swing",
@@ -602,8 +692,8 @@ class TestRegressionBaselines:
         """Test that swing count is consistent with baseline."""
         imu_df = loaded_session["imu_df"]
         
-        # Detect swings (returns DataFrame)
-        swings_df = core.detect_swing_windows_from_imu(imu_df)
+        # Detect swings with fixed 300 dps threshold (z-score replaced 2026-03)
+        swings_df = core.detect_swing_windows_from_imu(imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0)
         
         # Expected range based on regression data
         # (Update these values after establishing baseline)

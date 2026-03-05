@@ -113,6 +113,11 @@ def parse_args() -> argparse.Namespace:
     # Offline
     ap.add_argument('--emg-file', default=None)
     ap.add_argument('--imu-file', default=None)
+    ap.add_argument('--log-dir', default=None,
+                    help='Log directory containing imu_log_*.csv files. '
+                         'Uses capture_loader for correct abs_us timeline '
+                         '(handles multi-connection sessions, BLE dropouts, '
+                         'ESP32 resets). Overrides --imu-file for IMU data.')
     ap.add_argument('--max-points', type=int, default=0,
                     help='Max IMU rows to load (0=unlimited). '
                          'EMG rows are auto-scaled to cover the same duration '
@@ -1314,8 +1319,8 @@ class CsvReplayFeeder:
 # ---------------------------------------------------------------------------
 
 def run_offline(args: argparse.Namespace) -> None:
-    if not args.emg_file and not args.imu_file:
-        raise SystemExit('Offline mode requires --emg-file or --imu-file')
+    if not args.emg_file and not args.imu_file and not getattr(args, 'log_dir', None):
+        raise SystemExit('Offline mode requires --emg-file, --imu-file, or --log-dir')
 
     # ── Fatigue offline: drive run_live() via CSV replay feeder ─────────────
     if getattr(args, 'fatigue', False):
@@ -1458,67 +1463,79 @@ def run_offline(args: argparse.Namespace) -> None:
         fig.tight_layout()
         # NOTE: do NOT call plt.show() here — show both figures together below
 
-    if args.imu_file:
-        t_ms, ax_vals, ay_vals, az_vals, gx_vals, gy_vals, gz_vals = [], [], [], [], [], [], []
-        # Fallback FSR values if missing from CSV
-        acc_fsr_g = 4
-        gyro_fsr_dps = 1000
-
-        with open(args.imu_file, 'r', encoding='utf-8') as f:
-            r = csv.DictReader(f)
-            for row in r:
-                try:
-                    t  = int(row.get('host_rx_ms', '0'))
-
-                    # Read FSR metadata if available in CSV row
-                    if 'acc_fsr_g' in row and row['acc_fsr_g']:
-                        acc_fsr_g = int(row['acc_fsr_g'])
-                    if 'gyro_fsr_dps' in row and row['gyro_fsr_dps']:
-                        gyro_fsr_dps = int(row['gyro_fsr_dps'])
-
-                    ax = float(row.get('ax', 'nan'))
-                    ay = float(row.get('ay', 'nan'))
-                    az = float(row.get('az', 'nan'))
-                    gx = float(row.get('gx', 'nan'))
-                    gy = float(row.get('gy', 'nan'))
-                    gz = float(row.get('gz', 'nan'))
-                except Exception:
-                    continue
-                t_ms.append(t)
-                ax_vals.append(ax)
-                ay_vals.append(ay)
-                az_vals.append(az)
-                gx_vals.append(gx)
-                gy_vals.append(gy)
-                gz_vals.append(gz)
-                if int(args.max_points) > 0 and len(t_ms) >= int(args.max_points):
-                    break
-
-        if not t_ms:
-            raise SystemExit('No data read from IMU file')
-
-        # Convert raw LSB to physical units
-        acc_map = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
-        gyr_map = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
-        acc_lsb_per_g = acc_map.get(acc_fsr_g, 16384.0)
-        gyro_lsb_per_dps = gyr_map.get(gyro_fsr_dps, 131.0)
-
-        t0 = t_ms[0]
-        xs = np.array([(t - t0) / 1000.0 for t in t_ms], dtype=float)
-
-        # Calculate magnitudes in physical units
-        ax_g = np.array(ax_vals, dtype=float) / acc_lsb_per_g
-        ay_g = np.array(ay_vals, dtype=float) / acc_lsb_per_g
-        az_g = np.array(az_vals, dtype=float) / acc_lsb_per_g
-        amag = np.sqrt(ax_g**2 + ay_g**2 + az_g**2)
-
-        gx_dps = np.array(gx_vals, dtype=float) / gyro_lsb_per_dps
-        gy_dps = np.array(gy_vals, dtype=float) / gyro_lsb_per_dps
-        gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
-        gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
+    _has_imu = bool(getattr(args, 'log_dir', None) or args.imu_file)
+    if _has_imu:
+        # Use capture_loader for correct abs_us-based timeline.
+        # Handles single file (--imu-file), multi-file sessions (--log-dir),
+        # BLE dropouts and ESP32 resets correctly.
+        try:
+            import capture_loader as _cl
+            _log_dir = getattr(args, 'log_dir', None)
+            if _log_dir:
+                _sessions = _cl.discover_sessions(_log_dir)
+            else:
+                # Single file: treat its directory as the log dir
+                import glob as _glob
+                _file_dir = os.path.dirname(os.path.abspath(args.imu_file))
+                _sessions = _cl.discover_sessions(_file_dir)
+                if not _sessions:
+                    # Fallback: wrap the single file manually
+                    _sessions = {'offline': _cl.SessionFiles('offline', [], [args.imu_file], None)}
+            if not _sessions:
+                raise SystemExit('No IMU session files found')
+            # Stitch all connections into one timeline
+            _, _imu_df, _, _ = _cl.load_session_stitched(
+                _sessions,
+                use_physical_units=True,
+                acc_fsr_default_g=4.0,
+                gyro_fsr_default_dps=1000.0,
+            )
+            if _imu_df is None or len(_imu_df) == 0:
+                raise SystemExit('No IMU data loaded')
+            # Apply max_points limit
+            if int(args.max_points) > 0 and len(_imu_df) > int(args.max_points):
+                _imu_df = _imu_df.iloc[:int(args.max_points)].copy()
+            # Build time axis from abs_us (physical time, correct debounce)
+            xs = (_imu_df['abs_us'].to_numpy(float) - float(_imu_df['abs_us'].iloc[0])) / 1e6
+            imu_t0_ms = float(_imu_df['host_rx_ms'].iloc[0]) if 'host_rx_ms' in _imu_df.columns else 0.0
+            # Physical unit arrays (already converted by load_session_stitched)
+            ax_g = _imu_df['ax'].to_numpy(float)
+            ay_g = _imu_df['ay'].to_numpy(float)
+            az_g = _imu_df['az'].to_numpy(float)
+            amag = np.sqrt(ax_g**2 + ay_g**2 + az_g**2)
+            gx_dps = _imu_df['gx'].to_numpy(float)
+            gy_dps = _imu_df['gy'].to_numpy(float)
+            gz_dps = _imu_df['gz'].to_numpy(float)
+            gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
+        except ImportError:
+            # capture_loader not available -- fall back to single-file host_rx_ms path
+            _imu_df = None
+            t_ms, ax_vals, ay_vals, az_vals, gx_vals, gy_vals, gz_vals = [], [], [], [], [], [], []
+            acc_fsr_g = 4; gyro_fsr_dps = 1000
+            _imu_src = getattr(args, 'log_dir', None) or args.imu_file
+            with open(_imu_src, 'r', encoding='utf-8') as f:
+                for row in csv.DictReader(f):
+                    try:
+                        t = int(row.get('host_rx_ms', '0'))
+                        if 'acc_fsr_g' in row and row['acc_fsr_g']: acc_fsr_g = int(row['acc_fsr_g'])
+                        if 'gyro_fsr_dps' in row and row['gyro_fsr_dps']: gyro_fsr_dps = int(row['gyro_fsr_dps'])
+                        t_ms.append(t)
+                        ax_vals.append(float(row.get('ax','nan'))); ay_vals.append(float(row.get('ay','nan')))
+                        az_vals.append(float(row.get('az','nan'))); gx_vals.append(float(row.get('gx','nan')))
+                        gy_vals.append(float(row.get('gy','nan'))); gz_vals.append(float(row.get('gz','nan')))
+                    except: continue
+                    if int(args.max_points) > 0 and len(t_ms) >= int(args.max_points): break
+            if not t_ms: raise SystemExit('No data read from IMU file')
+            acc_map = {2:16384.,4:8192.,8:4096.,16:2048.}; gyr_map = {250:131.,500:65.5,1000:32.8,2000:16.4}
+            acc_lsb = acc_map.get(acc_fsr_g,16384.); gyr_lsb = gyr_map.get(gyro_fsr_dps,131.)
+            xs = np.array([(t-t_ms[0])/1000. for t in t_ms], dtype=float)
+            imu_t0_ms = float(t_ms[0])
+            ax_g = np.array(ax_vals)/acc_lsb; ay_g = np.array(ay_vals)/acc_lsb; az_g = np.array(az_vals)/acc_lsb
+            amag = np.sqrt(ax_g**2+ay_g**2+az_g**2)
+            gx_dps = np.array(gx_vals)/gyr_lsb; gy_dps = np.array(gy_vals)/gyr_lsb; gz_dps = np.array(gz_vals)/gyr_lsb
+            gmag = np.sqrt(gx_dps**2+gy_dps**2+gz_dps**2)
 
         # Swing detection on pre-loaded IMU data (same detector as live mode)
-        imu_t0_ms = t_ms[0]
         if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
             _detector = HysteresisSwingDetector(
                 th_on=300.0,   # aligned with ThresholdSwingDetector's thr_gyro_dps=300
@@ -1558,7 +1575,8 @@ def run_offline(args: argparse.Namespace) -> None:
         ax1.plot(xs, ax_g, lw=0.8, alpha=0.6, label='ax')
         ax1.plot(xs, ay_g, lw=0.8, alpha=0.6, label='ay')
         ax1.plot(xs, az_g, lw=0.8, alpha=0.6, label='az')
-        ax1.set_title(f'Offline IMU: {args.imu_file}\nFSR: {acc_fsr_g}g, {gyro_fsr_dps}dps  |  {n_swings} swings detected')
+        _imu_src = getattr(args, 'log_dir', None) or args.imu_file or 'IMU'
+        ax1.set_title(f'Offline IMU: {_imu_src}\n{n_swings} swings detected (abs_us timeline)')
         ax1.set_ylabel('Acceleration (g)')
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc='upper right', ncol=4)
@@ -1568,7 +1586,7 @@ def run_offline(args: argparse.Namespace) -> None:
         ax2.plot(xs, gx_dps, lw=0.8, alpha=0.6, label='gx')
         ax2.plot(xs, gy_dps, lw=0.8, alpha=0.6, label='gy')
         ax2.plot(xs, gz_dps, lw=0.8, alpha=0.6, label='gz')
-        ax2.set_xlabel('Time (s) (host_rx_ms)')
+        ax2.set_xlabel('Time (s) (abs_us physical time)')
         ax2.set_ylabel('Rotation (dps)')
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='upper right', ncol=4)
