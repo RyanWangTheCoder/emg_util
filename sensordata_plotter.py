@@ -125,6 +125,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument('--sr-hz', type=float, default=2000.0)
 
     # Swing detection (applies to both live and offline modes)
+    ap.add_argument('--swing-detector', choices=['threshold', 'hysteresis'],
+                    default='threshold',
+                    help='Detector algorithm: threshold (simple, current default) or '
+                         'hysteresis (advanced, with impact detection)')
     ap.add_argument('--swing-detect-mode', choices=['gyro_only', 'gyro_and_acc'],
                     default='gyro_and_acc',
                     help='Swing trigger mode: gyro_and_acc (default — requires both gyro AND acc '
@@ -168,16 +172,17 @@ def parse_args() -> argparse.Namespace:
 
 
 # ---------------------------------------------------------------------------
-# SwingDetector — modular peak-detection state machine
+# Swing Detectors — modular peak-detection state machines
 # ---------------------------------------------------------------------------
 
-class SwingDetector:
-    """IMU-based swing peak detector.
+class ThresholdSwingDetector:
+    """Simple threshold-based swing detector with debounce.
 
-    Supports two trigger modes:
-      'gyro_only'    — trigger when gmag >= thr_gyro_dps  (original behaviour)
-      'gyro_and_acc' — trigger when gmag >= thr_gyro_dps AND amag >= thr_acc_g
-                       (more robust: rejects slow drift and table bumps)
+    Triggers when gmag >= thr_gyro_dps AND amag >= thr_acc_g (gyro_and_acc mode).
+    Confirms swing if peak reaches min_peak_gyro_dps and debounce elapsed.
+
+    Pros: Simple, zero-latency, works well for stroke counting.
+    Cons: No impact detection, crude debounce, fixed thresholds.
 
     Works sample-by-sample (live mode via update()) or in batch over a
     pre-loaded array (offline mode via detect_batch()).
@@ -275,6 +280,157 @@ class SwingDetector:
         for i in range(len(xs)):
             amag = float(amag_arr[i]) if amag_arr is not None else None
             self.update(float(xs[i]), float(gmag_arr[i]), amag)
+        return list(self.swing_times)
+
+
+class HysteresisSwingDetector:
+    """Hysteresis-based swing detector with impact tagging.
+
+    Uses TH_ON/TH_OFF hysteresis to define swing windows, then searches for
+    impact events (acc high-pass spikes or jerk) near the gyro peak.
+
+    Pros: Natural swing/idle transitions, impact detection, duration tracking.
+    Cons: More complex, requires tuning 6 thresholds instead of 2.
+
+    Output attributes (compatible with ThresholdSwingDetector):
+        swing_count        — total swings confirmed
+        swing_times        — list of confirmed peak times (seconds)
+        last_peak_gyro_mag — gyro magnitude at most recent peak
+
+    Additional output (new):
+        impact_times       — list of impact times (parallel to swing_times; None if no impact)
+        last_impact_time   — impact time within last swing (or None)
+        last_swing_duration — duration of last swing (seconds)
+    """
+
+    def __init__(self, th_on=700.0, th_off=350.0, th_acc_hp=1.0, th_jerk=150.0,
+                 min_duration=0.08, impact_window=0.15,
+                 alpha_gyro=0.44, alpha_acc=0.136):
+        """Initialize hysteresis detector.
+
+        Args:
+            th_on: Gyro threshold to enter swing (dps)
+            th_off: Gyro threshold to exit swing (dps)
+            th_acc_hp: High-pass accel threshold for impact (g)
+            th_jerk: Jerk threshold for impact (g/s)
+            min_duration: Min swing duration to confirm (seconds)
+            impact_window: Search window around peak for impact (±seconds)
+            alpha_gyro: LPF alpha for gyro (~25 Hz @ 200 Hz sample rate)
+            alpha_acc: LPF alpha for accel (~5 Hz @ 200 Hz sample rate)
+        """
+        self.th_on = float(th_on)
+        self.th_off = float(th_off)
+        self.th_acc_hp = float(th_acc_hp)
+        self.th_jerk = float(th_jerk)
+        self.min_duration = float(min_duration)
+        self.impact_window = float(impact_window)
+        self.alpha_gyro = float(alpha_gyro)
+        self.alpha_acc = float(alpha_acc)
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset all state. Call on new BLE session (seg=0)."""
+        # State machine
+        self._state = 'IDLE'
+        self._swing_start_t = None
+        self._t_peak = None
+        self._peak_gyro = 0.0
+        self._impact_t = None
+
+                # LPF state (only for accel high-pass)
+        self._acc_lp = 1.0  # init to gravity
+        self._acc_hp_prev = 0.0
+
+        # Public API (compatible with ThresholdSwingDetector)
+        self.swing_count = 0
+        self.swing_times: list = []
+        self.last_peak_gyro_mag = 0.0
+
+        # Additional output
+        self.impact_times: list = []  # parallel to swing_times
+        self.last_impact_time = None
+        self.last_swing_duration = None
+
+    def update(self, t_sec: float, gmag: float, amag: float = None, dt: float = 0.005):
+        """Feed one sample.
+
+        Returns confirmed peak t_sec (float) when a swing is confirmed,
+        otherwise returns None. Also updates last_peak_gyro_mag and
+        last_impact_time on confirmation.
+
+        Args:
+            t_sec: sample time in seconds
+            gmag: gyro magnitude in dps
+            amag: accel magnitude in g (optional)
+            dt: time delta for jerk calculation (seconds)
+        """
+        if amag is None:
+            amag = 1.0  # fallback to gravity if acc not provided
+
+                # Update LPFs (only for accel high-pass, not for swing detection)
+        self._acc_lp += self.alpha_acc * (amag - self._acc_lp)
+
+        # High-pass accel + jerk
+        acc_hp = amag - self._acc_lp
+        jerk = abs(acc_hp - self._acc_hp_prev) / dt if dt > 0 else 0.0
+        self._acc_hp_prev = acc_hp
+
+        # State machine (uses RAW gmag, not LPF)
+        if self._state == 'IDLE':
+            if gmag > self.th_on:
+                self._state = 'IN_SWING'
+                self._swing_start_t = t_sec
+                self._peak_gyro = gmag
+                self._t_peak = t_sec
+                self._impact_t = None
+
+        elif self._state == 'IN_SWING':
+            # Track peak
+            if gmag > self._peak_gyro:
+                self._peak_gyro = gmag
+                self._t_peak = t_sec
+
+            # Impact detection (within ±impact_window of peak)
+            if abs(t_sec - self._t_peak) < self.impact_window:
+                if (acc_hp > self.th_acc_hp or jerk > self.th_jerk):
+                    if self._impact_t is None:  # first impact only
+                        self._impact_t = t_sec
+
+            # Exit swing (use raw gmag, not LPF)
+            if gmag < self.th_off:
+                duration = t_sec - self._swing_start_t
+                if duration >= self.min_duration:
+                    # Confirmed swing
+                    self.swing_count += 1
+                    self.swing_times.append(self._t_peak)
+                    self.impact_times.append(self._impact_t)
+                    self.last_peak_gyro_mag = self._peak_gyro
+                    self.last_impact_time = self._impact_t
+                    self.last_swing_duration = duration
+                    self._state = 'IDLE'
+                    return self._t_peak  # return peak time (compatible API)
+                self._state = 'IDLE'
+
+        return None
+
+    def detect_batch(self, xs, gmag_arr, amag_arr=None) -> list:
+        """Detect swings in pre-loaded arrays (offline mode).
+
+        Resets internal state first, then iterates all samples via update().
+
+        Args:
+            xs: time array (seconds)
+            gmag_arr: gyro magnitude array (dps)
+            amag_arr: accel magnitude array (g), optional
+
+        Returns:
+            List of confirmed swing peak times in seconds.
+        """
+        self.reset()
+        dt = float(xs[1] - xs[0]) if len(xs) > 1 else 0.005
+        for i in range(len(xs)):
+            amag = float(amag_arr[i]) if amag_arr is not None else None
+            self.update(float(xs[i]), float(gmag_arr[i]), amag, dt)
         return list(self.swing_times)
 
 
@@ -387,14 +543,24 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
     }
     emg_fatigue_buf = deque(maxlen=EMG_FATIGUE_BUF_SIZE)
 
-        # Swing detection — modular SwingDetector (always active; used for swing count + fatigue trigger)
-    swing_detector = SwingDetector(
-        thr_gyro_dps=float(args.imu_thr_dps),
-        thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
-        debounce_sec=1.0,
-        mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
-        min_peak_gyro_dps=200.0,  # peak must reach 200 dps to confirm (rejects noise/drift)
-    )
+                                                # Swing detection — modular detector (always active; used for swing count + fatigue trigger)
+    if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
+        swing_detector = HysteresisSwingDetector(
+            th_on=350.0,   # enter swing (slightly higher than threshold's 300)
+            th_off=175.0,  # exit swing (half of th_on for good hysteresis)
+            th_acc_hp=0.6,  # lowered from 1.0 to catch softer impacts
+            th_jerk=80.0,   # lowered from 150 to catch softer impacts
+            min_duration=0.08,
+            impact_window=0.15,
+        )
+    else:
+        swing_detector = ThresholdSwingDetector(
+            thr_gyro_dps=float(args.imu_thr_dps),
+            thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
+            debounce_sec=float(getattr(args, 'debounce_sec', 1.0)),
+            mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
+            min_peak_gyro_dps=200.0,  # peak must reach 200 dps to confirm (rejects noise/drift)
+        )
 
     if fatigue_enabled:
         util_path = args.emg_util_path
@@ -1339,21 +1505,36 @@ def run_offline(args: argparse.Namespace) -> None:
         gz_dps = np.array(gz_vals, dtype=float) / gyro_lsb_per_dps
         gmag = np.sqrt(gx_dps**2 + gy_dps**2 + gz_dps**2)
 
-                                # Swing detection on pre-loaded IMU data (same SwingDetector as live mode)
+                                                                        # Swing detection on pre-loaded IMU data (same detector as live mode)
         imu_t0_ms = t_ms[0]
-        _detector = SwingDetector(
-            thr_gyro_dps=float(args.imu_thr_dps),
-            thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
-            debounce_sec=float(getattr(args, 'debounce_sec', 1.0)),
-            mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
-            min_peak_gyro_dps=200.0,  # peak must reach 200 dps to confirm (rejects noise/drift)
-        )
+        if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
+            _detector = HysteresisSwingDetector(
+                th_on=350.0,
+                th_off=175.0,
+                th_acc_hp=0.6,
+                th_jerk=80.0,
+                min_duration=0.08,
+                impact_window=0.15,
+            )
+        else:
+            _detector = ThresholdSwingDetector(
+                thr_gyro_dps=float(args.imu_thr_dps),
+                thr_acc_g=float(getattr(args, 'imu_thr_acc_g', 1.5)),
+                debounce_sec=float(getattr(args, 'debounce_sec', 1.0)),
+                mode=getattr(args, 'swing_detect_mode', 'gyro_and_acc'),
+                min_peak_gyro_dps=200.0,
+            )
         swing_times = _detector.detect_batch(xs, gmag, amag)
         n_swings = _detector.swing_count
-        _mode_str = (f'gyro>={_detector.thr_gyro_dps:.0f} dps + acc>={_detector.thr_acc_g:.1f} g'
-        if _detector.mode == 'gyro_and_acc'
-        else f'gyro>={_detector.thr_gyro_dps:.0f} dps, peak>={_detector.min_peak_gyro_dps:.0f} dps')
-        print(f'[SwingDetector] Offline: {n_swings} swings detected ({_mode_str})')
+        detector_name = 'HysteresisSwingDetector' if isinstance(_detector, HysteresisSwingDetector) else 'ThresholdSwingDetector'
+        if isinstance(_detector, HysteresisSwingDetector):
+            n_impacts = sum(1 for it in _detector.impact_times if it is not None)
+            _mode_str = f'{n_swings} swings ({n_impacts} with impact) | th_on={_detector.th_on:.0f} dps, th_off={_detector.th_off:.0f} dps'
+        else:
+            _mode_str = (f'gyro>={_detector.thr_gyro_dps:.0f} dps + acc>={_detector.thr_acc_g:.1f} g'
+            if _detector.mode == 'gyro_and_acc'
+            else f'gyro>={_detector.thr_gyro_dps:.0f} dps, peak>={_detector.min_peak_gyro_dps:.0f} dps')
+        print(f'[{detector_name}] Offline: {_mode_str}')
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
 
@@ -1377,7 +1558,7 @@ def run_offline(args: argparse.Namespace) -> None:
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='upper right', ncol=4)
 
-        # Swing annotations on IMU plots (purple dotted vlines at each confirmed peak)
+                # Swing annotations on IMU plots (purple dotted vlines at each confirmed peak)
         if swing_times:
             ax2.axhline(float(args.imu_thr_dps), color='purple', ls='--', lw=1.2, alpha=0.7,
                         label=f'gyro thr ({args.imu_thr_dps:.0f} dps)')
@@ -1385,6 +1566,21 @@ def run_offline(args: argparse.Namespace) -> None:
                 ax2.axvline(st, color='purple', ls=':', lw=1.2, alpha=0.65,
                             label='swing peak' if i == 0 else None)
                 ax1.axvline(st, color='purple', ls=':', lw=1.2, alpha=0.65)
+            
+            # Impact dots (red) if hysteresis detector used
+            if isinstance(_detector, HysteresisSwingDetector) and _detector.impact_times:
+                impact_xs = []
+                impact_ys = []
+                for i, it in enumerate(_detector.impact_times):
+                    if it is not None:
+                        # Find gyro value at impact time
+                        idx = np.argmin(np.abs(xs - it))
+                        impact_xs.append(it)
+                        impact_ys.append(gmag[idx])
+                if impact_xs:
+                    ax2.scatter(impact_xs, impact_ys, color='red', s=50, zorder=5,
+                               label='impact', marker='o', edgecolors='darkred', linewidths=1.5)
+            
             ax2.legend(loc='upper right', ncol=4)
 
         fig.tight_layout()
