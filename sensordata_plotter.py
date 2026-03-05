@@ -543,7 +543,7 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
     }
     emg_fatigue_buf = deque(maxlen=EMG_FATIGUE_BUF_SIZE)
 
-                                                # Swing detection — modular detector (always active; used for swing count + fatigue trigger)
+    # Swing detection — modular detector (always active; used for swing count + fatigue trigger)
     if getattr(args, 'swing_detector', 'threshold') == 'hysteresis':
         swing_detector = HysteresisSwingDetector(
             th_on=350.0,   # enter swing (slightly higher than threshold's 300)
@@ -577,7 +577,12 @@ def run_live(args: argparse.Namespace, recv_fn=None, feeder=None) -> None:
                 baseline_swings=int(args.fatigue_baseline_swings),
             )
             fatigue_q = queue.Queue(maxsize=1)
-            print(f'[Fatigue] Enabled | thr={swing_detector.thr_gyro_dps:.0f} dps | '
+                        # Print detector-specific info
+            if isinstance(swing_detector, HysteresisSwingDetector):
+                thr_str = f'th_on={swing_detector.th_on:.0f} dps, th_off={swing_detector.th_off:.0f} dps'
+            else:
+                thr_str = f'thr={swing_detector.thr_gyro_dps:.0f} dps'
+            print(f'[Fatigue] Enabled | {thr_str} | '
                   f'warmup={args.fatigue_warmup_min} min | '
                   f'baseline={args.fatigue_baseline_swings} swings')
         else:

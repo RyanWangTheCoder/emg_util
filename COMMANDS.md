@@ -187,6 +187,20 @@ python sensordata_plotter.py --mode offline --fatigue --replay-speed 4.0 --repla
     --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
     --fatigue-baseline-swings 5
 
+# Instant replay with hysteresis detector (advanced: impact detection)
+python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --swing-detector hysteresis \
+    --fatigue-baseline-swings 5
+
+# Real-time replay at 2× speed with hysteresis detector
+python sensordata_plotter.py --mode offline --fatigue --replay-speed 2.0 \
+    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --swing-detector hysteresis \
+    --fatigue-baseline-swings 5
+
 # With explicit emg_util path (if running from a different directory)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
     --emg-file path\to\emg_log.csv --imu-file path\to\imu_log.csv \
@@ -203,11 +217,24 @@ python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
 **Replay-specific Options:**
 - `--replay-speed`: Speed multiplier (default: 0 = instant)
 - `--replay-no-scroll`: Freeze x-axis at end to show full session
+- `--swing-detector`: `threshold` (default) or `hysteresis` (advanced, with impact detection)
 - `--fatigue-baseline-swings`: Number of swings for baseline (default: 20; use 5 for short sessions)
-- `--imu-thr-dps`: Gyro threshold for swing detection (default: **300 dps**)
-- `--swing-detect-mode`: `gyro_and_acc` (default) or `gyro_only`
-- `--debounce-sec`: Min seconds between swings (default: **2.0**)
+- `--imu-thr-dps`: Gyro threshold for swing detection (default: **300 dps**; only used with `threshold` detector)
+- `--swing-detect-mode`: `gyro_and_acc` (default) or `gyro_only` (only used with `threshold` detector)
+- `--debounce-sec`: Min seconds between swings (default: **2.0**; only used with `threshold` detector)
 - `--sr-hz`: EMG sample rate used for FatigueMonitor and LPF (default: 2000)
+
+**Detector Comparison (CSV Replay Mode):**
+
+| Feature | Threshold (default) | Hysteresis (`--swing-detector hysteresis`) |
+|---------|---------------------|--------------------------------------------|
+| **Swing detection** | Simple threshold + debounce | Hysteresis state machine (natural back-swing merging) |
+| **Impact detection** | ❌ No | ✅ Yes (`last_impact_time` available to FatigueMonitor) |
+| **Impact visualization** | ❌ No | ❌ No (live mode limitation — no gyro history to plot red dots) |
+| **Console output** | Swing count only | Swing count + impact detection status |
+| **Best for** | Quick fatigue analysis | Precise EMG-impact correlation |
+
+**Note:** Impact visualization (red dots on gyro plot) only works in pure offline mode (`--mode offline` without `--fatigue`). In CSV replay mode (`--mode offline --fatigue`), impact detection still works internally but red dots are not shown because the live animation doesn't retain full gyro history.
 
 **How to interpret the IMU figure (offline IMU-only or IMU overlay):**
 

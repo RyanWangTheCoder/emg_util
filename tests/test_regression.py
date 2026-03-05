@@ -277,6 +277,147 @@ class TestSwingDetection:
         assert swings1["t_peak_ms"].equals(swings2["t_peak_ms"])
         assert swings1["t_start_ms"].equals(swings2["t_start_ms"])
         assert swings1["t_end_ms"].equals(swings2["t_end_ms"])
+    
+    @pytest.mark.fast
+    def test_threshold_detector_initialization(self):
+        """Test ThresholdSwingDetector initialization."""
+        try:
+            from sensordata_plotter import ThresholdSwingDetector
+        except ImportError:
+            pytest.skip("sensordata_plotter not available")
+        
+        # Initialize detector with default params
+        detector = ThresholdSwingDetector(
+            thr_gyro_dps=300.0,
+            thr_acc_g=1.5,
+            debounce_sec=2.0,
+            mode='gyro_and_acc',
+            min_peak_gyro_dps=200.0,
+        )
+        
+        # Verify initialization
+        assert detector.thr_gyro_dps == 300.0
+        assert detector.thr_acc_g == 1.5
+        assert detector.debounce_sec == 2.0
+        assert detector.mode == 'gyro_and_acc'
+        assert detector.min_peak_gyro_dps == 200.0
+        assert detector.swing_count == 0
+        assert len(detector.swing_times) == 0
+    
+    @pytest.mark.fast
+    def test_threshold_detector_basic_detection(self):
+        """Test ThresholdSwingDetector with synthetic data."""
+        try:
+            from sensordata_plotter import ThresholdSwingDetector
+        except ImportError:
+            pytest.skip("sensordata_plotter not available")
+        
+        detector = ThresholdSwingDetector(
+            thr_gyro_dps=300.0,
+            thr_acc_g=1.5,
+            debounce_sec=1.0,
+            mode='gyro_and_acc',
+            min_peak_gyro_dps=200.0,
+        )
+        
+        # Simulate a swing: below threshold, peak, below threshold
+        # Time (s), gyro (dps), accel (g)
+        samples = [
+            (0.0, 100.0, 1.0),   # Below threshold
+            (0.1, 350.0, 2.0),   # Above threshold - start peak
+            (0.2, 400.0, 2.5),   # Peak
+            (0.3, 350.0, 2.0),   # Still above
+            (0.4, 250.0, 1.2),   # Below threshold - end peak
+            (0.5, 100.0, 1.0),   # Back to baseline
+        ]
+        
+        confirmed_peaks = []
+        for t_sec, gmag, amag in samples:
+            result = detector.update(t_sec, gmag, amag)
+            if result is not None:
+                confirmed_peaks.append(result)
+        
+        # Should detect exactly one swing
+        assert detector.swing_count == 1, f"Expected 1 swing, got {detector.swing_count}"
+        assert len(confirmed_peaks) == 1
+        assert len(detector.swing_times) == 1
+        assert detector.last_peak_gyro_mag == 400.0  # Peak magnitude
+    
+    @pytest.mark.fast
+    def test_hysteresis_detector_initialization(self):
+        """Test HysteresisSwingDetector initialization."""
+        try:
+            from sensordata_plotter import HysteresisSwingDetector
+        except ImportError:
+            pytest.skip("sensordata_plotter not available")
+        
+        # Initialize detector with default params
+        detector = HysteresisSwingDetector(
+            th_on=350.0,
+            th_off=175.0,
+            th_acc_hp=0.6,
+            th_jerk=80.0,
+            min_duration=0.08,
+            impact_window=0.15,
+        )
+        
+        # Verify initialization
+        assert detector.th_on == 350.0
+        assert detector.th_off == 175.0
+        assert detector.th_acc_hp == 0.6
+        assert detector.th_jerk == 80.0
+        assert detector.min_duration == 0.08
+        assert detector.impact_window == 0.15
+        assert detector.swing_count == 0
+        assert len(detector.swing_times) == 0
+        assert len(detector.impact_times) == 0
+    
+    @pytest.mark.fast
+    def test_hysteresis_detector_basic_detection(self):
+        """Test HysteresisSwingDetector with synthetic data."""
+        try:
+            from sensordata_plotter import HysteresisSwingDetector
+        except ImportError:
+            pytest.skip("sensordata_plotter not available")
+        
+        detector = HysteresisSwingDetector(
+            th_on=350.0,
+            th_off=175.0,
+            th_acc_hp=0.6,
+            th_jerk=80.0,
+            min_duration=0.08,
+            impact_window=0.15,
+        )
+        
+        # Simulate a swing with impact:
+        # Time (s), gyro (dps), accel (g)
+        samples = [
+            (0.0, 100.0, 1.0),   # Below th_on
+            (0.1, 400.0, 1.5),   # Above th_on - enter IN_SWING
+            (0.2, 500.0, 2.0),   # Peak gyro
+            (0.25, 480.0, 3.5),  # Near peak - high accel (impact!)
+            (0.3, 400.0, 2.0),   # Still above th_off
+            (0.4, 150.0, 1.2),   # Below th_off - exit swing
+            (0.5, 100.0, 1.0),   # Back to baseline
+        ]
+        
+        confirmed_peaks = []
+        for t_sec, gmag, amag in samples:
+            result = detector.update(t_sec, gmag, amag, dt=0.005)
+            if result is not None:
+                confirmed_peaks.append(result)
+        
+        # Should detect exactly one swing
+        assert detector.swing_count == 1, f"Expected 1 swing, got {detector.swing_count}"
+        assert len(confirmed_peaks) == 1
+        assert len(detector.swing_times) == 1
+        assert detector.last_peak_gyro_mag == 500.0  # Peak magnitude
+        
+        # Should detect impact (high accel near peak)
+        assert len(detector.impact_times) == 1
+        assert detector.impact_times[0] is not None, "Impact should be detected"
+        assert detector.last_impact_time is not None
+        assert abs(detector.last_impact_time - 0.25) < 0.01  # Impact at t=0.25s
 
 
 # ============================================================================
