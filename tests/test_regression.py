@@ -187,8 +187,10 @@ class TestStitchedLoader:
 
         p1 = tmp_path / 'imu_log_20260101_100000_20260101_100000_000.csv'
         p2 = tmp_path / 'imu_log_20260101_100010_20260101_100010_000.csv'
+        # conn1: dev_us 0->20s, host_rx 0->20000ms
+        # conn2: dev_us 25->45s (5s BLE gap, dev_us continuous), host_rx 25000->45000ms
         make_imu(p1, dev_start=0,          host_start=0)
-        make_imu(p2, dev_start=50_000_000, host_start=50_000)  # 5s BLE gap
+        make_imu(p2, dev_start=25_000_000, host_start=25_000)  # 5s BLE gap
 
         sessions = {
             '20260101_100000': SessionFiles('20260101_100000', [], [str(p1)], None),
@@ -197,7 +199,8 @@ class TestStitchedLoader:
         _, imu, _, _ = load_session_stitched(sessions, use_physical_units=False)
         abs_s = imu['abs_us'].values / 1e6
         gap = abs_s[5] - abs_s[4]
-        assert abs(abs_s[-1] - 95) < 1, f"Expected span 0-95s, got {abs_s[-1]:.1f}s"
+        # BLE dropout: abs_us = dev_us (continuous), span 0->45s, gap = 5s
+        assert abs(abs_s[-1] - 45) < 1, f"Expected span 0-45s, got {abs_s[-1]:.1f}s"
         assert abs(gap - 5) < 1, f"Expected 5s BLE gap, got {gap:.1f}s"
 
     def test_esp32_reset_stitching(self, tmp_path):
@@ -216,8 +219,10 @@ class TestStitchedLoader:
 
         p1 = tmp_path / 'imu_log_20260101_110000_20260101_110000_000.csv'
         p2 = tmp_path / 'imu_log_20260101_110030_20260101_110030_000.csv'
+        # conn1: dev_us 0->20s, host_rx 0->20000ms
+        # conn2: dev_us 0->20s (reset), host_rx 50000->70000ms (30s wall gap)
         make_imu(p1, dev_start=0, host_start=0)
-        make_imu(p2, dev_start=0, host_start=75_000)  # reset + 30s wall gap
+        make_imu(p2, dev_start=0, host_start=50_000)  # reset + 30s wall gap
 
         sessions = {
             '20260101_110000': SessionFiles('20260101_110000', [], [str(p1)], None),
@@ -226,7 +231,9 @@ class TestStitchedLoader:
         _, imu, _, _ = load_session_stitched(sessions, use_physical_units=False)
         abs_s = imu['abs_us'].values / 1e6
         gap = abs_s[5] - abs_s[4]
-        assert abs(abs_s[-1] - 120) < 1, f"Expected span 0-120s, got {abs_s[-1]:.1f}s"
+        # ESP32 reset: abs_us conn2 = abs_end_conn1 + host_rx_gap + dev_rel
+        # = 20s + 30s + 0..20s = 50..70s, total span 0..70s, gap = 30s
+        assert abs(abs_s[-1] - 70) < 1, f"Expected span 0-70s, got {abs_s[-1]:.1f}s"
         assert abs(gap - 30) < 1, f"Expected 30s reset gap, got {gap:.1f}s"
 
 
