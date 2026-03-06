@@ -9,6 +9,102 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-05] — Fix: fatigue summary -53% nonsensical result (`emg_util_yaml_runner.py`)
+
+### Root cause
+`core.analyze_fatigue(res.feats, ...)` used 1-second windowed features that include
+rest periods between rallies. During rest the EMG signal is noise-dominated (flat
+spectrum, MDF ≈ 100 Hz). The windowed MDF at session end (more active play) was
+higher than at session start (more rest), giving `(100 − 254) / 100 × 100 = −53%`
+— the opposite of fatigue.
+
+### Fixed (`emg_util_yaml_runner.py`)
+
+#### Bug — windowed MDF corrupts fatigue summary
+- Added `_compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms)`:
+  - Filters out pre-warmup swings (`t_peak_ms < warmup_skip_ms`).
+  - Baseline MDF = mean of first 10% of post-warmup swings.
+  - Final MDF = mean of last 10% of post-warmup swings.
+  - Computes `MDF_drop_pct`, `MNF_drop_pct` (if available), fatigue onset time.
+  - Saves `fatigue_summary.csv` with `source = per_swing`.
+  - Prints `[Fatigue/per-swing] MDF drop % = X.XX ; MNF drop % = Y.YY ; onset_s = Z`.
+- Called in both **medium mode** and **full mode** after `_plot_fatigue_trend_stitched()`.
+- The `do_fatigue` block in full mode now has `pass` — `core.analyze_fatigue` (windowed)
+  is no longer called, preventing it from overwriting `fatigue_summary.csv` with
+  noise-contaminated results.
+
+#### Also fixed — f-string format spec error
+- `f'{onset_time:.1f if np.isfinite(onset_time) else "n/a"}'` is invalid Python
+  (ternary inside format spec). Fixed to pre-compute `onset_str` before the f-string.
+
+### Verified output (`out_0305_v3/fatigue_summary.csv`)
+| Field | Value | Interpretation |
+|---|---|---|
+| `baseline_MDF` | 137.1 Hz | Real muscle activity (not noise) |
+| `final_MDF` | 140.7 Hz | Slightly higher at end |
+| `MDF_drop_pct` | **−2.6%** | Near zero — no significant fatigue ✓ |
+| `MNF_drop_pct` | +3.9% | Consistent with MDF |
+| `fatigue_onset_s` | 841.6 s | No onset (MDF never dropped 15% below baseline) |
+| `n_swings_post_warmup` | 505 | 505 swings after 10-min warmup exclusion |
+| `source` | `per_swing` | Swing-gated, not rest-period contaminated |
+
+---
+
+## [2026-03-05] — Fix: fatigue trend plot nonsensical results (`emg_util_yaml_runner.py`)
+
+### Root-cause analysis
+
+The `fatigue_trend.png` plot showed two symptoms that made the analysis uninterpretable:
+
+1. **MDF drop % deeply negative (−50 % to −100 %) throughout the entire session.**
+   - Expected: near 0 % at session start, going positive (e.g. +12–20 %) as the player fatigues.
+   - Observed: large negative values from the very first swing, implying MDF *increased* over time.
+   - **Root cause:** The first BLE connection (≈ t = 0–500 s) had near-zero EMG RMS — the electrode was not yet in good contact with the skin. The IMU-based swing detector still fired during this period (gyro threshold is independent of EMG quality). Those swing windows contained mostly broadband noise, whose MDF ≈ 100 Hz (flat spectrum). `select_baseline_swings()` picked the first N active swings after the warmup skip, which still fell inside this low-RMS period. The baseline MDF was therefore anchored at ≈ 100 Hz. Every subsequent swing (real muscle activity, MDF ≈ 160–200 Hz) then computed `(100 − 200) / 100 × 100 = −100 %` — the opposite of fatigue.
+
+2. **Acc drop % reference lines labelled `"mild (-10%)"` / `"significant (-20%)"` but drawn at +10 and +20.**
+   - The sign in the legend strings was inverted relative to the actual line positions.
+
+### Fixed (`emg_util_yaml_runner.py`)
+
+#### Bug 1 — Wrong acc drop % legend labels
+- In `_plot_fatigue_trend_stitched()`, changed:
+  - `label='mild (-10%)'` → `label='mild (+10%)'`
+  - `label='significant (-20%)'` → `label='significant (+20%)'`
+- Labels now match the drawn line positions (+10 % and +20 %).
+
+#### Bug 2 — Noise-dominated baseline corrupts MDF drop %
+- Added `_filter_baseline_by_rms(base_feats, all_swing_feats, out_dir)` helper:
+  - Computes the **90th percentile RMS** across all swings to represent "peak effort".
+  - The median RMS is not robust because a session might be >50% inactive/noise swings, which would pull the median down to the noise floor.
+  - Drops any baseline candidate whose `rms < 0.25 × session_p90_rms` (noise-dominated).
+  - Falls back to a 10% threshold, or the original candidate set, if fewer than 3 swings survive the filter.
+  - Logs a diagnostic message: how many swings were dropped, the threshold used, and the session p90 RMS.
+- Called in `analyze_tennis_session()` immediately after `base_feats` is assembled from `swing_feat_df`, in both **medium mode** and **full mode**.
+
+#### Bug 3 — Pre-warmup swings distort the fatigue trend plot
+- The first `warmup_skip_min` minutes of swings (before the baseline period) had low MDF
+  (82–101 Hz) due to poor electrode contact, giving +38–50 % drop % relative to the
+  baseline. These swings were included in the plot, creating a misleading "V" shape
+  (high drop % at start → 0 % at baseline → gradual increase).
+- **Fix:** `_plot_fatigue_trend_stitched()` now accepts a `warmup_skip_ms` parameter.
+  Swings with `t_peak_ms < warmup_skip_ms` are excluded from all four subplots.
+  A green dotted vertical line marks the warmup boundary on every subplot.
+  The plot title includes `| warmup=Nmin excluded` when pre-warmup swings are filtered.
+- `analyze_tennis_session()` now computes `warmup_skip_ms` from
+  `cfg.baseline.warmup_skip_min` and passes it to `_plot_fatigue_trend_stitched()`.
+  Applied in both **medium mode** and **full mode**.
+
+### Expected behavior after fix
+| Condition | MDF drop % | Interpretation |
+|---|---|---|
+| Session start (fresh muscle, good electrode) | ≈ 0 % | Baseline correctly anchored |
+| Mid-session (no fatigue) | ≈ 0 % | No spurious drift |
+| Late session (genuine fatigue) | +12 % to +20 % | Mild → significant fatigue |
+| Poor electrode contact swings | Excluded from baseline | No baseline corruption |
+| Pre-warmup swings | Excluded from plot | No misleading V-shape at start |
+
+---
+
 ## [2026-03-05] — Swing detection consistency: rename + cross-version tests
 
 ### Changed (`emg_util_nopandas.py`)
