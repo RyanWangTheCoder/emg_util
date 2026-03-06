@@ -9,6 +9,100 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-05] — Swing detection consistency: rename + cross-version tests
+
+### Changed (`emg_util_nopandas.py`)
+- **Renamed `detect_swing_windows_from_imu_arrays` → `detect_swing_windows_from_imu`**
+  to match the pandas version's function name in `emg_util.py`.
+  - Both files now expose the same canonical name for swing detection.
+  - Old name kept as a backward-compat alias:
+    `detect_swing_windows_from_imu_arrays = detect_swing_windows_from_imu`
+  - Short alias also kept: `detect_swings_from_imu = detect_swing_windows_from_imu`
+  - Internal call in `stitch_decoded_session_from_paths()` updated to use the new name.
+
+### Verified: algorithm parity between `emg_util.py` and `emg_util_nopandas.py`
+Both implementations of `detect_swing_windows_from_imu` are now confirmed identical
+in algorithm (only input type and FSR source differ by design):
+
+| Step | `emg_util.py` (pandas) | `emg_util_nopandas.py` (Android) |
+|---|---|---|
+| Time axis | `build_time_axis_from_ts(imu_df)` | `build_time_axis_from_ts(ts_ms_array)` |
+| FSR source | DataFrame columns (`gyro_fsr_dps`, `acc_fsr_g`) | Function parameters |
+| FSR maps | `_GYR_MAP`, `_ACC_MAP` | identical |
+| `mag_dps` | `sqrt(gx²+gy²+gz²) / gyr_lsb` | identical |
+| Acc gate | `amag_g >= thr_acc_g` | identical |
+| Peak finding | contiguous above-threshold → `argmax` | identical |
+| Min-gap | keep highest peak within `min_gap_ms` | identical |
+| Window merge | merge overlapping `[t_start, t_end]` | identical |
+| Output | `pd.DataFrame` | `List[Dict[str, float]]` |
+
+### Added (`tests/test_regression_nopandas.py`)
+- **`TestSwingDetectionCrossVersion`** — 6 new tests that run both the pandas
+  (`emg_util.detect_swing_windows_from_imu_arrays`) and nopandas
+  (`emg_util_nopandas.detect_swing_windows_from_imu`) implementations on identical
+  synthetic IMU data and assert they produce the same results:
+  - `test_no_swings_both_empty` — no peaks above threshold → both return empty
+  - `test_single_swing_same_peak_time` — one peak → same `t_peak_ms` and `peak_mag`
+  - `test_two_swings_same_count_and_times` — two peaks > `min_gap_ms` apart → same count, times, boundaries
+  - `test_two_peaks_within_min_gap_keep_highest` — two peaks within `min_gap_ms` → both keep the higher peak
+  - `test_window_boundaries_identical` — `t_start = t_peak - pre_ms`, `t_end = t_peak + post_ms`
+  - `test_empty_input_both_return_empty` — empty arrays → both return empty
+
+### Updated (`tests/test_regression_nopandas.py`)
+- `TestNoPandasSwingDetection.test_swing_detection_nopandas_from_arrays`: updated to
+  call `nopandas.detect_swing_windows_from_imu()` (new canonical name).
+
+### Updated (`REGRESSION_TEST.md`)
+- Status: `29/29` → `53/53 tests passing (100%) — 29 pandas + 24 nopandas`
+- Added `TestSwingDetectionCrossVersion` to the nopandas test suite documentation.
+- Added nopandas quick-start commands and performance table row.
+
+---
+
+## [2026-03-05] — Nopandas regression tests: physical timeline + cross-platform parity
+
+### Added (`tests/test_regression_nopandas.py`) — 24 new tests
+A new dedicated regression test file for the pandas-free Android pipeline.
+Tests use **synthetic CSV data** (no `frames.bin` required) and run in ~9 seconds.
+
+#### `TestLoadDecodedCsvHostRxMs` (5 tests)
+Verifies `host_rx_ms` is used as `ts_ms` when non-zero, falling back to `dev_us/1000`
+for legacy files (Layer 3 of the physical timeline fix).
+
+#### `TestStitchDecodedSessionFromPaths` (7 tests)
+Verifies `stitch_decoded_session_from_paths()` correctly handles:
+- Single capture (baseline)
+- Two captures with 10s BLE reconnect gap — duration preserved (~14s)
+- ESP32 reset between captures (dev_us→0, host_rx_ms continuous) — no timestamp overlap
+- Legacy files without `host_rx_ms` column — falls back to `dev_us/1000`
+- Out-of-order paths — sorted by `ts_ms`, not filename order
+- Empty path list — raises `FileNotFoundError`
+- Two captures with IMU peaks — ≥2 swings detected, gap between swings preserved
+
+#### `TestStitchDecodedSession` (2 tests)
+Verifies `stitch_decoded_session(decoded_dir)` is a thin wrapper that produces
+identical results to `stitch_decoded_session_from_paths()`.
+
+#### `TestComputeSwingEmgFeatures` (4 tests)
+Verifies `compute_swing_emg_features()` output structure and IMU feature computation:
+- All required keys present (`swing_id`, `mdf`, `rms`, `imu_mean_acc_dyn`, etc.)
+- `imu_mean_acc_dyn` is finite and correct when IMU data provided
+- `imu_mean_acc_dyn` is NaN when no IMU data
+- Empty swing list → empty feature list
+
+#### `TestBaselineAndFatigueDeltas` (6 tests)
+Verifies baseline selection and fatigue delta computation:
+- Baseline MDF = median of selected swings (~95.5 Hz)
+- `mdf_drop_pct=20`, `rms_increase_pct=10`, `acc_drop_pct=20` computed correctly
+- `mdf_drop_pct=0` when MDF equals baseline
+- Warmup skip filters early swings from baseline
+- Empty inputs return empty outputs
+
+#### `TestNoPandasSwingDetection` (1 test, `@pytest.mark.slow`)
+Requires real `frames.bin` in `regression_testlogs/`. Skipped automatically if absent.
+
+---
+
 ## [2026-03-03] — Feature: Add gyro_mag to live IMU subplot (`sensordata_plotter.py`)
 
 ### Changed (`sensordata_plotter.py`)

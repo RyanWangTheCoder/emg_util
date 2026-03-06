@@ -178,7 +178,7 @@ class TestNoPandasSwingDetection:
         assert "ts_ms" in imu_data
         assert len(imu_data["ts_ms"]) > 0, "IMU data is empty"
 
-        swing_windows = nopandas.detect_swing_windows_from_imu_arrays(
+        swing_windows = nopandas.detect_swing_windows_from_imu(
             ts_ms=imu_data["ts_ms"],
             ax=imu_data["ax"], ay=imu_data["ay"], az=imu_data["az"],
             gx=imu_data["gx"], gy=imu_data["gy"], gz=imu_data["gz"],
@@ -655,6 +655,179 @@ class TestBaselineAndFatigueDeltas:
         """Empty rows should return empty list."""
         out = nopandas.apply_baseline_deltas([], {"mdf": 100.0})
         assert out == []
+
+
+# ===========================================================================
+# 7. Cross-version consistency: emg_util.py vs emg_util_nopandas.py
+# ===========================================================================
+
+class TestSwingDetectionCrossVersion:
+    """
+    Verify that emg_util.detect_swing_windows_from_imu_arrays (pandas, Windows)
+    and emg_util_nopandas.detect_swing_windows_from_imu_arrays (no-pandas, Android)
+    produce identical swing counts, peak times, and peak magnitudes on the same
+    synthetic IMU data.
+
+    This is the canonical cross-platform consistency check.
+
+    Algorithm parity checklist (both versions must implement identically):
+      ✅ build_time_axis_from_ts — same logic, different input type
+      ✅ FSR conversion maps (_GYR_MAP, _ACC_MAP)
+      ✅ mag_dps = sqrt(gx²+gy²+gz²) / gyr_lsb
+      ✅ Optional acc gate: amag_g >= thr_acc_g
+      ✅ Contiguous above-threshold region → peak at argmax(mag_dps)
+      ✅ Min-gap enforcement: keep highest peak within min_gap_ms
+      ✅ Window merging: merge overlapping [t_start, t_end] windows
+    """
+
+    # Shared parameters — must match between both calls
+    THR_GYRO_DPS = 300.0
+    THR_ACC_G    = 0.0
+    MIN_GAP_MS   = 2000.0
+    PRE_MS       = 250.0
+    POST_MS      = 450.0
+    GYRO_FSR     = 1000
+    ACC_FSR      = 4
+
+    def _make_imu_arrays(self, n: int = 2000, fs_hz: float = 200.0,
+                         swing_at_samples=None):
+        """
+        Synthetic IMU arrays with optional gyro peaks.
+
+        swing_at_samples: list of sample indices where a 400 dps peak is injected.
+        """
+        if swing_at_samples is None:
+            swing_at_samples = []
+
+        lsb_per_dps = 32.8  # 1000 dps FSR
+        dt_ms = 1000.0 / fs_hz
+        ts_ms = np.arange(n, dtype=np.float64) * dt_ms
+
+        gx = np.zeros(n, dtype=np.float64)
+        gy = np.zeros(n, dtype=np.float64)
+        gz = np.full(n, 10.0 * lsb_per_dps, dtype=np.float64)  # 10 dps baseline
+
+        for idx in swing_at_samples:
+            if 0 <= idx < n:
+                gz[idx] = 400.0 * lsb_per_dps  # 400 dps peak
+
+        ax = np.full(n, 8192.0)  # 1g at rest (acc_fsr=4 → 8192 LSB/g)
+        ay = np.zeros(n)
+        az = np.zeros(n)
+
+        return ts_ms, ax, ay, az, gx, gy, gz
+
+    def _run_pandas(self, ts_ms, ax, ay, az, gx, gy, gz):
+        """Run the pandas (Windows) version."""
+        import emg_util as core_pandas
+        df = core_pandas.detect_swing_windows_from_imu_arrays(
+            ts_ms, ax, ay, az, gx, gy, gz,
+            thr_gyro_dps=self.THR_GYRO_DPS,
+            thr_acc_g=self.THR_ACC_G,
+            min_gap_ms=self.MIN_GAP_MS,
+            pre_ms=self.PRE_MS,
+            post_ms=self.POST_MS,
+        )
+        # Convert DataFrame to list of dicts for uniform comparison
+        return df.to_dict("records")
+
+    def _run_nopandas(self, ts_ms, ax, ay, az, gx, gy, gz):
+        """Run the nopandas (Android) version."""
+        return nopandas.detect_swing_windows_from_imu(
+            ts_ms, ax, ay, az, gx, gy, gz,
+            thr_gyro_dps=self.THR_GYRO_DPS,
+            thr_acc_g=self.THR_ACC_G,
+            min_gap_ms=self.MIN_GAP_MS,
+            pre_ms=self.PRE_MS,
+            post_ms=self.POST_MS,
+            gyro_fsr_dps=self.GYRO_FSR,
+            acc_fsr_g=self.ACC_FSR,
+        )
+
+    def test_no_swings_both_empty(self):
+        """No peaks above threshold → both return empty."""
+        ts_ms, ax, ay, az, gx, gy, gz = self._make_imu_arrays(n=400)
+        pd_rows  = self._run_pandas(ts_ms, ax, ay, az, gx, gy, gz)
+        np_rows  = self._run_nopandas(ts_ms, ax, ay, az, gx, gy, gz)
+        assert len(pd_rows) == 0
+        assert len(np_rows) == 0
+
+    def test_single_swing_same_peak_time(self):
+        """One peak → both detect it at the same t_peak_ms."""
+        ts_ms, ax, ay, az, gx, gy, gz = self._make_imu_arrays(
+            n=1000, swing_at_samples=[500])
+        pd_rows = self._run_pandas(ts_ms, ax, ay, az, gx, gy, gz)
+        np_rows = self._run_nopandas(ts_ms, ax, ay, az, gx, gy, gz)
+
+        assert len(pd_rows) == 1, f"pandas: expected 1 swing, got {len(pd_rows)}"
+        assert len(np_rows) == 1, f"nopandas: expected 1 swing, got {len(np_rows)}"
+        assert pd_rows[0]["t_peak_ms"] == pytest.approx(np_rows[0]["t_peak_ms"], abs=1.0)
+        assert pd_rows[0]["peak_mag"]  == pytest.approx(np_rows[0]["peak_mag"],  abs=0.01)
+
+    def test_two_swings_same_count_and_times(self):
+        """Two peaks separated by > min_gap_ms → both detect 2 swings at same times."""
+        # 200 Hz, 5000 samples = 25s; peaks at 2s (400) and 12s (2400)
+        ts_ms, ax, ay, az, gx, gy, gz = self._make_imu_arrays(
+            n=5000, swing_at_samples=[400, 2400])
+        pd_rows = self._run_pandas(ts_ms, ax, ay, az, gx, gy, gz)
+        np_rows = self._run_nopandas(ts_ms, ax, ay, az, gx, gy, gz)
+
+        assert len(pd_rows) == len(np_rows), \
+            f"Swing count mismatch: pandas={len(pd_rows)}, nopandas={len(np_rows)}"
+        assert len(pd_rows) == 2
+
+        for i, (pr, nr) in enumerate(zip(pd_rows, np_rows)):
+            assert pr["t_peak_ms"] == pytest.approx(nr["t_peak_ms"], abs=1.0), \
+                f"Swing {i}: t_peak_ms mismatch pandas={pr['t_peak_ms']:.1f} nopandas={nr['t_peak_ms']:.1f}"
+            assert pr["peak_mag"] == pytest.approx(nr["peak_mag"], abs=0.01), \
+                f"Swing {i}: peak_mag mismatch"
+            assert pr["t_start_ms"] == pytest.approx(nr["t_start_ms"], abs=1.0)
+            assert pr["t_end_ms"]   == pytest.approx(nr["t_end_ms"],   abs=1.0)
+
+    def test_two_peaks_within_min_gap_keep_highest(self):
+        """
+        Two peaks within min_gap_ms → both keep the HIGHER peak (not the first).
+        This tests the min-gap enforcement logic is identical.
+        """
+        # 200 Hz; peaks at 1s (200) and 1.5s (300) — gap = 500ms < 2000ms
+        # Peak at 300 is higher (400 dps) than peak at 200 (350 dps)
+        lsb = 32.8
+        ts_ms, ax, ay, az, gx, gy, gz = self._make_imu_arrays(n=2000)
+        gz[200] = 350.0 * lsb  # lower peak at 1s
+        gz[300] = 400.0 * lsb  # higher peak at 1.5s
+
+        pd_rows = self._run_pandas(ts_ms, ax, ay, az, gx, gy, gz)
+        np_rows = self._run_nopandas(ts_ms, ax, ay, az, gx, gy, gz)
+
+        assert len(pd_rows) == 1, f"pandas: expected 1 swing (merged), got {len(pd_rows)}"
+        assert len(np_rows) == 1, f"nopandas: expected 1 swing (merged), got {len(np_rows)}"
+        # Both should keep the higher peak (at sample 300 = 1.5s)
+        assert pd_rows[0]["t_peak_ms"] == pytest.approx(np_rows[0]["t_peak_ms"], abs=1.0)
+        assert pd_rows[0]["peak_mag"]  == pytest.approx(400.0, abs=0.1)
+        assert np_rows[0]["peak_mag"]  == pytest.approx(400.0, abs=0.1)
+
+    def test_window_boundaries_identical(self):
+        """t_start_ms = t_peak_ms - pre_ms, t_end_ms = t_peak_ms + post_ms."""
+        ts_ms, ax, ay, az, gx, gy, gz = self._make_imu_arrays(
+            n=1000, swing_at_samples=[500])
+        pd_rows = self._run_pandas(ts_ms, ax, ay, az, gx, gy, gz)
+        np_rows = self._run_nopandas(ts_ms, ax, ay, az, gx, gy, gz)
+
+        assert len(pd_rows) == 1 and len(np_rows) == 1
+        tp_pd = pd_rows[0]["t_peak_ms"]
+        tp_np = np_rows[0]["t_peak_ms"]
+        assert pd_rows[0]["t_start_ms"] == pytest.approx(tp_pd - self.PRE_MS,  abs=0.1)
+        assert pd_rows[0]["t_end_ms"]   == pytest.approx(tp_pd + self.POST_MS, abs=0.1)
+        assert np_rows[0]["t_start_ms"] == pytest.approx(tp_np - self.PRE_MS,  abs=0.1)
+        assert np_rows[0]["t_end_ms"]   == pytest.approx(tp_np + self.POST_MS, abs=0.1)
+
+    def test_empty_input_both_return_empty(self):
+        """Empty arrays → both return empty."""
+        empty = np.array([])
+        pd_rows = self._run_pandas(empty, empty, empty, empty, empty, empty, empty)
+        np_rows = self._run_nopandas(empty, empty, empty, empty, empty, empty, empty)
+        assert len(pd_rows) == 0
+        assert len(np_rows) == 0
 
 
 if __name__ == "__main__":

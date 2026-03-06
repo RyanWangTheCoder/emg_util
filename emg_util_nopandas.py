@@ -962,7 +962,7 @@ def stitch_decoded_session_from_paths(
     baseline: Dict[str, float] = {}
 
     if imu_ts_ms.size > 0:
-        swing_windows = detect_swing_windows_from_imu_arrays(
+        swing_windows = detect_swing_windows_from_imu(
             imu_ts_ms, imu_ax, imu_ay, imu_az, imu_gx, imu_gy, imu_gz,
             z_thr=float(swing_z_thr),
             pre_ms=float(swing_pre_ms),
@@ -1130,7 +1130,7 @@ def build_time_axis_from_ts(ts_ms: np.ndarray, fs_fallback: float = 200.0) -> np
     return t
 
 
-def detect_swing_windows_from_imu_arrays(
+def detect_swing_windows_from_imu(
     ts_ms: np.ndarray,
     ax: np.ndarray,
     ay: np.ndarray,
@@ -1278,7 +1278,8 @@ def detect_swing_windows_from_imu_arrays(
     return merged
 
 
-# Alias: Windows emg_util.py uses detect_swings_from_imu (DataFrame-based);
-# Android uses detect_swing_windows_from_imu_arrays (array-based).
-# This alias lets callers use either name on Android.
-detect_swings_from_imu = detect_swing_windows_from_imu_arrays
+# Backward-compat aliases — both names resolve to the same array-based function.
+# emg_util.py (pandas/Windows) exposes detect_swing_windows_from_imu(imu_df, ...)
+# emg_util_nopandas.py (Android) exposes detect_swing_windows_from_imu(ts_ms, ax, ...) — same name.
+detect_swing_windows_from_imu_arrays = detect_swing_windows_from_imu  # old name kept for compat
+detect_swings_from_imu               = detect_swing_windows_from_imu  # short alias

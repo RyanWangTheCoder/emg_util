@@ -2,9 +2,9 @@
 
 **Purpose:** Ensure consistent behavior of EMG analysis algorithms across code changes using real tennis session data.
 
-**Last Updated:** 2026-03-04  
-**Status:** ✅ **29/29 tests passing (100%)**  
-**Execution Time:** ~2.5 minutes (full suite), ~60 seconds (fast tests only)
+**Last Updated:** 2026-03-05  
+**Status:** ✅ **53/53 tests passing (100%)** — 29 pandas + 24 nopandas  
+**Execution Time:** ~2.5 minutes (full suite), ~70 seconds (fast tests only)
 
 ---
 
@@ -13,12 +13,13 @@
 ### Final Achievement
 
 **✅ Complete Regression Test Suite**
-- **29 tests** across 9 test classes
+- **53 tests** across 14 test classes (29 pandas + 24 nopandas)
 - **100% pass rate** - All tests passing
 - **10 test categories** for selective execution
 - **Zero warnings** with proper pytest configuration
-- **Cross-module coverage** - Tests both `emg_util` and `sensordata_plotter.py`
+- **Cross-module coverage** - Tests `emg_util`, `emg_util_nopandas`, and `sensordata_plotter.py`
 - **Swing detector coverage** - Tests both ThresholdSwingDetector and HysteresisSwingDetector
+- **Physical timeline coverage** - Tests BLE reconnect gap, ESP32 reset, legacy fallback
 
 ### Test Categories
 
@@ -33,10 +34,11 @@ Tests are organized into **10 categories** using pytest markers:
 6. **`baseline`** (2 tests) - Regression baseline tests
 7. **`error_handling`** (3 tests) - Error handling and edge cases
 8. **`plotter`** (6 tests) - Plotter offline mode tests
+9. **`nopandas`** (1 test, slow) - Pandas-free pipeline with real `frames.bin`
 
 #### Performance Categories
-9. **`fast`** (20 tests) - Fast tests (< 5 seconds each)
-10. **`slow`** (9 tests) - Slow tests (> 5 seconds each)
+10. **`fast`** (20 tests) - Fast tests (< 5 seconds each)
+11. **`slow`** (9 tests) - Slow tests (> 5 seconds each)
 
 ### Quick Start Examples
 
@@ -55,19 +57,27 @@ pytest tests/test_regression.py -m "not slow"
 
 # Run multiple categories
 pytest tests/test_regression.py -m "signal_processing or fatigue"
+
+# Run nopandas tests only (Android pipeline)
+pytest tests/test_regression_nopandas.py -v -k "not slow"
+
+# Run nopandas stitching tests only
+pytest tests/test_regression_nopandas.py -v -k "stitch or host_rx_ms"
 ```
 
 ### Performance Comparison
 
 | Test Set | Tests | Time | Speed vs Full | Use Case |
 |----------|-------|------|---------------|----------|
-| **All tests** | 29 | ~2.5 min | 100% | Pre-commit, CI/CD |
-| **Fast tests** | 20 | ~60 sec | **60% faster** | Development, quick checks |
+| **All tests (pandas)** | 29 | ~2.5 min | 100% | Pre-commit, CI/CD |
+| **All tests (nopandas)** | 24 | ~9 sec | — | Android pipeline changes |
+| **Fast tests (pandas)** | 20 | ~60 sec | **60% faster** | Development, quick checks |
 | **Slow tests** | 9 | ~1.5 min | - | Integration validation |
 | **Swing detection** | 6 | ~20 sec | **87% faster** | Detector algorithm changes |
 | **Signal processing** | 4 | ~15 sec | **90% faster** | Algorithm changes |
 | **Plotter** | 6 | ~10 sec | **93% faster** | Plotter changes |
 | **Data loading** | 4 | ~8 sec | **95% faster** | Data format changes |
+| **Nopandas stitching** | 7 | ~5 sec | — | Timeline stitching changes |
 
 ### What Was Fixed During Implementation
 
@@ -157,29 +167,35 @@ pytest tests/test_regression.py -m "signal_processing or fatigue"
 - Real-time processing (streaming, latency tests)
 - Cross-platform compatibility (Windows/Linux/macOS)
 
-### Files Created
+### Files Created / Updated
 
 1. **`tests/test_regression.py`** (700+ lines)
-   - 25 comprehensive tests with pytest markers
-   - 8 test classes covering all major functionality
+   - 29 comprehensive tests with pytest markers
+   - 9 test classes covering all major functionality
    - Proper fixtures for data loading
 
-2. **`tests/run_regression_tests.py`** (150+ lines)
+2. **`tests/test_regression_nopandas.py`** (500+ lines) ← **NEW 2026-03-05**
+   - 24 tests for the pandas-free Android pipeline
+   - 5 test classes covering CSV loading, stitching, features, baseline, fatigue
+   - Synthetic CSV helpers — no `frames.bin` required for most tests
+   - 1 slow test (`TestNoPandasSwingDetection`) requires real `frames.bin`
+
+3. **`tests/run_regression_tests.py`** (150+ lines)
    - Test runner with colored output
    - Dependency checking
    - Execution time reporting
 
-3. **`pytest.ini`** (30 lines)
+4. **`pytest.ini`** (30 lines)
    - Registers 10 custom pytest markers
    - Configures test discovery patterns
    - Sets default output options
 
-4. **`REGRESSION_TEST.md`** (this file)
+5. **`REGRESSION_TEST.md`** (this file)
    - Complete documentation
    - Usage examples
    - Troubleshooting guide
 
-5. **`PYTHON_CONSOLIDATION_PLAN.md`** (400+ lines)
+6. **`PYTHON_CONSOLIDATION_PLAN.md`** (400+ lines)
    - Strategy for consolidating Python scripts
    - Git submodule architecture
    - Android integration plan
@@ -192,6 +208,7 @@ The regression test suite validates the complete EMG analysis pipeline using rea
 
 ### What Gets Tested
 
+**`tests/test_regression.py`** (pandas pipeline — PC/Windows):
 1. **Data Loading** - CSV parsing, metadata extraction, session stitching
 2. **Signal Processing** - Bandpass filtering, envelope extraction, MDF computation
 3. **Swing Detection** - IMU-based swing detection, consistency checks
@@ -199,6 +216,13 @@ The regression test suite validates the complete EMG analysis pipeline using rea
 5. **Full Pipeline** - End-to-end analysis with real data
 6. **Regression Baselines** - Comparison against known good values
 7. **Error Handling** - Edge cases, invalid inputs, NaN handling
+
+**`tests/test_regression_nopandas.py`** (pandas-free pipeline — Android):
+1. **CSV Loading** - `host_rx_ms` priority over `dev_us`; legacy fallback
+2. **Physical Timeline Stitching** - BLE reconnect gaps, ESP32 resets, out-of-order files
+3. **Per-swing EMG Features** - Output structure, IMU acc_dyn, empty inputs
+4. **Baseline Selection** - Warmup skip, median MDF, empty inputs
+5. **Fatigue Deltas** - `mdf_drop_pct`, `rms_increase_pct`, `acc_drop_pct`
 
 ---
 
@@ -442,6 +466,115 @@ assert detector.last_impact_time is not None  # Impact detected
 - Crashes on invalid input
 - Poor error messages
 - Unhandled edge cases
+
+---
+
+---
+
+## Nopandas Test Suite (`test_regression_nopandas.py`)
+
+### Why a Separate Test File?
+
+`emg_util_nopandas.py` is the Android-side pipeline — it runs on-device via Chaquopy
+and must work without pandas. The tests use **synthetic CSV data** (no `frames.bin`
+required) so they run fast (~9 seconds) and are self-contained.
+
+### Test Classes
+
+#### `TestLoadDecodedCsvHostRxMs` (5 tests)
+
+Verifies Layer 3 of the physical timeline fix: `host_rx_ms` is used as `ts_ms` when
+non-zero, falling back to `dev_us/1000` for legacy files.
+
+| Test | What it checks |
+|---|---|
+| `test_emg_csv_uses_host_rx_ms_when_nonzero` | `ts_ms == host_rx_ms` when `host_rx_ms > 0` |
+| `test_emg_csv_falls_back_to_dev_us_when_host_rx_ms_zero` | `ts_ms == dev_us/1000` when `host_rx_ms == 0` |
+| `test_emg_csv_falls_back_when_no_host_rx_ms_column` | Legacy CSV without column: `ts_ms = dev_us/1000` |
+| `test_imu_csv_uses_host_rx_ms_when_nonzero` | Same for IMU CSV |
+| `test_imu_csv_falls_back_to_dev_us_when_host_rx_ms_zero` | Same for IMU CSV |
+
+#### `TestStitchDecodedSessionFromPaths` (7 tests)
+
+Verifies `stitch_decoded_session_from_paths()` — the core multi-capture stitching
+function. Uses synthetic CSVs with controlled timestamps.
+
+| Test | Scenario | What it checks |
+|---|---|---|
+| `test_single_capture_basic` | 1 capture | Correct sample count |
+| `test_two_captures_ble_reconnect_gap` | 2 captures, 10s BLE gap | Duration ~14s (2s+10s+2s); gap preserved |
+| `test_esp32_reset_between_captures` | ESP32 reset (dev_us→0) | Duration > 5s; no timestamp overlap |
+| `test_legacy_files_no_host_rx_ms` | No `host_rx_ms` column | Falls back to dev_us; duration ~7s |
+| `test_out_of_order_paths_sorted_by_ts_ms` | Paths in reverse order | Sorted by ts_ms, not path order |
+| `test_empty_emg_paths_raises` | Empty path list | Raises `FileNotFoundError` |
+| `test_with_imu_swing_detection` | 2 captures + IMU peaks | ≥2 swings; gap between swings > 80% of gap_ms |
+
+**Key timing invariant tested:**
+```
+host_rx_ms advances at step_us/1000 ms per sample
+  500 µs/sample (2000 Hz) → 0.5 ms/sample → 4000 samples = 2000 ms = 2 s
+```
+
+#### `TestStitchDecodedSession` (2 tests)
+
+Verifies `stitch_decoded_session(decoded_dir)` is a thin wrapper that delegates to
+`stitch_decoded_session_from_paths()`.
+
+| Test | What it checks |
+|---|---|
+| `test_single_dir_matches_from_paths` | Both functions return identical `num_emg_samples` and `session_duration_s` |
+| `test_raises_when_no_emg_csv` | Raises `FileNotFoundError` when dir has no `emg_log_*.csv` |
+
+#### `TestComputeSwingEmgFeatures` (4 tests)
+
+Verifies `compute_swing_emg_features()` output structure and IMU feature computation.
+
+| Test | What it checks |
+|---|---|
+| `test_output_structure` | All required keys present: `swing_id`, `mdf`, `rms`, `imu_mean_acc_dyn`, etc. |
+| `test_imu_acc_dyn_computed_when_provided` | `imu_mean_acc_dyn` is finite and correct when IMU data provided |
+| `test_imu_acc_dyn_nan_when_not_provided` | `imu_mean_acc_dyn` is NaN when no IMU data |
+| `test_empty_swings_returns_empty` | Empty swing list → empty feature list |
+
+#### `TestBaselineAndFatigueDeltas` (6 tests)
+
+Verifies baseline selection and fatigue delta computation.
+
+| Test | What it checks |
+|---|---|
+| `test_baseline_median_mdf` | Baseline MDF = median of selected swings (~95.5 Hz) |
+| `test_apply_baseline_deltas_mdf_drop` | `mdf_drop_pct=20`, `rms_increase_pct=10`, `acc_drop_pct=20` |
+| `test_apply_baseline_deltas_no_drop` | `mdf_drop_pct=0` when MDF equals baseline |
+| `test_warmup_skip_filters_early_swings` | Swings before 5-min warmup excluded from baseline |
+| `test_empty_swing_feats_returns_empty_baseline` | Empty input → empty baseline dict |
+| `test_apply_baseline_deltas_empty_rows` | Empty rows → empty list |
+
+#### `TestNoPandasSwingDetection` (1 test, `@pytest.mark.slow`)
+
+Requires real `frames.bin` in `regression_testlogs/`. Skipped automatically if not present.
+
+| Test | What it checks |
+|---|---|
+| `test_swing_detection_nopandas_from_arrays` | ≥5 swings detected; monotonic peak times; correct dict keys |
+
+### Running Nopandas Tests
+
+```bash
+# All nopandas tests (fast, no frames.bin needed)
+pytest tests/test_regression_nopandas.py -v -k "not slow"
+
+# Stitching tests only
+pytest tests/test_regression_nopandas.py -v -k "stitch"
+
+# host_rx_ms priority tests only
+pytest tests/test_regression_nopandas.py -v -k "host_rx_ms"
+
+# Baseline + fatigue tests
+pytest tests/test_regression_nopandas.py -v -k "Baseline or Fatigue"
+
+# All tests including slow (requires frames.bin)
+pytest tests/test_regression_nopandas.py -v
+```
 
 ---
 
