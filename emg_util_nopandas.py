@@ -761,10 +761,14 @@ apply_baseline_deltas_nopandas = apply_baseline_deltas
 def load_decoded_emg_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
     """Load a decoded EMG CSV (dev_us, emg_seq, env, raw, ref, ...) into arrays.
 
-    Converts dev_us (microseconds) → ts_ms (milliseconds) for compatibility
-    with emg_util.py column naming.
+    ts_ms selection (in priority order):
+      1. host_rx_ms column — written by Android Java via TLV_HOST_MS (0x04) as
+         System.currentTimeMillis() per BLE notification. Enables correct
+         multi-capture stitching across BLE reconnects and ESP32 resets.
+      2. dev_us / 1000 — fallback for legacy files without host_rx_ms, or when
+         host_rx_ms == 0 (old frames.bin without TLV_HOST_MS).
     """
-    cols_in = ["dev_us", "env", "raw"]
+    cols_in = ["dev_us", "env", "raw", "host_rx_ms"]
     d: Dict[str, List[float]] = {c: [] for c in cols_in}
     with open(path, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -772,8 +776,11 @@ def load_decoded_emg_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
             for c in cols_in:
                 d[c].append(_to_float(row.get(c)))
     dev_us = np.asarray(d["dev_us"], dtype=np.float64)
+    host_rx_ms = np.asarray(d["host_rx_ms"], dtype=np.float64)
+    # Use host_rx_ms when available (non-zero, finite); fall back to dev_us/1000.
+    ts_ms = np.where(np.isfinite(host_rx_ms) & (host_rx_ms > 0), host_rx_ms, dev_us / 1000.0)
     return {
-        "ts_ms": dev_us / 1000.0,
+        "ts_ms": ts_ms,
         "env": np.asarray(d["env"], dtype=np.float64),
         "raw": np.asarray(d["raw"], dtype=np.float64),
     }
@@ -782,9 +789,14 @@ def load_decoded_emg_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
 def load_decoded_imu_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
     """Load a decoded IMU CSV (dev_us, imu_seq, ax, ay, az, gx, gy, gz, ...) into arrays.
 
-    Converts dev_us → ts_ms.
+    ts_ms selection (in priority order):
+      1. host_rx_ms column — written by Android Java via TLV_HOST_MS (0x04) as
+         System.currentTimeMillis() per BLE notification. Enables correct
+         multi-capture stitching across BLE reconnects and ESP32 resets.
+      2. dev_us / 1000 — fallback for legacy files without host_rx_ms, or when
+         host_rx_ms == 0 (old frames.bin without TLV_HOST_MS).
     """
-    cols_in = ["dev_us", "ax", "ay", "az", "gx", "gy", "gz"]
+    cols_in = ["dev_us", "ax", "ay", "az", "gx", "gy", "gz", "host_rx_ms"]
     d: Dict[str, List[float]] = {c: [] for c in cols_in}
     with open(path, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -792,8 +804,11 @@ def load_decoded_imu_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
             for c in cols_in:
                 d[c].append(_to_float(row.get(c)))
     dev_us = np.asarray(d["dev_us"], dtype=np.float64)
+    host_rx_ms = np.asarray(d["host_rx_ms"], dtype=np.float64)
+    # Use host_rx_ms when available (non-zero, finite); fall back to dev_us/1000.
+    ts_ms = np.where(np.isfinite(host_rx_ms) & (host_rx_ms > 0), host_rx_ms, dev_us / 1000.0)
     return {
-        "ts_ms": dev_us / 1000.0,
+        "ts_ms": ts_ms,
         "ax": np.asarray(d["ax"], dtype=np.float64),
         "ay": np.asarray(d["ay"], dtype=np.float64),
         "az": np.asarray(d["az"], dtype=np.float64),
@@ -803,8 +818,9 @@ def load_decoded_imu_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
     }
 
 
-def stitch_decoded_session(
-    decoded_dir: Union[str, Path],
+def stitch_decoded_session_from_paths(
+    emg_paths: List[Union[str, Path]],
+    imu_paths: List[Union[str, Path]],
     emg_fs_hz: float,
     win_sec: float = 1.0,
     step_sec: float = 0.25,
@@ -815,9 +831,23 @@ def stitch_decoded_session(
     swing_post_ms: float = 450.0,
     mdf_pad_ms: float = 300.0,
 ) -> Dict:
-    """Load all decoded CSVs from a session, stitch them, run full analysis.
+    """Stitch decoded CSVs from a list of paths and run full analysis.
 
-    Mirrors the emg_util.py CLI pipeline but pandas-free.
+    This is the core stitching function. It accepts lists of EMG and IMU CSV
+    paths (which may come from multiple decoded_<stem>/ directories), loads
+    all rows, sorts by ts_ms, and runs the full analysis pipeline.
+
+    Physical timeline construction
+    --------------------------------
+    ts_ms for each row is set by load_decoded_emg_csv() / load_decoded_imu_csv():
+      - host_rx_ms (from TLV_HOST_MS, written by Android Java as
+        System.currentTimeMillis() per BLE notification) when non-zero
+      - dev_us / 1000 for legacy files without TLV_HOST_MS
+
+    Sorting all rows by ts_ms correctly handles:
+      - BLE reconnect gaps (5–30 s): host_rx_ms jumps forward by the gap duration
+      - ESP32 resets (dev_us restarts from 0): host_rx_ms is continuous across resets
+      - uint32 dev_us wrap after ~71 min: handled by DeviceClockExtender within a file
 
     Returns a dict with:
         window_feats:   list of dicts (windowed features)
@@ -826,13 +856,7 @@ def stitch_decoded_session(
         baseline:       dict (baseline values)
         summary:        dict (fatigue summary)
     """
-    decoded_dir = Path(decoded_dir)
-
     # --- Load and stitch all EMG CSVs ---
-    emg_paths = sorted(decoded_dir.glob("emg_log_*.csv"))
-    if not emg_paths:
-        raise FileNotFoundError(f"No emg_log_*.csv found in {decoded_dir}")
-
     emg_ts_list: List[float] = []
     emg_env_list: List[float] = []
     emg_raw_list: List[float] = []
@@ -843,10 +867,14 @@ def stitch_decoded_session(
         emg_env_list.extend(d["env"].tolist())
         emg_raw_list.extend(d["raw"].tolist())
 
+    if not emg_ts_list:
+        raise FileNotFoundError("No EMG data found in provided paths")
+
     emg_ts_ms = np.asarray(emg_ts_list, dtype=np.float64)
     emg_raw = np.asarray(emg_raw_list, dtype=np.float64)
 
-    # Sort by timestamp
+    # Sort by ts_ms — this is the physical timeline construction step.
+    # With host_rx_ms, gaps between captures are preserved correctly.
     order = np.argsort(emg_ts_ms, kind='mergesort')
     emg_ts_ms = emg_ts_ms[order]
     emg_raw = emg_raw[order]
@@ -859,7 +887,9 @@ def stitch_decoded_session(
     if emg_raw.size == 0:
         raise ValueError("No valid EMG samples after stitching")
 
-    # Rebuild uniform timestamp axis from session start
+    # Rebuild uniform timestamp axis from session start.
+    # Note: gaps between captures are collapsed here (uniform spacing).
+    # The original ts_ms (with gaps) is preserved in emg_ts_ms for reference.
     t0_ms = float(emg_ts_ms[0])
     emg_ts_uniform = t0_ms + (np.arange(emg_raw.size, dtype=np.float64) / float(emg_fs_hz)) * 1000.0
 
@@ -868,7 +898,6 @@ def stitch_decoded_session(
     env_sig = envelope(proc, float(emg_fs_hz))
 
     # --- Load and stitch all IMU CSVs ---
-    imu_paths = sorted(decoded_dir.glob("imu_log_*.csv"))
     imu_ts_ms = np.array([], dtype=np.float64)
     imu_ax = imu_ay = imu_az = imu_gx = imu_gy = imu_gz = np.array([], dtype=np.float64)
 
@@ -892,6 +921,7 @@ def stitch_decoded_session(
             imu_gz_list.extend(d["gz"].tolist())
 
         imu_ts_ms = np.asarray(imu_ts_list, dtype=np.float64)
+        # Sort IMU by ts_ms — same physical timeline construction as EMG
         imu_order = np.argsort(imu_ts_ms, kind='mergesort')
         imu_ts_ms = imu_ts_ms[imu_order]
         imu_ax = np.asarray(imu_ax_list, dtype=np.float64)[imu_order]
@@ -925,6 +955,8 @@ def stitch_decoded_session(
             window_feats.append({k: float(feats_dict[k][i]) for k in keys})
 
     # --- Swing detection ---
+    # imu_ts_ms retains the physical timeline (with gaps), so swing timestamps
+    # are correct wall-clock times even across BLE reconnects / ESP32 resets.
     swing_windows: List[Dict[str, float]] = []
     swing_feats: List[Dict[str, float]] = []
     baseline: Dict[str, float] = {}
@@ -984,6 +1016,51 @@ def stitch_decoded_session(
         "baseline": baseline,
         "summary": summary,
     }
+
+
+def stitch_decoded_session(
+    decoded_dir: Union[str, Path],
+    emg_fs_hz: float,
+    win_sec: float = 1.0,
+    step_sec: float = 0.25,
+    warmup_skip_min: float = 5.0,
+    baseline_swings: int = 20,
+    swing_z_thr: float = 5.0,
+    swing_pre_ms: float = 250.0,
+    swing_post_ms: float = 450.0,
+    mdf_pad_ms: float = 300.0,
+) -> Dict:
+    """Load all decoded CSVs from a single decoded/ directory, stitch, and analyze.
+
+    Thin wrapper around stitch_decoded_session_from_paths() for the session-dir
+    layout (btcentral_offline_decode.py output):
+        session_YYYYMMDD_HHMMSS/
+            decoded/
+                emg_log_*.csv
+                imu_log_*.csv
+
+    For the flat-folder layout (offline_runner.py output with multiple
+    decoded_frames_*/ directories), use stitch_decoded_session_from_paths()
+    directly with the collected CSV paths.
+    """
+    decoded_dir = Path(decoded_dir)
+    emg_paths = sorted(decoded_dir.glob("emg_log_*.csv"))
+    if not emg_paths:
+        raise FileNotFoundError(f"No emg_log_*.csv found in {decoded_dir}")
+    imu_paths = sorted(decoded_dir.glob("imu_log_*.csv"))
+    return stitch_decoded_session_from_paths(
+        emg_paths=emg_paths,
+        imu_paths=imu_paths,
+        emg_fs_hz=emg_fs_hz,
+        win_sec=win_sec,
+        step_sec=step_sec,
+        warmup_skip_min=warmup_skip_min,
+        baseline_swings=baseline_swings,
+        swing_z_thr=swing_z_thr,
+        swing_pre_ms=swing_pre_ms,
+        swing_post_ms=swing_post_ms,
+        mdf_pad_ms=mdf_pad_ms,
+    )
 
 
 # ============================
@@ -1062,15 +1139,40 @@ def detect_swing_windows_from_imu_arrays(
     gy: np.ndarray,
     gz: np.ndarray,
     *,
-    baseline_s: float = 2.0,
-    z_thr: float = 5.0,
-    min_consec: int = 3,
-    min_gap_ms: float = 300.0,
+    thr_gyro_dps: float = 300.0,
+    thr_acc_g: float = 0.0,
+    min_gap_ms: float = 2000.0,
     pre_ms: float = 250.0,
     post_ms: float = 450.0,
     use_gyro: bool = True,
+    gyro_fsr_dps: int = 1000,
+    acc_fsr_g: int = 4,
+    # legacy params kept for backward compat but ignored:
+    baseline_s: float = 2.0,
+    z_thr: float = 5.0,
+    min_consec: int = 3,
 ) -> List[Dict[str, float]]:
-    """Detect swing windows from IMU magnitude using robust z-score.
+    """Detect swing windows from IMU magnitude using a fixed dps threshold.
+
+    Replaces the previous z-score approach. The z-score baseline (first 2s)
+    was unreliable when the player was already moving at capture start, and
+    the rest floor statistics cannot bridge the gap to 300 dps for wrist sensors.
+
+    Parameters
+    ----------
+    thr_gyro_dps : float
+        Gyro magnitude threshold in dps. Default 300 dps, consistent with
+        ThresholdSwingDetector and HysteresisSwingDetector.
+    thr_acc_g : float
+        Optional acc gate in g (0 = disabled). Set to 1.5 to match
+        ThresholdSwingDetector gyro_and_acc mode.
+    min_gap_ms : float
+        Minimum ms between confirmed swings. Default 2000ms matches
+        plotter debounce_sec=2.0.
+    gyro_fsr_dps : int
+        Gyro full-scale range in dps (250, 500, 1000, or 2000). Default 1000.
+    acc_fsr_g : int
+        Acc full-scale range in g (2, 4, 8, or 16). Default 4.
 
     Returns list of dict rows: swing_id, t_start_ms, t_peak_ms, t_end_ms, peak_z, peak_mag
     """
@@ -1083,41 +1185,54 @@ def detect_swing_windows_from_imu_arrays(
     t0_ms = float(ts_ms[0])
     t_ms = t0_ms + 1000.0 * t_rel_s
 
+    # Convert raw LSB -> physical units (dps or g)
+    _GYR_MAP = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
+    _ACC_MAP = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
+    gyr_lsb = _GYR_MAP.get(int(gyro_fsr_dps), 32.8)
+    acc_lsb = _ACC_MAP.get(int(acc_fsr_g), 8192.0)
+
     if use_gyro:
-        mag = np.sqrt(np.asarray(gx, dtype=np.float64)**2 + np.asarray(gy, dtype=np.float64)**2 + np.asarray(gz, dtype=np.float64)**2)
+        mag_dps = np.sqrt(
+            np.asarray(gx, dtype=np.float64)**2 +
+            np.asarray(gy, dtype=np.float64)**2 +
+            np.asarray(gz, dtype=np.float64)**2
+        ) / gyr_lsb
     else:
-        mag = np.sqrt(np.asarray(ax, dtype=np.float64)**2 + np.asarray(ay, dtype=np.float64)**2 + np.asarray(az, dtype=np.float64)**2)
+        mag_dps = np.sqrt(
+            np.asarray(ax, dtype=np.float64)**2 +
+            np.asarray(ay, dtype=np.float64)**2 +
+            np.asarray(az, dtype=np.float64)**2
+        ) / acc_lsb
 
-    total_s = float(np.nanmax(t_rel_s)) if t_rel_s.size else float(baseline_s)
-    b_s = min(float(baseline_s), max(0.2 * total_s, 0.5))
-    z, _, _ = robust_zscore(mag, t_rel_s <= b_s)
+    # Optional acc gate
+    if float(thr_acc_g) > 0.0:
+        amag_g = np.sqrt(
+            np.asarray(ax, dtype=np.float64)**2 +
+            np.asarray(ay, dtype=np.float64)**2 +
+            np.asarray(az, dtype=np.float64)**2
+        ) / acc_lsb
+        above = (mag_dps >= float(thr_gyro_dps)) & (amag_g >= float(thr_acc_g))
+    else:
+        above = mag_dps >= float(thr_gyro_dps)
 
-    active = z > float(z_thr)
-    if int(min_consec) > 1:
-        run = 0
-        flags = np.zeros_like(active, dtype=bool)
-        for i, v in enumerate(active):
-            run = run + 1 if v else 0
-            flags[i] = run >= int(min_consec)
-        active = flags
-
+    # Find contiguous above-threshold regions, take peak within each
     peaks = []
     i = 0
-    while i < active.size:
-        if not active[i]:
+    while i < above.size:
+        if not above[i]:
             i += 1
             continue
         j = i
-        while j < active.size and active[j]:
+        while j < above.size and above[j]:
             j += 1
-        seg = slice(i, j)
-        k = int(i + np.nanargmax(z[seg]))
+        k = int(i + np.nanargmax(mag_dps[i:j]))
         peaks.append(k)
         i = j
 
     if not peaks:
         return []
 
+    # Enforce min gap -- keep highest peak when two are within min_gap_ms
     peaks_sorted = sorted(peaks, key=lambda k: t_ms[k])
     kept = []
     last_t = -1e18
@@ -1125,11 +1240,9 @@ def detect_swing_windows_from_imu_arrays(
         if (t_ms[k] - last_t) >= float(min_gap_ms):
             kept.append(k)
             last_t = t_ms[k]
-        else:
-            # keep the stronger one
-            if kept and z[k] > z[kept[-1]]:
-                kept[-1] = k
-                last_t = t_ms[k]
+        elif kept and mag_dps[k] > mag_dps[kept[-1]]:
+            kept[-1] = k
+            last_t = t_ms[k]
 
     rows = []
     for si, k in enumerate(kept):
@@ -1139,12 +1252,14 @@ def detect_swing_windows_from_imu_arrays(
             "t_start_ms": tp - float(pre_ms),
             "t_peak_ms": tp,
             "t_end_ms": tp + float(post_ms),
-            "peak_z": float(z[k]),
-            "peak_mag": float(mag[k]),
+            "peak_z": float(mag_dps[k]),  # dps value (replaces z-score)
+            "peak_mag": float(mag_dps[k]),
         })
 
     # Merge overlapping windows
     rows.sort(key=lambda r: r["t_start_ms"])
+    if not rows:
+        return []
     merged = []
     cur = rows[0].copy()
     for r in rows[1:]:
