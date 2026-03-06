@@ -1110,10 +1110,14 @@ def _plot_fatigue_trend_stitched(
     reconnection_times_s: List[float],
     out_dir: str,
     cfg: Dict[str, Any],
+    warmup_skip_ms: float = 0.0,
 ) -> None:
     """Plot MDF and RMS fatigue trend across the full stitched session.
 
     Vertical dashed lines mark BLE reconnection boundaries.
+    Pre-warmup swings (t < warmup_skip_ms) are excluded from the plot to avoid
+    misleading high drop % values caused by poor electrode contact at session start.
+    A vertical line marks the warmup boundary.
     """
     if swing_feat_df is None or len(swing_feat_df) == 0:
         return
@@ -1123,11 +1127,20 @@ def _plot_fatigue_trend_stitched(
         log('[WARN] matplotlib not available; skipping fatigue trend plot')
         return
 
-    t_s = swing_feat_df['t_peak_ms'].to_numpy(float) / 1000.0
+    # Exclude pre-warmup swings from the plot (poor electrode contact → misleading MDF)
+    warmup_skip_s = warmup_skip_ms / 1000.0
+    if warmup_skip_ms > 0:
+        plot_df = swing_feat_df[swing_feat_df['t_peak_ms'] >= warmup_skip_ms].copy()
+        if len(plot_df) == 0:
+            plot_df = swing_feat_df.copy()  # fallback: show all if nothing remains
+    else:
+        plot_df = swing_feat_df.copy()
+
+    t_s = plot_df['t_peak_ms'].to_numpy(float) / 1000.0
 
     # Determine available subplots
-    has_drop = 'swing_mdf_drop_pct' in swing_feat_df.columns
-    has_acc = 'swing_acc_drop_pct' in swing_feat_df.columns
+    has_drop = 'swing_mdf_drop_pct' in plot_df.columns
+    has_acc = 'swing_acc_drop_pct' in plot_df.columns
     n_rows = 2 + int(has_drop) + int(has_acc)
     fig, axes = plt.subplots(n_rows, 1, figsize=(14, 4 * n_rows), sharex=True)
 
@@ -1135,9 +1148,9 @@ def _plot_fatigue_trend_stitched(
         (axes[0], 'mdf', 'MDF (Hz)', 'steelblue'),
         (axes[1], 'rms', 'RMS', 'darkorange'),
     ]:
-        if col not in swing_feat_df.columns:
+        if col not in plot_df.columns:
             continue
-        y = swing_feat_df[col].to_numpy(float)
+        y = plot_df[col].to_numpy(float)
         ax.scatter(t_s, y, s=8, alpha=0.5, color=color, label=col.upper())
 
         # Rolling median trend line (window = 20 swings)
@@ -1165,7 +1178,7 @@ def _plot_fatigue_trend_stitched(
     if has_drop:
         ax3 = axes[subplot_idx]
         subplot_idx += 1
-        drop = swing_feat_df['swing_mdf_drop_pct'].to_numpy(float)
+        drop = plot_df['swing_mdf_drop_pct'].to_numpy(float)
         ax3.scatter(t_s, drop, s=8, alpha=0.5, color='purple', label='MDF drop %')
         win = min(20, max(3, len(drop) // 10))
         if len(drop) >= win:
@@ -1191,7 +1204,7 @@ def _plot_fatigue_trend_stitched(
     # Note: gyro is saturated at FSR=250 dps; acc_dyn is the reliable IMU fatigue signal.
     if has_acc:
         ax4 = axes[subplot_idx]
-        acc_drop = swing_feat_df['swing_acc_drop_pct'].to_numpy(float)
+        acc_drop = plot_df['swing_acc_drop_pct'].to_numpy(float)
         ax4.scatter(t_s, acc_drop, s=8, alpha=0.5, color='teal', label='acc drop %')
         win = min(20, max(3, len(acc_drop) // 10))
         if len(acc_drop) >= win:
@@ -1204,8 +1217,8 @@ def _plot_fatigue_trend_stitched(
             except Exception:
                 pass
         ax4.axhline(0.0,  color='k',      ls='-',  lw=1.0, alpha=0.5, label='baseline (0%)')
-        ax4.axhline(10.0, color='orange', ls='--', lw=1.0, alpha=0.7, label='mild (-10%)')
-        ax4.axhline(20.0, color='red',    ls='--', lw=1.0, alpha=0.7, label='significant (-20%)')
+        ax4.axhline(10.0, color='orange', ls='--', lw=1.0, alpha=0.7, label='mild (+10%)')
+        ax4.axhline(20.0, color='red',    ls='--', lw=1.0, alpha=0.7, label='significant (+20%)')
         for rt in reconnection_times_s:
             ax4.axvline(rt, color='gray', ls='--', lw=1.0, alpha=0.7)
         ax4.set_ylabel('Acc drop % (↑ = less force)')
@@ -1214,7 +1227,15 @@ def _plot_fatigue_trend_stitched(
 
     axes[-1].set_xlabel('time (s)')
 
-    # Annotate reconnection times on top axis
+    # Annotate reconnection times and warmup boundary on all axes
+    for ax in axes:
+        if warmup_skip_s > 0:
+            ax.axvline(warmup_skip_s, color='green', ls=':', lw=1.2, alpha=0.7)
+    if warmup_skip_s > 0:
+        axes[0].text(warmup_skip_s, axes[0].get_ylim()[1],
+                     f' warmup end\n {warmup_skip_s/60:.1f}min',
+                     fontsize=7, color='green', va='top', rotation=90)
+
     if reconnection_times_s:
         for rt in reconnection_times_s:
             axes[0].text(rt, axes[0].get_ylim()[1], f' {rt/60:.1f}min',
@@ -1222,12 +1243,184 @@ def _plot_fatigue_trend_stitched(
 
     if not has_drop and not has_acc:
         axes[1].set_xlabel('time (s)')
-    fig.suptitle('Fatigue trend — full tennis session (dashed = BLE reconnection)', fontsize=11)
+    title_suffix = f' | warmup={warmup_skip_s/60:.0f}min excluded' if warmup_skip_s > 0 else ''
+    fig.suptitle(f'Fatigue trend — full tennis session (dashed = BLE reconnection){title_suffix}', fontsize=11)
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     fig.savefig(os.path.join(out_dir, 'fatigue_trend.png'), dpi=150)
     plt.close(fig)
     log(f'Saved fatigue_trend.png')
+
+
+# ---------------------------------------------------------
+# Per-swing fatigue summary (replaces windowed analyze_fatigue)
+# ---------------------------------------------------------
+
+def _compute_per_swing_fatigue_summary(
+    swing_feat_df: pd.DataFrame,
+    out_dir: str,
+    warmup_skip_ms: float = 0.0,
+) -> None:
+    """Compute fatigue summary from per-swing MDF and save to fatigue_summary.csv.
+
+    Per-swing MDF is more reliable than windowed MDF because it only samples
+    windows when the muscle is actively contracting (swing events), not during
+    rest periods between rallies where the signal is noise-dominated.
+
+    Replaces the call to core.analyze_fatigue(res.feats, ...) which uses
+    1-second windowed features and is corrupted by rest-period noise.
+    """
+    if swing_feat_df is None or len(swing_feat_df) == 0:
+        return
+
+    # Filter out pre-warmup swings (poor electrode contact → misleading MDF)
+    if warmup_skip_ms > 0:
+        df = swing_feat_df[swing_feat_df['t_peak_ms'] >= warmup_skip_ms].copy()
+        if len(df) == 0:
+            df = swing_feat_df.copy()
+    else:
+        df = swing_feat_df.copy()
+
+    if 'mdf' not in df.columns:
+        return
+
+    mdf = df['mdf'].to_numpy(float)
+    t_s = df['t_peak_ms'].to_numpy(float) / 1000.0
+    valid = np.isfinite(mdf)
+    mdf = mdf[valid]
+    t_s = t_s[valid]
+
+    if len(mdf) < 10:
+        log('[Fatigue] Not enough post-warmup swings for fatigue summary.')
+        return
+
+    # Baseline: first 10% of post-warmup swings
+    baseline_n = max(1, int(len(mdf) * 0.1))
+    baseline_mdf = float(np.nanmean(mdf[:baseline_n]))
+
+    # Final: last 10% of post-warmup swings
+    final_n = max(1, int(len(mdf) * 0.1))
+    final_mdf = float(np.nanmean(mdf[-final_n:]))
+
+    mdf_drop_pct = (
+        100.0 * (baseline_mdf - final_mdf) / baseline_mdf
+        if (np.isfinite(baseline_mdf) and baseline_mdf > 0) else np.nan
+    )
+
+    # MNF if available (full mode only)
+    mnf_drop_pct = np.nan
+    if 'mnf' in df.columns:
+        mnf = df['mnf'].to_numpy(float)[valid]
+        if np.sum(np.isfinite(mnf)) >= 10:
+            baseline_mnf = float(np.nanmean(mnf[:baseline_n]))
+            final_mnf = float(np.nanmean(mnf[-final_n:]))
+            mnf_drop_pct = (
+                100.0 * (baseline_mnf - final_mnf) / baseline_mnf
+                if (np.isfinite(baseline_mnf) and baseline_mnf > 0) else np.nan
+            )
+
+    # Onset: first time rolling-median MDF drops below 85% of baseline
+    onset_time = np.nan
+    if np.isfinite(baseline_mdf) and baseline_mdf > 0:
+        threshold = baseline_mdf * 0.85
+        min_time = float(np.nanmax(t_s)) * 0.2
+        rolling = pd.Series(mdf).rolling(window=20, min_periods=5).mean().to_numpy(float)
+        cand = np.where((t_s >= min_time) & (rolling <= threshold))[0]
+        if len(cand):
+            onset_time = float(t_s[cand[0]])
+
+    onset_str = f'{onset_time:.1f}' if np.isfinite(onset_time) else 'n/a'
+    mnf_str = f'{mnf_drop_pct:.2f}' if np.isfinite(mnf_drop_pct) else 'n/a'
+    log(f'[Fatigue/per-swing] MDF drop % = {mdf_drop_pct:.2f} ; '
+        f'MNF drop % = {mnf_str} ; '
+        f'onset_s = {onset_str}')
+
+    summary = {
+        'baseline_MDF': round(baseline_mdf, 3),
+        'final_MDF': round(final_mdf, 3),
+        'MDF_drop_pct': round(mdf_drop_pct, 3) if np.isfinite(mdf_drop_pct) else np.nan,
+        'MNF_drop_pct': round(mnf_drop_pct, 3) if np.isfinite(mnf_drop_pct) else np.nan,
+        'fatigue_onset_s': round(onset_time, 1) if np.isfinite(onset_time) else np.nan,
+        'n_swings_post_warmup': int(len(mdf)),
+        'warmup_skip_min': round(warmup_skip_ms / 60000.0, 1),
+        'source': 'per_swing',
+    }
+
+    os.makedirs(out_dir, exist_ok=True)
+    pd.DataFrame([summary]).to_csv(os.path.join(out_dir, 'fatigue_summary.csv'), index=False)
+    log('Saved fatigue_summary.csv (per-swing)')
+
+
+# ---------------------------------------------------------
+# Baseline quality filter
+# ---------------------------------------------------------
+
+def _filter_baseline_by_rms(
+    base_feats: pd.DataFrame,
+    all_swing_feats: pd.DataFrame,
+    out_dir: str,
+    rms_fraction: float = 0.25,
+    min_keep: int = 3,
+) -> pd.DataFrame:
+    """Drop noise-dominated swings from the baseline candidate set.
+
+    When the electrode is not yet in good contact at session start (RMS ≈ 0),
+    the MDF of those windows is dominated by broadband noise (≈ 100 Hz) rather
+    than real muscle activity (≈ 150–200 Hz).  Using those swings as the
+    baseline makes every subsequent drop % negative — the opposite of fatigue.
+
+    Strategy: compute the 90th percentile RMS across ALL swings (representing
+    peak player effort); keep only baseline candidates whose RMS ≥ 
+    rms_fraction × session_p90_rms. The median is not robust here because a 
+    session might be >50% inactive/noise swings, pulling the median down to the noise floor.
+    Falls back to a lower threshold or the original set if fewer than min_keep swings survive.
+
+    Args:
+        base_feats:      candidate baseline swing features (subset of all_swing_feats)
+        all_swing_feats: full per-swing feature DataFrame (used for session p90)
+        out_dir:         output directory for diagnostic log message
+        rms_fraction:    keep swings with rms >= rms_fraction * session_p90_rms
+        min_keep:        minimum number of swings to keep; fall back if below this
+
+    Returns:
+        Filtered (or original) base_feats DataFrame.
+    """
+    if base_feats is None or len(base_feats) == 0:
+        return base_feats
+    if 'rms' not in base_feats.columns or 'rms' not in all_swing_feats.columns:
+        return base_feats
+
+    all_rms = all_swing_feats['rms'].dropna().to_numpy(dtype=float)
+    if len(all_rms) < 5:
+        return base_feats
+
+    session_p90_rms = float(np.nanpercentile(all_rms, 90))
+    if session_p90_rms <= 0 or not np.isfinite(session_p90_rms):
+        return base_feats
+
+    threshold = rms_fraction * session_p90_rms
+    filtered = base_feats[base_feats['rms'].fillna(0.0) >= threshold]
+
+    if len(filtered) >= min_keep:
+        n_dropped = len(base_feats) - len(filtered)
+        if n_dropped > 0:
+            log(f'[Baseline] Dropped {n_dropped}/{len(base_feats)} low-RMS swings '
+                f'(threshold={threshold:.2f}, session_p90_rms={session_p90_rms:.2f}). '
+                f'Baseline now uses {len(filtered)} swings.')
+        return filtered.reset_index(drop=True)
+    else:
+        # Fallback to a less aggressive filter if 25% of p90 drops too many
+        threshold_fallback = 0.10 * session_p90_rms
+        filtered_fallback = base_feats[base_feats['rms'].fillna(0.0) >= threshold_fallback]
+        if len(filtered_fallback) >= min_keep:
+            n_dropped = len(base_feats) - len(filtered_fallback)
+            log(f'[Baseline] Strict filter dropped too many. Used fallback threshold={threshold_fallback:.2f}, '
+                f'dropped {n_dropped}/{len(base_feats)} swings.')
+            return filtered_fallback.reset_index(drop=True)
+
+        log(f'[Baseline] Low-RMS filter would leave only {len(filtered)} swings '
+            f'(< min_keep={min_keep}); keeping original {len(base_feats)} swings.')
+        return base_feats
 
 
 # ---------------------------------------------------------
@@ -1391,9 +1584,12 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
                                                 win_s=win_rms_s, step_s=step_rms_s)
         win_rms_df.to_csv(os.path.join(out_dir, 'windowed_rms.csv'), index=False)
 
-        # Baseline from first N swings
+        # Baseline from first N swings — filter out noise-dominated (low-RMS) swings
+        # so that poor-electrode-contact periods at session start don't corrupt the
+        # baseline MDF (noise MDF ≈ 100 Hz vs active-muscle MDF ≈ 150-200 Hz).
         base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
         base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
+        base_feats = _filter_baseline_by_rms(base_feats, swing_feat_df, out_dir)
         base = baseline_from_features(base_feats)
         swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
 
@@ -1405,8 +1601,11 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         bout_df = segment_bouts_from_active(active_segs, swings, cfg)
         bout_df.to_csv(os.path.join(out_dir, 'bout_summary.csv'), index=False)
 
-        _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg)
+        warmup_skip_ms = float(cfg.get('baseline', {}).get('warmup_skip_min', 0.0)) * 60.0 * 1000.0
+        _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg,
+                                     warmup_skip_ms=warmup_skip_ms)
         _plot_windowed_rms(win_rms_df, reconnection_times_s, out_dir)
+        _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms)
 
         _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
                                      total_dur_s, len(swings), len(bout_df), mode)
@@ -1416,9 +1615,12 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
     # --- Full mode: per-swing EMG features ---
     swing_feat_df = per_swing_emg_features_stitched(swings, emg_df, cfg, imu_df=imu_df)
 
-    # Baseline: first N swings of the full session (abs_us starts at 0)
+    # Baseline: first N swings of the full session — filter out noise-dominated
+    # (low-RMS) swings so that poor-electrode-contact periods at session start
+    # don't corrupt the baseline MDF (noise MDF ≈ 100 Hz vs active MDF ≈ 150-200 Hz).
     base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
     base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
+    base_feats = _filter_baseline_by_rms(base_feats, swing_feat_df, out_dir)
     base = baseline_from_features(base_feats)
     swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
 
@@ -1462,11 +1664,17 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         )
 
         if bool(pl.get('do_fatigue', False)):
-            warmup_skip = float(cfg.get('baseline', {}).get('warmup_skip_min', 10.0))
-            core.analyze_fatigue(res.feats, save_dir=out_dir, warmup_skip_min=warmup_skip)
+            # NOTE: core.analyze_fatigue uses windowed features (1-second windows including
+            # rest periods) which gives unreliable MDF. We skip it here and use
+            # _compute_per_swing_fatigue_summary instead (per-swing MDF only).
+            pass
 
-    # Fatigue trend plot with reconnection markers
-    _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg)
+    # Fatigue trend plot with reconnection markers (exclude pre-warmup swings)
+    warmup_skip_ms = float(cfg.get('baseline', {}).get('warmup_skip_min', 0.0)) * 60.0 * 1000.0
+    _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg,
+                                 warmup_skip_ms=warmup_skip_ms)
+    # Per-swing fatigue summary (replaces windowed analyze_fatigue)
+    _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms)
 
     # Session summary
     _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
