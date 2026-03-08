@@ -746,7 +746,7 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
                                  pre_ms: float = 250.0,
                                  post_ms: float = 450.0,
                                  use_gyro: bool = True,
-                                 already_in_dps: bool = False,
+                                 already_in_dps: bool = True,
                                  # legacy params kept for backward compat but ignored:
                                  baseline_s: float = 2.0,
                                  z_thr: float = 5.0,
@@ -769,10 +769,11 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
         Minimum ms between confirmed swings. Default 2000ms matches
         plotter debounce_sec=2.0.
     already_in_dps : bool
-        When True, gx/gy/gz are already in dps and ax/ay/az already in g
-        (e.g. data from load_session_stitched() which applies FSR conversion).
-        When False (default), raw LSB values are converted using the
-        gyro_fsr_dps / acc_fsr_g columns in the DataFrame.
+        When True (default), gx/gy/gz are already in dps and ax/ay/az already
+        in g — the standard case when imu_df comes from load_session_stitched()
+        which applies FSR conversion.
+        When False, raw LSB values are converted using the gyro_fsr_dps /
+        acc_fsr_g columns in the DataFrame (opt-in for raw ADC callers).
     """
     _EMPTY = pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
 
@@ -1087,6 +1088,8 @@ def detect_swing_windows_from_imu_arrays(
     gx: np.ndarray,
     gy: np.ndarray,
     gz: np.ndarray,
+    gyro_fsr_dps: float = 1000.0,
+    acc_fsr_g: float = 4.0,
     **kwargs,
 ) -> pd.DataFrame:
     """Array-based wrapper around detect_swing_windows_from_imu (Windows/pandas version).
@@ -1094,6 +1097,10 @@ def detect_swing_windows_from_imu_arrays(
     Accepts the same positional numpy-array arguments as the Android
     emg_util_nopandas.detect_swing_windows_from_imu_arrays, builds a
     temporary DataFrame, and delegates to detect_swing_windows_from_imu.
+
+    gyro_fsr_dps / acc_fsr_g are injected as DataFrame columns so the
+    already_in_dps=False (raw LSB) path can read them.  This matches the
+    nopandas function signature exactly.
 
     Returns a pandas DataFrame (same schema as detect_swing_windows_from_imu).
     """
@@ -1105,7 +1112,12 @@ def detect_swing_windows_from_imu_arrays(
         "gx": np.asarray(gx, dtype=float),
         "gy": np.asarray(gy, dtype=float),
         "gz": np.asarray(gz, dtype=float),
+        "gyro_fsr_dps": float(gyro_fsr_dps),
+        "acc_fsr_g": float(acc_fsr_g),
     })
+    # Default to raw-LSB path (already_in_dps=False) to match nopandas interface.
+    # Callers with pre-converted dps data can override via already_in_dps=True.
+    kwargs.setdefault("already_in_dps", False)
     return detect_swing_windows_from_imu(imu_df, **kwargs)
 
 
