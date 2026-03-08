@@ -100,3 +100,35 @@ health:
 
   # New knob: filter out swing windows that overlap BAD EMG intervals
   filter_swings_by_emg_bad: true
+
+env_gating:
+  # ENV-based activation gating for MDF/MNF windows (sports EMG best practice)
+  # ENV = MyoWare envelope output (rectified + low-passed ~3.6 Hz)
+  # Use ENV to detect "muscle active" vs "rest" periods
+  # MDF/MNF computed only on RAW during ENV-active + IMU-stable windows
+  enable: true  # set true to enable ENV gating for MDF/MNF
+  
+  # Threshold mode: 'percentile' (session-adaptive) or 'absolute' (fixed value)
+  mode: percentile
+  
+  # Percentile-based threshold (recommended for sports with varying intensity)
+  # Compute threshold as percentile of 1s ENV windows across full session
+  # p75 = upper quartile (conservative: keeps ~25% of time as "active")
+  # p50 = median (moderate: keeps ~50% of time)
+  # p25 = lower quartile (permissive: keeps ~75% of time)
+  percentile: 75
+  
+  # Absolute threshold (ADC units, 0-4095 for 12-bit)
+  # Only used if mode='absolute'
+  # From log0305: p75(env_mean) ≈ 1651, p50 ≈ 1223, p25 ≈ 700
+  absolute_threshold: 1651
+  
+  # Window size for computing ENV mean (seconds)
+  # Should match MDF/MNF window size for consistency
+  window_sec: 1.0
+  
+  # Apply ENV gate to: 'mdf_only', 'baseline_only', or 'both'
+  # mdf_only: gate per-swing MDF/MNF windows (recommended)
+  # baseline_only: gate baseline swing selection only
+  # both: gate both baseline and per-swing MDF/MNF
+  apply_to: mdf_only

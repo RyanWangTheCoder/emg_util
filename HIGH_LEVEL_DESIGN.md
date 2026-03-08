@@ -640,6 +640,119 @@ binary filter when electrode contact degrades gradually over a session.
 
 ---
 
+### 9. ENV-Based Activation Gating (Sports EMG Best Practice)
+
+**Problem:** Even with IMU-based swing detection and EMG health filtering, some detected
+"swings" occur during rest periods or low-effort movements where the muscle is not actively
+contracting. These windows contain mostly noise and produce unreliable MDF values:
+- Rest-period noise: MDF ≈ 100 Hz (flat spectrum, Nyquist/2 of noise floor)
+- Active muscle contraction: MDF ≈ 150–200 Hz (real EMG frequency content)
+
+Including rest-period windows in MDF/MNF computation adds scatter to the fatigue trend and
+can bias the baseline if rest swings are selected.
+
+**Solution: ENV (envelope) as activation proxy**
+
+The MyoWare 2.0 provides two EMG outputs:
+- **RAW**: unprocessed EMG signal (20–500 Hz hardware bandpass)
+- **ENV**: envelope output (rectified + low-passed at ~3.6 Hz)
+
+ENV is not suitable for frequency analysis (MDF/MNF) because the low-pass filter removes
+the frequency content needed for spectral estimation. However, ENV is an excellent proxy
+for muscle activation intensity:
+
+```
+ENV high (> threshold) → muscle actively contracting → MDF/MNF valid
+ENV low  (< threshold) → muscle at rest or noise-dominated → MDF/MNF unreliable
+```
+
+**Implementation (`compute_env_gate_threshold()` + `apply_env_gate_to_swings()`):**
+
+```python
+# 1. Compute session-adaptive threshold from 1s ENV windows
+win = int(1.0 * emg_fs_hz)  # 2000 samples @ 2000 Hz
+n = len(env) // win
+env_mean = np.mean(env[:n*win].reshape(n, win), axis=1)
+threshold = np.percentile(env_mean, 75)  # upper quartile
+
+# 2. For each swing: check if mean(ENV) >= threshold
+for swing in swings:
+    seg_env = env[swing.t_start:swing.t_end]
+    env_mean = np.mean(seg_env)
+    swing.env_active = 1 if env_mean >= threshold else 0
+
+# 3. Filter swings by env_active before MDF/MNF computation
+active_swings = [s for s in swings if s.env_active == 1]
+```
+
+**Why percentile-based threshold (not absolute):**
+- ENV amplitude varies by electrode placement, skin impedance, and player physiology
+- A fixed threshold (e.g., 1651 ADC units) would fail for different players or sessions
+- The 75th percentile adapts to the session's own intensity distribution
+- p75 (upper quartile) is conservative: keeps ~25% of time as "active"
+
+**Validation (log0305 real data):**
+- Correlation between ENV and RAW amplitude: **r = 0.696** (strong positive)
+- ENV p10/p50/p90: 196 / 1223 / 2183 ADC units
+- Suggested threshold (p75): **1651 ADC units**
+
+This confirms ENV tracks muscle activation intensity and is suitable for gating.
+
+**Configuration (`config.yaml`):**
+
+```yaml
+env_gating:
+  enable: false  # opt-in feature (default disabled)
+  mode: percentile  # 'percentile' or 'absolute'
+  percentile: 75  # p75 = upper quartile (conservative)
+  absolute_threshold: 1651  # fixed threshold (only if mode='absolute')
+  window_sec: 1.0  # window size for ENV mean computation
+  apply_to: mdf_only  # 'mdf_only', 'baseline_only', or 'both'
+```
+
+**When to use ENV gating:**
+- **Recommended:** Sessions with significant rest periods (tennis, interval training)
+- **Not needed:** Continuous high-intensity activities (cycling time trial, rowing)
+- **Caution:** If electrode contact is poor throughout, ENV may be noise-dominated and
+  the percentile threshold will be at the noise floor → filter does nothing
+
+**Relationship to existing filters:**
+
+| Filter | Purpose | When it runs |
+|--------|---------|--------------|
+| IMU swing detection (300 dps) | Detect movement events | Pre-filter (defines candidate swings) |
+| EMG health filter | Reject contact-loss windows | Pre-filter (removes bad data) |
+| RMS quality filter | Reject noise-dominated swings | Baseline selection only |
+| ENV activation gate | Reject rest-period swings | MDF/MNF computation (optional) |
+| Activity gating (IMU percentile) | Separate rallies from rest | Offline only |
+
+ENV gating complements the existing filters by adding a muscle-activation criterion.
+It is most effective when combined with IMU activity gating (offline) or used as a
+replacement for activity gating in real-time scenarios where session-wide IMU statistics
+are not available.
+
+**Sports EMG best practice pattern:**
+
+```
+RAW (2000 Hz)  →  MDF/MNF (frequency analysis, fatigue)
+ENV (3.6 Hz LP) →  Activation gating (muscle on/off detection)
+IMU (200 Hz)    →  Motion artifact rejection (violent motion)
+```
+
+This three-signal approach is the recommended pattern for sports EMG:
+- Use RAW for spectral features (MDF/MNF) — requires full frequency content
+- Use ENV for amplitude/intensity features and gating — robust to sign changes
+- Use IMU to reject artifact windows — independent motion reference
+
+**Implementation status:**
+- ✅ Configuration added (`config.yaml`)
+- ✅ Core functions implemented (`emg_util.py`, `emg_util_nopandas.py`)
+- ✅ Validated with real data (log0305: corr=0.696)
+- ⏳ Integration into `emg_util_yaml_runner.py` (pending)
+- ⏳ Testing with log0305 (after integration)
+
+---
+
 ## Real-time vs Offline Feature Comparison
 
 | Feature | FatigueMonitor (real-time) | medium mode (offline) | both mode (offline) |
