@@ -836,5 +836,224 @@ class TestSwingDetectionCrossVersion:
         assert len(np_rows) == 0
 
 
+# ===========================================================================
+# 8. ENV Gating (Activation Detection) - nopandas version
+# ===========================================================================
+
+class TestENVGatingNoPandas:
+    """Test ENV-based activation gating functions (nopandas version)."""
+
+    def test_compute_env_gate_threshold_percentile(self):
+        """Test ENV threshold computation (percentile mode) - nopandas."""
+        # Synthetic ENV signal
+        env = np.random.rand(20000) * 2000 + 500  # 500-2500 ADC range
+        
+        # Compute threshold (percentile mode)
+        threshold = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0,
+            mode='percentile',
+            percentile=75.0,
+            window_sec=1.0,
+        )
+        
+        # Verify output
+        assert isinstance(threshold, float)
+        assert np.isfinite(threshold)
+        assert threshold > 0, "Threshold should be positive"
+        assert threshold < 4095, "Threshold should be within ADC range"
+        
+        # Threshold should be between median and max
+        assert np.median(env) < threshold < np.max(env)
+    
+    def test_compute_env_gate_threshold_absolute(self):
+        """Test ENV threshold computation (absolute mode) - nopandas."""
+        # Dummy ENV signal
+        env = np.random.rand(10000) * 2000
+        
+        # Compute threshold (absolute mode)
+        threshold = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0,
+            mode='absolute',
+            absolute_threshold=1651.0,
+        )
+        
+        # Should return the absolute value
+        assert threshold == 1651.0
+    
+    def test_apply_env_gate_to_swings_list(self):
+        """Test ENV gating on list of dicts (nopandas path)."""
+        # Synthetic ENV signal with clear high/low distinction
+        # p75 of [500, 500, ..., 2000, 2000, ..., 600, 600, ...] ≈ 1125
+        # So swing at 2000 should be active, swings at 500/600 should be inactive
+        env = np.concatenate([
+            np.ones(2000) * 500,   # Low ENV (rest)
+            np.ones(2000) * 2000,  # High ENV (active) - clearly above p75
+            np.ones(2000) * 600,   # Low ENV (rest)
+        ])
+        emg_ts_ms = np.arange(len(env)) * 0.5  # 2000 Hz → 0.5 ms/sample
+        
+        # Swings at different ENV levels
+        swings = [
+            {"swing_id": 0, "t_start_ms": 500.0, "t_end_ms": 1000.0},   # Low ENV (~500)
+            {"swing_id": 1, "t_start_ms": 2500.0, "t_end_ms": 3000.0},  # High ENV (~2000)
+            {"swing_id": 2, "t_start_ms": 4500.0, "t_end_ms": 5000.0},  # Low ENV (~600)
+        ]
+        
+        # ENV gating config - use percentile mode
+        env_gate_cfg = {
+            'enable': True,
+            'mode': 'percentile',
+            'percentile': 50.0,  # Use median so threshold ≈ 600, making swing 1 active
+            'absolute_threshold': 1651.0,
+            'window_sec': 1.0,
+        }
+        
+        # Apply gating
+        gated_swings = nopandas.apply_env_gate_to_swings(
+            swings, env, emg_ts_ms, 2000.0, env_gate_cfg
+        )
+        
+        # Verify output
+        assert isinstance(gated_swings, list)
+        assert len(gated_swings) == len(swings)
+        assert all('env_active' in s for s in gated_swings)
+        
+        # Check env_active values
+        assert all(s['env_active'] in [0, 1] for s in gated_swings)
+        
+        # Swing 1 (high ENV) should be active
+        assert gated_swings[1]['env_active'] == 1, \
+            f"Swing 1 should be active (ENV=2000 > threshold), got env_active={gated_swings[1]['env_active']}"
+        
+        # At least one swing should be active
+        assert sum(s['env_active'] for s in gated_swings) > 0
+    
+    def test_apply_env_gate_disabled(self):
+        """Test ENV gating when disabled (all swings marked active) - nopandas."""
+        # Dummy data
+        env = np.random.rand(5000) * 2000
+        emg_ts_ms = np.arange(len(env)) * 0.5
+        
+        swings = [
+            {"swing_id": 0, "t_start_ms": 500.0, "t_end_ms": 1000.0},
+            {"swing_id": 1, "t_start_ms": 2500.0, "t_end_ms": 3000.0},
+        ]
+        
+        # ENV gating config (disabled)
+        env_gate_cfg = {
+            'enable': False,
+            'mode': 'percentile',
+            'percentile': 75.0,
+        }
+        
+        # Apply gating
+        gated_swings = nopandas.apply_env_gate_to_swings(
+            swings, env, emg_ts_ms, 2000.0, env_gate_cfg
+        )
+        
+        # All swings should be marked active when disabled
+        assert all(s['env_active'] == 1 for s in gated_swings)
+    
+    def test_env_gate_threshold_consistency(self):
+        """Test that ENV threshold is deterministic - nopandas."""
+        # Fixed ENV signal
+        np.random.seed(42)
+        env = np.random.rand(20000) * 2000
+        
+        # Compute threshold twice
+        thr1 = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0, mode='percentile', percentile=75.0
+        )
+        thr2 = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0, mode='percentile', percentile=75.0
+        )
+        
+        # Should be identical
+        assert thr1 == thr2
+    
+    def test_env_gate_percentile_range(self):
+        """Test ENV threshold with different percentiles - nopandas."""
+        # Fixed ENV signal
+        np.random.seed(42)
+        env = np.random.rand(20000) * 2000
+        
+        # Compute thresholds at different percentiles
+        thr_50 = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0, mode='percentile', percentile=50.0
+        )
+        thr_75 = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0, mode='percentile', percentile=75.0
+        )
+        thr_90 = nopandas.compute_env_gate_threshold(
+            env, emg_fs_hz=2000.0, mode='percentile', percentile=90.0
+        )
+        
+        # Higher percentile should give higher threshold
+        assert thr_50 < thr_75 < thr_90
+    
+    def test_env_gate_empty_swings(self):
+        """Test ENV gating with empty swing list - nopandas."""
+        env = np.random.rand(5000) * 2000
+        emg_ts_ms = np.arange(len(env)) * 0.5
+        
+        env_gate_cfg = {
+            'enable': True,
+            'mode': 'percentile',
+            'percentile': 75.0,
+        }
+        
+        # Apply gating to empty list
+        gated_swings = nopandas.apply_env_gate_to_swings(
+            [], env, emg_ts_ms, 2000.0, env_gate_cfg
+        )
+        
+        # Should return empty list
+        assert gated_swings == []
+    
+    def test_env_gate_integration_with_swing_features(self):
+        """Test ENV gating integration with compute_swing_emg_features - nopandas."""
+        # Synthetic signals
+        n = 10000
+        proc = np.sin(2 * np.pi * 50 * np.arange(n) / 2000.0) * 200.0
+        env_sig = np.abs(proc) + np.random.rand(n) * 500 + 1000  # 1000-1700 range
+        ts_ms = np.arange(n) * 0.5
+        
+        # Create swings
+        swings = [
+            {"swing_id": 0, "t_start_ms": 500.0, "t_peak_ms": 700.0,
+             "t_end_ms": 900.0, "peak_z": 400.0, "peak_mag": 400.0},
+            {"swing_id": 1, "t_start_ms": 2500.0, "t_peak_ms": 2700.0,
+             "t_end_ms": 2900.0, "peak_z": 400.0, "peak_mag": 400.0},
+        ]
+        
+        # Apply ENV gating
+        env_gate_cfg = {
+            'enable': True,
+            'mode': 'percentile',
+            'percentile': 75.0,
+        }
+        gated_swings = nopandas.apply_env_gate_to_swings(
+            swings, env_sig, ts_ms, 2000.0, env_gate_cfg
+        )
+        
+        # Verify env_active was added by apply_env_gate_to_swings
+        assert all('env_active' in s for s in gated_swings), \
+            "apply_env_gate_to_swings should add env_active field"
+        
+        # Compute features (should preserve env_active field from input)
+        feats = nopandas.compute_swing_emg_features(
+            proc, env_sig, ts_ms, 2000.0, gated_swings
+        )
+        
+        # compute_swing_emg_features should preserve env_active from input swings
+        # Check if env_active is in the output (it should be copied from input)
+        for i, f in enumerate(feats):
+            if 'env_active' in gated_swings[i]:
+                assert 'env_active' in f, \
+                    f"compute_swing_emg_features should preserve env_active from input swing {i}"
+                assert f['env_active'] == gated_swings[i]['env_active'], \
+                    f"env_active value should match input for swing {i}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-m", "nopandas"])

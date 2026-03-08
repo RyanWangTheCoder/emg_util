@@ -277,10 +277,16 @@ python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
 Run the complete test suite:
 
 ```bash
-# Run all tests
+# Run all pandas tests (Windows/PC pipeline)
 python -m pytest tests/test_regression.py -v
 
-# Run specific test categories
+# Run all nopandas tests (Android pipeline)
+python -m pytest tests/test_regression_nopandas.py -v
+
+# Run both test suites
+python -m pytest tests/ -v
+
+# Run specific test categories (pandas)
 python -m pytest tests/test_regression.py -m data_loading -v
 python -m pytest tests/test_regression.py -m signal_processing -v
 python -m pytest tests/test_regression.py -m fatigue -v
@@ -288,20 +294,49 @@ python -m pytest tests/test_regression.py -m plotter -v
 
 # Run only fast tests (skip slow tests)
 python -m pytest tests/test_regression.py -m "not slow" -v
+python -m pytest tests/test_regression_nopandas.py -m "not slow" -v
+
+# Run ENV gating tests only
+python -m pytest tests/test_regression.py::TestENVGating -v
+python -m pytest tests/test_regression_nopandas.py::TestENVGatingNoPandas -v
+python -m pytest tests/ -k "ENV" -v
 
 # Run with coverage report
 python -m pytest tests/test_regression.py --cov=. --cov-report=html
 ```
 
+**Nopandas-Specific Tests:**
+
+```bash
+# Run all nopandas tests (fast, no frames.bin needed)
+python -m pytest tests/test_regression_nopandas.py -v -k "not slow"
+
+# Run stitching tests only
+python -m pytest tests/test_regression_nopandas.py -v -k "stitch"
+
+# Run host_rx_ms priority tests
+python -m pytest tests/test_regression_nopandas.py -v -k "host_rx_ms"
+
+# Run baseline + fatigue tests
+python -m pytest tests/test_regression_nopandas.py -v -k "Baseline or Fatigue"
+
+# Run cross-version consistency tests
+python -m pytest tests/test_regression_nopandas.py::TestSwingDetectionCrossVersion -v
+
+# Run all tests including slow (requires frames.bin)
+python -m pytest tests/test_regression_nopandas.py -v
+```
+
 **Test Categories:**
 - `data_loading` - Data loading and integrity tests
-- `signal_processing` - Signal processing algorithm tests
+- `signal_processing` - Signal processing algorithm tests (includes ENV gating)
 - `swing_detection` - Swing detection tests
 - `fatigue` - Fatigue analysis tests
 - `pipeline` - Full pipeline integration tests
 - `baseline` - Regression baseline tests
 - `error_handling` - Error handling and edge cases
 - `plotter` - Plotter offline mode tests
+- `nopandas` - Pandas-free pipeline tests (Android)
 - `fast` - Fast tests (< 5 seconds)
 - `slow` - Slow tests (> 5 seconds)
 

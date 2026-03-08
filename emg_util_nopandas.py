@@ -649,7 +649,10 @@ def compute_swing_emg_features(
                 imu_mean_acc_dyn = float(np.nanmean(seg_acc))
                 imu_peak_acc_dyn = float(np.nanmax(seg_acc))
 
-        rows.append({
+        # Start with a copy of the input swing to preserve extra fields (e.g. env_active)
+        row = dict(r)
+        # Update with computed features
+        row.update({
             "swing_id": int(r['swing_id']),
             "t_start_ms": t0,
             "t_peak_ms": float(r['t_peak_ms']),
@@ -669,6 +672,7 @@ def compute_swing_emg_features(
             "imu_mean_acc_dyn": imu_mean_acc_dyn,
             "imu_peak_acc_dyn": imu_peak_acc_dyn,
         })
+        rows.append(row)
 
     return rows
 
