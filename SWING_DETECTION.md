@@ -180,7 +180,15 @@ emg_util_yaml_runner.py - detect_swings_from_imu():
 
 emg_util.py - detect_swing_windows_from_imu():
 - Same replacement: z-score -> fixed 300 dps threshold
-- Added LSB->dps conversion (this function receives raw LSB data)
+- Added already_in_dps parameter (default True):
+  - already_in_dps=True (default): data already in dps/g — used by yaml_runner
+    which calls load_session_stitched() that applies FSR conversion before returning
+  - already_in_dps=False: raw LSB path — reads gyro_fsr_dps / acc_fsr_g columns
+    from the DataFrame and converts LSB -> dps internally
+- detect_swing_windows_from_imu_arrays() wrapper added for cross-platform parity:
+  - Accepts numpy arrays (same signature as Android emg_util_nopandas version)
+  - Takes explicit gyro_fsr_dps / acc_fsr_g parameters, injects them as DataFrame columns
+  - Defaults to already_in_dps=False (raw LSB path) to match nopandas interface
 - Legacy parameters (baseline_s, z_thr, min_consec) kept in signature
   for backward compatibility but ignored
 
@@ -198,6 +206,11 @@ config.yaml:
     thr_gyro_dps: 300       # fixed gyro threshold in dps
     thr_acc_g: 0.0          # optional acc gate (0=disabled, 1.5=strict)
     min_gap_ms: 2000        # matches plotter debounce=2s
+
+Android Java (SessionCaptureActivity.java) - aligned in 2026-03-07:
+- GYRO_SWING_THRESHOLD_DPS: ~150 dps -> 300 dps (matches all other paths)
+- MARKER_DEBOUNCE_US: 300ms -> 2000ms (matches plotter debounce=2s)
+- Previously Android counted ~3x more "swings" than offline analysis
 
 ### Alignment After Fix (same host_rx_ms time axis)
 
@@ -354,6 +367,14 @@ When to use each:
 | Acc gate | thr_acc_g | 0.0 (disabled) | Set to 1.5 to match ThresholdSwingDetector |
 | Min gap | min_gap_ms | 2000 ms | Matches plotter debounce=2s |
 | Window pre/post | pre_ms / post_ms | 250 / 450 ms | EMG feature extraction window |
+| Data format | already_in_dps | True (yaml_runner) | yaml_runner: dps (load_session_stitched converts); arrays wrapper: False (raw LSB) |
+
+### Android Java (SessionCaptureActivity.java)
+
+| Parameter | Old Value | Current Value | Notes |
+|-----------|-----------|---------------|-------|
+| GYRO_SWING_THRESHOLD_DPS | ~150 dps | 300 dps | Aligned with all other paths |
+| MARKER_DEBOUNCE_US | 300,000 µs (300ms) | 2,000,000 µs (2000ms) | Aligned with plotter debounce=2s |
 
 ---
 
@@ -418,4 +439,4 @@ threshold estimation. The fixed 300 dps threshold is the correct solution.
 
 ---
 
-Last Updated: 2026-03 (adaptive threshold investigation + time axis unification)
+Last Updated: 2026-03-07 (adaptive threshold investigation + time axis unification + Android alignment + already_in_dps parameter)
