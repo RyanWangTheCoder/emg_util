@@ -602,7 +602,12 @@ class TestBaselineAndFatigueDeltas:
         return rows
 
     def test_baseline_median_mdf(self):
-        """Baseline MDF should be median of selected baseline swings."""
+        """Baseline MDF should be 75th percentile of selected baseline swings.
+
+        Fresh muscles have the HIGHEST MDF, so the baseline uses the 75th percentile
+        (not median) to represent the fresh state.  This prevents warm-up swings with
+        lower MDF from anchoring the baseline too low.
+        """
         feats = self._make_swing_feats(20, mdf_start=100.0, mdf_drop_per_swing=1.0,
                                        t0_ms=400_000.0)  # after 5-min warmup
         base_swings = nopandas.select_baseline_swings(
@@ -611,8 +616,9 @@ class TestBaselineAndFatigueDeltas:
 
         assert "mdf" in baseline
         assert np.isfinite(baseline["mdf"])
-        # First 10 swings after warmup: MDF = 100, 99, 98, ..., 91 → median ≈ 95.5
-        assert baseline["mdf"] == pytest.approx(95.5, abs=1.0)
+        # First 10 swings after warmup: MDF = 100, 99, 98, ..., 91
+        # 75th percentile of [91..100] = 97.75  (matches emg_util.py behavior)
+        assert baseline["mdf"] == pytest.approx(97.75, abs=1.0)
 
     def test_apply_baseline_deltas_mdf_drop(self):
         """mdf_drop_pct should be positive when MDF decreases from baseline."""
