@@ -93,7 +93,7 @@ frames.bin (Android)
 emg_util_yaml_runner.py --config config.yaml --log-dir <folder>
   → capture_loader.discover_sessions()
   → load_session_stitched() [stitch all BLE captures as one tennis session]
-  → detect_swings_from_imu() [robust z-score on gyro magnitude]
+  → detect_swings_from_imu() [fixed 300 dps threshold → delegates to core.detect_swing_windows_from_imu()]
   → activity_segments_from_imu() [percentile hysteresis gating]
   → per_swing_emg_features_stitched() [full: MDF+RMS+MAV+WL+ZC+SSC+MNF]
      OR per_swing_emg_medium_stitched() [medium: envelope+MDF+RMS only]
@@ -108,7 +108,8 @@ emg_util_yaml_runner.py --config config.yaml --log-dir <folder>
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `emg_util.py` | `emg_util/` | Core library: preprocessing, features, FatigueMonitor, offline analysis |
+| `emg_util.py` | `emg_util/` | Core library: preprocessing, features, swing detection, offline analysis |
+| `fatigue_monitor.py` | `emg_util/` | **Canonical** `FatigueMonitor` + `preprocess_emg` (pandas-free, Android-compatible) |
 | `emg_util_yaml_runner.py` | `emg_util/` | YAML-driven CLI: offline tennis session analysis |
 | `capture_loader.py` | `emg_util/` | Session discovery, CSV loading, stitching |
 | `capture_health.py` | `emg_util/` | EMG signal health check (contact loss detection) |
@@ -158,13 +159,18 @@ Configured via `features.mode` in YAML:
 
 ## Swing Detection: Real-time vs Offline
 
-| | Real-time (Android + plotter) | Offline (yaml_runner) |
-|---|---|---|
-| **Method** | Simple threshold on gyro magnitude | Robust z-score on gyro magnitude |
-| **Threshold** | Fixed: ~150 dps (configurable) | Adaptive: z > 5.0 (configurable) |
-| **Debounce** | 300ms hard gate | min_gap_ms (configurable, default 300ms) |
-| **Advantage** | Zero latency, no history needed | Adapts to sensor placement/activity level |
-| **Disadvantage** | May miss low-intensity swings or false-trigger on noise | Requires full session data |
+| | Real-time Android (Java) | Real-time PC plotter | Offline (yaml_runner) |
+|---|---|---|---|
+| **Method** | Fixed threshold on gyro magnitude | Fixed threshold on gyro magnitude | Fixed threshold on gyro magnitude |
+| **Threshold** | ~150 dps (TODO: align to 300 dps) | 300 dps (`ThresholdSwingDetector`) | 300 dps (`thr_gyro_dps` config) |
+| **Debounce** | 300ms (TODO: align to 2000ms) | 2000ms (`debounce_sec=2.0`) | 2000ms (`min_gap_ms` config) |
+| **Implementation** | Java hot path | `ThresholdSwingDetector` / `HysteresisSwingDetector` | `core.detect_swing_windows_from_imu(already_in_dps=True)` |
+| **Data format** | Raw LSB (converted in Java) | dps (converted by plotter) | dps (converted by `load_session_stitched()`) |
+| **Window merge** | N/A | N/A | ✅ overlapping windows merged |
+
+> **Known misalignment**: Android Java still uses ~150 dps / 300ms debounce while the plotter
+> and offline analysis use 300 dps / 2000ms. This causes Android to count ~3× more "swings"
+> than offline analysis. The Android threshold/debounce should be raised to match.
 
 ---
 
@@ -224,16 +230,17 @@ design correctly avoids this.
 
 ## FatigueMonitor: Canonical Implementation
 
-`FatigueMonitor` exists in two files that must be kept in sync:
+`FatigueMonitor` and `preprocess_emg` live in **`fatigue_monitor.py`** — the single source of truth:
 
-| File | Used by |
-|------|---------|
-| `emg_util/emg_util.py` | `sensordata_plotter.py` (PC live plotter) |
-| `btLeApp/.../emg_util_nopandas.py` | `analysis_bridge.py` (Android via Chaquopy) |
+| File | Role |
+|------|------|
+| `emg_util/fatigue_monitor.py` | **Canonical** implementation (pandas-free, Android-compatible) |
+| `emg_util/emg_util.py` | Re-exports `FatigueMonitor` and `preprocess_emg` via `from fatigue_monitor import ...` |
+| `btLeApp/.../emg_util_nopandas.py` | Android copy — imports from `fatigue_monitor` submodule (git submodule) |
 
-Both implementations are **identical** in algorithm. The split exists because Android cannot use
-pandas, matplotlib, or scipy's full stack. Any change to `FatigueMonitor` must be applied to
-**both files**.
+`fatigue_monitor.py` is intentionally pandas-free and scipy-optional so it can run on Android
+via Chaquopy. Any change to `FatigueMonitor` or `preprocess_emg` is made **once** in
+`fatigue_monitor.py` and automatically available to all callers.
 
 ### FatigueMonitor parameters
 
@@ -264,8 +271,9 @@ pandas, matplotlib, or scipy's full stack. Any change to `FatigueMonitor` must b
 
 ## Known Issues / Maintenance Notes
 
-1. **`FatigueMonitor` is duplicated** — any change must be applied to both `emg_util.py` and
-   `emg_util_nopandas.py` manually.
+1. **Android swing threshold/debounce misalignment** — Android Java uses ~150 dps / 300ms while
+   the PC plotter and offline analysis use 300 dps / 2000ms. Android counts ~3× more "swings".
+   Fix: raise Android `GYRO_SWING_THRESHOLD_DPS` to 300 and debounce to 2000ms.
 
 2. **`warmup_skip_min` default differs** between `sensordata_plotter.py` (default=0.0, for testing)
    and `analysis_bridge.py` singleton (5.0, production). Use `--fatigue-warmup-min 5.0` for real
@@ -277,6 +285,11 @@ pandas, matplotlib, or scipy's full stack. Any change to `FatigueMonitor` must b
 
 4. **`env_mean` column name** means different things in real-time (`nanmean(abs(raw))`) vs offline
    (`emg_env_mean` from `envelope()` LPF). Do not compare these values directly.
+
+5. **`_filter_baseline_by_rms` (offline) vs `FatigueMonitor` adaptive filter (real-time)** use
+   different reference RMS values by design: offline uses session-wide p90 (all data available);
+   real-time uses candidate pool p90 (best available approximation). Do not expect identical
+   baseline MDF values between the two paths.
 
 ---
 

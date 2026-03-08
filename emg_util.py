@@ -746,6 +746,7 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
                                  pre_ms: float = 250.0,
                                  post_ms: float = 450.0,
                                  use_gyro: bool = True,
+                                 already_in_dps: bool = False,
                                  # legacy params kept for backward compat but ignored:
                                  baseline_s: float = 2.0,
                                  z_thr: float = 5.0,
@@ -767,6 +768,11 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
     min_gap_ms : float
         Minimum ms between confirmed swings. Default 2000ms matches
         plotter debounce_sec=2.0.
+    already_in_dps : bool
+        When True, gx/gy/gz are already in dps and ax/ay/az already in g
+        (e.g. data from load_session_stitched() which applies FSR conversion).
+        When False (default), raw LSB values are converted using the
+        gyro_fsr_dps / acc_fsr_g columns in the DataFrame.
     """
     _EMPTY = pd.DataFrame(columns=["swing_id","t_start_ms","t_peak_ms","t_end_ms","peak_z","peak_mag"])
 
@@ -781,25 +787,36 @@ def detect_swing_windows_from_imu(imu_df: pd.DataFrame,
     t0_ms   = float(imu["ts_ms"].iloc[0])
     t_ms    = t0_ms + 1000.0 * t_rel_s
 
-    # Convert raw LSB -> dps using gyro_fsr_dps from the DataFrame
-    _GYR_MAP = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
-    _ACC_MAP = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
-    gyro_fsr = int(imu["gyro_fsr_dps"].dropna().iloc[-1]) if "gyro_fsr_dps" in imu.columns and imu["gyro_fsr_dps"].notna().any() else 1000
-    acc_fsr  = int(imu["acc_fsr_g"].dropna().iloc[-1])    if "acc_fsr_g"    in imu.columns and imu["acc_fsr_g"].notna().any()    else 4
-    gyr_lsb  = _GYR_MAP.get(gyro_fsr, 32.8)
-    acc_lsb  = _ACC_MAP.get(acc_fsr, 8192.0)
-
-    if use_gyro:
-        mag_dps = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2) / gyr_lsb
+    if already_in_dps:
+        # Data already in physical units — no FSR conversion needed.
+        # Used when imu_df comes from load_session_stitched() (yaml_runner path).
+        if use_gyro:
+            mag_dps = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2)
+        else:
+            mag_dps = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
+        if thr_acc_g > 0.0:
+            amag_g = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
+            above  = (mag_dps >= thr_gyro_dps) & (amag_g >= thr_acc_g)
+        else:
+            above = mag_dps >= thr_gyro_dps
     else:
-        mag_dps = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2) / acc_lsb
-
-    # Optional acc gate
-    if thr_acc_g > 0.0:
-        amag_g = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2) / acc_lsb
-        above  = (mag_dps >= thr_gyro_dps) & (amag_g >= thr_acc_g)
-    else:
-        above = mag_dps >= thr_gyro_dps
+        # Convert raw LSB -> dps using gyro_fsr_dps from the DataFrame.
+        # Used when imu_df contains raw ADC values (emg_util.py direct callers).
+        _GYR_MAP = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}
+        _ACC_MAP = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}
+        gyro_fsr = int(imu["gyro_fsr_dps"].dropna().iloc[-1]) if "gyro_fsr_dps" in imu.columns and imu["gyro_fsr_dps"].notna().any() else 1000
+        acc_fsr  = int(imu["acc_fsr_g"].dropna().iloc[-1])    if "acc_fsr_g"    in imu.columns and imu["acc_fsr_g"].notna().any()    else 4
+        gyr_lsb  = _GYR_MAP.get(gyro_fsr, 32.8)
+        acc_lsb  = _ACC_MAP.get(acc_fsr, 8192.0)
+        if use_gyro:
+            mag_dps = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2) / gyr_lsb
+        else:
+            mag_dps = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2) / acc_lsb
+        if thr_acc_g > 0.0:
+            amag_g = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2) / acc_lsb
+            above  = (mag_dps >= thr_gyro_dps) & (amag_g >= thr_acc_g)
+        else:
+            above = mag_dps >= thr_gyro_dps
 
     # Find contiguous above-threshold regions, take peak within each
     peaks = []
@@ -979,13 +996,33 @@ def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float,
 
 
 def compute_baseline_from_swing_features(swing_feats: pd.DataFrame) -> dict:
-    """Compute robust baseline values from per-swing features (median)."""
+    """Compute robust baseline values from per-swing features.
+
+    For MDF and imu_mean_acc_dyn: uses the 75th percentile to represent the
+    fresh/best state.  Fresh muscles have the HIGHEST MDF; fresh swings have
+    the HIGHEST dynamic acceleration.  Using the median underestimates the
+    baseline when the first N baseline swings are still in the warm-up phase
+    (low MDF ~100 Hz) while active-play MDF is ~200 Hz — this causes
+    mdf_drop_pct to be negative (MDF "increased" from baseline), which is
+    the opposite of fatigue and makes the plot uninterpretable.
+
+    For RMS / effort proxies: uses the median.  Fatigue increases RMS, so
+    the baseline should be the low-effort (fresh) level, not the peak.
+    """
     base = {}
     if swing_feats is None or len(swing_feats) == 0:
         return base
     for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg', 'imu_mean_acc_dyn']:
         if k in swing_feats.columns:
-            base[k] = float(np.nanmedian(swing_feats[k].to_numpy(dtype=float)))
+            vals = swing_feats[k].to_numpy(dtype=float)
+            vals = vals[np.isfinite(vals)]
+            if len(vals) == 0:
+                continue
+            if k in ('mdf', 'imu_mean_acc_dyn'):
+                # 75th-percentile: fresh state = highest MDF / highest force
+                base[k] = float(np.nanpercentile(vals, 75))
+            else:
+                base[k] = float(np.nanmedian(vals))
     return base
 
 

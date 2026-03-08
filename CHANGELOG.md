@@ -9,6 +9,111 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-07] — Fix: `FatigueMonitor` baseline missing RMS filter (`fatigue_monitor.py`)
+
+### Root cause
+`FatigueMonitor.push_swing()` collected the first `baseline_swings` (default 20)
+post-warmup swings and used their median MDF/RMS as the baseline — with no check
+for noise-dominated swings. If the first 20 swings had poor electrode contact
+(RMS near noise floor, MDF ≈ 100 Hz flat spectrum), the baseline was anchored at
+≈ 100 Hz. Every subsequent real swing (MDF ≈ 160–200 Hz) then computed
+`(100 − 200) / 100 × 100 = −100%` — the opposite of fatigue.
+
+This is the same bug that was fixed in `emg_util_yaml_runner.py` via
+`_filter_baseline_by_rms()` on 2026-03-05. `FatigueMonitor` (used by
+`sensordata_plotter.py --fatigue` and Android) had the same gap.
+
+### Fixed (`fatigue_monitor.py`)
+- In `push_swing()`, replaced the simple "collect N, finalize" logic with a
+  **real-time adaptive RMS filter**:
+  - Collect candidates continuously after warmup.
+  - After each new candidate (once `n_collected >= baseline_swings`), compute
+    `p90_rms` of all collected candidates and apply `rms_thr = 0.25 × p90_rms`.
+  - **Finalize when** either:
+    - `n_valid >= baseline_swings` (enough good candidates found), OR
+    - `n_collected >= baseline_swings × 3` (hard cap — fall back to best available)
+  - If ≥ 3 valid candidates, use filtered set; otherwise fall back to all.
+  - Use `np.median()` of the surviving set for both `baseline_mdf` and `baseline_rms`.
+  - Prints diagnostic: `[FatigueMonitor] Baseline: N_valid/N_collected valid ...`
+
+- **Why 3× hard cap works in real-time:** if the first `baseline_swings` candidates
+  are all noise-dominated (poor electrode contact), the p90 of those N is still
+  noise-level and the filter does nothing. By collecting up to 3× candidates,
+  electrode contact typically improves and later candidates raise the p90, allowing
+  the filter to correctly exclude the early noise-dominated swings.
+
+- **Example (default baseline_swings=20):**
+  - Swings 1–20: noise-dominated (MDF≈100 Hz, low RMS) → p90 is noise-level → 0 valid → keep collecting
+  - Swings 21–40: electrode contact improves → p90 rises → early swings filtered out → ≥20 valid → finalize
+  - Hard cap at swing 60: if contact never improves, use best available
+
+- Mirrors `_filter_baseline_by_rms()` in `emg_util_yaml_runner.py` in principle,
+  adapted for streaming (no session-wide p90 available in real-time).
+- Android uses `emg_util` as a git submodule — no manual copy needed.
+
+### Affected paths
+- `sensordata_plotter.py --mode offline --fatigue` — uses `FatigueMonitor` directly
+- `sensordata_plotter.py --mode live --fatigue` — same
+- Android `analysis_bridge.py` — same via Chaquopy
+
+---
+
+## [2026-03-07] — Fix: `analyze_tennis_session()` FSR defaults wrong (`emg_util_yaml_runner.py`)
+
+### Root cause
+`analyze_tennis_session()` called `loader.load_session_stitched()` with hardcoded
+fallback defaults `acc_fsr_default_g=2.0` and `gyro_fsr_default_dps=250.0` — the
+**old pre-2026-02-25 values**. The 2026-02-25 FSR update correctly changed these
+defaults in `capture_loader.py`, `config.yaml`, `config_fast.yaml`, and
+`analyze_single_session()`, but missed `analyze_tennis_session()` (the main path).
+
+**Impact**: Without an explicit config file, gyro is scaled by 131.0 (250 dps FSR)
+instead of 32.8 (1000 dps FSR) → gyro values 4× too small → a real 300 dps swing
+appears as ~75 dps → zero swings detected.
+
+### Fixed (`emg_util_yaml_runner.py`)
+- `analyze_tennis_session()`: changed `acc_fsr_default_g=2.0` → `4.0` and
+  `gyro_fsr_default_dps=250.0` → `1000.0` to match `config.yaml` and firmware.
+- Added comment explaining why the correct defaults matter.
+
+---
+
+## [2026-03-07] — Fix: `fatigue_summary.csv` baseline inconsistent with `baseline.json` (`emg_util_yaml_runner.py`)
+
+### Root cause
+`_compute_per_swing_fatigue_summary()` recomputed the baseline MDF independently
+from `baseline.json`, using the **mean of the first 10% of post-warmup swings
+with no RMS filter**. Meanwhile `baseline.json` uses the **median of the first 20
+post-warmup swings after filtering out noise-dominated (low-RMS) swings**.
+
+Result: `fatigue_summary.csv` reported `baseline_MDF = 137.1 Hz` while
+`baseline.json` reported `baseline.mdf = 166.0 Hz` for the same session.
+`swing_features.csv` (`swing_mdf_drop_pct`) was computed relative to 166 Hz,
+making the two files inconsistent and incomparable.
+
+### Fixed (`emg_util_yaml_runner.py`)
+
+#### `_compute_per_swing_fatigue_summary()` — new `ext_baseline_mdf` parameter
+- Added `ext_baseline_mdf: float = None` parameter.
+- When provided and finite/positive, uses it directly as `baseline_mdf`
+  (`baseline_source = 'baseline_json'`).
+- Falls back to mean of first 10% of post-warmup swings when `None`
+  (`baseline_source = 'first_10pct_mean'`).
+- Added `baseline_source` field to `fatigue_summary.csv` output row.
+- Fixed latent bug: `baseline_n` is now always computed (needed for MNF
+  computation even when `ext_baseline_mdf` is provided for MDF).
+
+#### Call sites updated — both medium mode and full mode
+- Medium mode: `_compute_per_swing_fatigue_summary(..., ext_baseline_mdf=base.get('mdf'))`
+- Full mode: `_compute_per_swing_fatigue_summary(..., ext_baseline_mdf=base.get('mdf'))`
+
+### Expected behavior after fix
+`fatigue_summary.csv` `baseline_MDF` now matches `baseline.json` `baseline.mdf`
+exactly. `MDF_drop_pct` in `fatigue_summary.csv` is now consistent with
+`swing_mdf_drop_pct` in `swing_features.csv`.
+
+---
+
 ## [2026-03-05] — Fix: fatigue summary -53% nonsensical result (`emg_util_yaml_runner.py`)
 
 ### Root cause
@@ -428,11 +533,8 @@ The Android path was silently using a different filter than the PC path, produci
 inconsistent MDF/RMS features between offline PC analysis and on-device real-time
 monitoring. This is now fixed.
 
-**Maintenance rule:** to change the EMG filter, edit only `emg_util/fatigue_monitor.py`,
-then run:
-```
-copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py
-```
+**Maintenance rule:** to change the EMG filter, edit only `emg_util/fatigue_monitor.py`.
+Android uses `emg_util` as a git submodule — changes are automatically available.
 
 ---
 
@@ -440,9 +542,11 @@ copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py
 
 ### Changed (`fatigue_monitor.py`)
 - `preprocess_emg`: low cutoff raised from **20 Hz → 50 Hz**.
-  - Rationale: MyoWare sensor hardware bandpass is 50–500 Hz. Using 20 Hz in software
-    passes motion artifact (5–20 Hz) that the hardware already rejects, inflating RMS
-    and distorting MDF estimates.
+  - Rationale: MyoWare 2.0 hardware bandpass is 20–500 Hz (confirmed from datasheet).
+    The software 50 Hz cutoff additionally rejects the 20–50 Hz band (residual motion
+    artifact + low-frequency EMG components less useful for MDF spectral estimation).
+    This is a software choice beyond what the hardware provides, not a duplication of
+    hardware filtering. Raises RMS accuracy and sharpens MDF estimates.
   - Guard `if high <= 50.0: return y` updated accordingly.
 
 ---

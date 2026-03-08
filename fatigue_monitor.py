@@ -10,8 +10,8 @@ Imported by:
 
 DO NOT duplicate FatigueMonitor in those files — import from here.
 
-Android deployment: copy this file alongside emg_util_nopandas.py into
-  btLeApp/app/src/main/python/
+Android deployment: btLeApp uses emg_util as a git submodule — no manual copy needed.
+  Changes to this file are automatically available to the Android app via the submodule.
 """
 
 from __future__ import annotations
@@ -51,9 +51,13 @@ def preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
     Public API — single source of truth for EMG preprocessing across PC and Android.
     Imported by emg_util.py so the filter parameters live in exactly one place.
 
-    Low cutoff: 50 Hz (matches MyoWare hardware bandpass, suppresses motion artifact).
-    High cutoff: 450 Hz (below Nyquist for 2000 Hz sampling).
-    Notch: 60 Hz + 120 Hz (power-line interference).
+    High-pass cutoff: 50 Hz — rejects the 20–50 Hz band (residual motion artifact +
+        low-frequency EMG components less useful for MDF spectral estimation).
+        Note: MyoWare 2.0 hardware bandpass is 20–500 Hz (per datasheet), so the
+        hardware does NOT already reject this band — the 50 Hz cutoff is a deliberate
+        software choice beyond the hardware filtering.
+    Low-pass cutoff: 450 Hz — rejects high-frequency noise (below Nyquist at 2000 Hz).
+    Notch: 60 Hz + 120 Hz — power-line interference rejection.
 
     Falls back to DC removal only when SciPy is unavailable (Android without SciPy).
     """
@@ -242,11 +246,38 @@ class FatigueMonitor:
         if not baseline_ready and not in_warmup:
             if np.isfinite(mdf_val) and np.isfinite(rms_val):
                 self._baseline_samples.append((mdf_val, rms_val))
-                if len(self._baseline_samples) >= self._baseline_swings:
+                n_collected = len(self._baseline_samples)
+                # Real-time RMS filter: keep collecting beyond baseline_swings until
+                # enough good candidates are found, up to a hard cap of 3×.
+                #
+                # Why 3×: if the first baseline_swings candidates are all noise-dominated
+                # (poor electrode contact), the p90 of those N is still noise-level and
+                # the filter does nothing. By collecting up to 3× candidates, electrode
+                # contact typically improves and later candidates raise the p90, allowing
+                # the filter to correctly exclude the early noise-dominated swings.
+                #
+                # Finalize when:
+                #   (a) we have >= baseline_swings valid (post-filter) candidates, OR
+                #   (b) we hit the 3× hard cap (fall back to best available)
+                _max_collect = self._baseline_swings * 3
+                if n_collected >= self._baseline_swings:
                     mdfs = [s[0] for s in self._baseline_samples]
                     rmss = [s[1] for s in self._baseline_samples]
-                    self._baseline_mdf = float(np.median(mdfs))
-                    self._baseline_rms = float(np.median(rmss))
+                    p90_rms = float(np.percentile(rmss, 90))
+                    rms_thr = 0.25 * p90_rms
+                    valid = [(m, r) for m, r in zip(mdfs, rmss) if r >= rms_thr]
+                    n_valid = len(valid)
+                    # Finalize if enough valid candidates OR hit the hard cap
+                    if n_valid >= self._baseline_swings or n_collected >= _max_collect:
+                        if n_valid >= 3:
+                            mdfs = [v[0] for v in valid]
+                            rmss = [v[1] for v in valid]
+                        # else: fewer than 3 survived — fall back to all candidates
+                        self._baseline_mdf = float(np.median(mdfs))
+                        self._baseline_rms = float(np.median(rmss))
+                        print(f'[FatigueMonitor] Baseline: {n_valid}/{n_collected} valid '
+                              f'(rms>={rms_thr:.4f}) | baseline_mdf={self._baseline_mdf:.1f} Hz '
+                              f'| baseline_rms={self._baseline_rms:.4f}')
 
         # Fatigue deltas (only after baseline is established)
         mdf_drop_pct = float('nan')

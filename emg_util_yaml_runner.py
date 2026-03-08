@@ -396,99 +396,24 @@ def segment_bouts_from_active(active_segs: pd.DataFrame, swings: pd.DataFrame, c
     return pd.DataFrame(bouts)
 
 def detect_swings_from_imu(imu_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Detect swing windows from IMU using a fixed dps threshold.
+    """Thin wrapper: extracts config params and delegates to core.detect_swing_windows_from_imu().
 
-    Replaces the previous z-score approach. Diagnostic analysis showed the
-    z-score baseline (first 2s) was often corrupted by player movement, and
-    the rest floor statistics cannot reliably produce a threshold near 300 dps
-    for wrist-mounted sensors (rest ~20 dps, swings ~300-1700 dps, no bimodal gap).
-
-    The fixed threshold (default 300 dps) is now consistent with
-    ThresholdSwingDetector and HysteresisSwingDetector in sensordata_plotter.py.
-    Config keys: thr_gyro_dps (300), thr_acc_g (0=disabled), min_gap_ms (2000).
+    Data from load_session_stitched() is already in physical units (dps / g),
+    so already_in_dps=True skips the FSR LSB->dps conversion in the core function.
+    The core function also applies the window-merge step (merges overlapping
+    [t_start, t_end] windows) which was absent from the previous local implementation.
     """
-    sd         = cfg.get("swing_detection", {})
-    use_gyro   = bool(sd.get("use_gyro", True))
-    thr_dps    = float(sd.get("thr_gyro_dps", 300.0))
-    thr_acc_g  = float(sd.get("thr_acc_g", 0.0))
-    min_gap_ms = float(sd.get("min_gap_ms", 2000.0))
-    pre_ms     = float(sd.get("pre_ms", 250.0))
-    post_ms    = float(sd.get("post_ms", 450.0))
-
-    _EMPTY = pd.DataFrame(columns=["swing_id", "t_start_ms", "t_peak_ms", "t_end_ms", "peak_z", "peak_mag"])
-
-    if imu_df is None or len(imu_df) == 0:
-        return _EMPTY
-
-    imu = imu_df.dropna(subset=["ts_ms"]).sort_values("ts_ms", kind="mergesort").reset_index(drop=True)
-    if len(imu) == 0:
-        return _EMPTY
-
-    t_ms    = imu["ts_ms"].to_numpy(dtype=float)
-    t0      = float(t_ms[0])
-    t_rel_s = (t_ms - t0) / 1000.0
-    for i in range(1, len(t_rel_s)):
-        if t_rel_s[i] <= t_rel_s[i - 1]:
-            t_rel_s[i] = t_rel_s[i - 1] + 1e-9
-
-    # Data is already in physical units (dps / g) -- loader converts via use_physical_units=True
-    if use_gyro:
-        mag_dps = np.sqrt(imu["gx"].to_numpy(float)**2 + imu["gy"].to_numpy(float)**2 + imu["gz"].to_numpy(float)**2)
-    else:
-        mag_dps = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
-
-    # Optional acc gate (mirrors ThresholdSwingDetector gyro_and_acc mode)
-    if thr_acc_g > 0.0:
-        amag_g = np.sqrt(imu["ax"].to_numpy(float)**2 + imu["ay"].to_numpy(float)**2 + imu["az"].to_numpy(float)**2)
-        above  = (mag_dps >= thr_dps) & (amag_g >= thr_acc_g)
-    else:
-        above = mag_dps >= thr_dps
-
-    # Find contiguous above-threshold regions, take peak within each
-    peaks = []
-    i = 0
-    n = len(above)
-    while i < n:
-        if not above[i]:
-            i += 1
-            continue
-        j = i
-        while j < n and above[j]:
-            j += 1
-        k = int(i + np.nanargmax(mag_dps[i:j]))
-        peaks.append(k)
-        i = j
-
-    if not peaks:
-        return _EMPTY
-
-    # Enforce min gap -- keep highest peak when two are within min_gap_ms
-    peaks  = sorted(peaks, key=lambda k: t_ms[k])
-    kept   = []
-    last_t = -1e18
-    for k in peaks:
-        if (t_ms[k] - last_t) >= min_gap_ms:
-            kept.append(k)
-            last_t = t_ms[k]
-        elif kept and mag_dps[k] > mag_dps[kept[-1]]:
-            kept[-1] = k
-            last_t   = t_ms[k]
-
-    rows = []
-    for sid, k in enumerate(kept):
-        tp = float(t_ms[k])
-        rows.append({
-            "swing_id":   int(sid),
-            "t_start_ms": tp - pre_ms,
-            "t_peak_ms":  tp,
-            "t_end_ms":   tp + post_ms,
-            "peak_z":     float(mag_dps[k]),  # dps value (replaces z-score)
-            "peak_mag":   float(mag_dps[k]),
-        })
-
-    out = pd.DataFrame(rows).sort_values("t_start_ms").reset_index(drop=True)
-    out["swing_id"] = np.arange(len(out), dtype=int)
-    return out
+    sd = cfg.get("swing_detection", {})
+    return core.detect_swing_windows_from_imu(
+        imu_df,
+        thr_gyro_dps   = float(sd.get("thr_gyro_dps", 300.0)),
+        thr_acc_g      = float(sd.get("thr_acc_g", 0.0)),
+        min_gap_ms     = float(sd.get("min_gap_ms", 2000.0)),
+        pre_ms         = float(sd.get("pre_ms", 250.0)),
+        post_ms        = float(sd.get("post_ms", 450.0)),
+        use_gyro       = bool(sd.get("use_gyro", True)),
+        already_in_dps = True,  # load_session_stitched() returns physical units
+    )
 
 
 
@@ -1260,12 +1185,24 @@ def _compute_per_swing_fatigue_summary(
     swing_feat_df: pd.DataFrame,
     out_dir: str,
     warmup_skip_ms: float = 0.0,
+    ext_baseline_mdf: float = None,
 ) -> None:
     """Compute fatigue summary from per-swing MDF and save to fatigue_summary.csv.
 
     Per-swing MDF is more reliable than windowed MDF because it only samples
     windows when the muscle is actively contracting (swing events), not during
     rest periods between rallies where the signal is noise-dominated.
+
+    Args:
+        swing_feat_df:    per-swing feature DataFrame (must have 'mdf' column)
+        out_dir:          output directory for fatigue_summary.csv
+        warmup_skip_ms:   exclude swings before this time (ms) from analysis
+        ext_baseline_mdf: pre-computed baseline MDF from baseline.json (median of
+                          first N post-warmup swings after RMS filtering). When
+                          provided, this value is used directly so that
+                          fatigue_summary.csv is consistent with baseline.json and
+                          swing_features.csv (swing_mdf_drop_pct). Falls back to
+                          mean of first 10% of post-warmup swings if None.
 
     Replaces the call to core.analyze_fatigue(res.feats, ...) which uses
     1-second windowed features and is corrupted by rest-period noise.
@@ -1294,9 +1231,20 @@ def _compute_per_swing_fatigue_summary(
         log('[Fatigue] Not enough post-warmup swings for fatigue summary.')
         return
 
-    # Baseline: first 10% of post-warmup swings
+    # baseline_n is always needed for MNF computation (MNF has no external baseline).
     baseline_n = max(1, int(len(mdf) * 0.1))
-    baseline_mdf = float(np.nanmean(mdf[:baseline_n]))
+
+    # Baseline MDF: use pre-computed value from baseline.json when available so that
+    # fatigue_summary.csv is consistent with swing_features.csv (swing_mdf_drop_pct).
+    # The pre-computed baseline uses median + RMS filtering (noise-dominated swings
+    # removed), which is more robust than the first-10%-mean fallback below.
+    if ext_baseline_mdf is not None and np.isfinite(float(ext_baseline_mdf)) and float(ext_baseline_mdf) > 0:
+        baseline_mdf = float(ext_baseline_mdf)
+        baseline_source = 'baseline_json'
+    else:
+        # Fallback: mean of first 10% of post-warmup swings (no RMS filter)
+        baseline_mdf = float(np.nanmean(mdf[:baseline_n]))
+        baseline_source = 'first_10pct_mean'
 
     # Final: last 10% of post-warmup swings
     final_n = max(1, int(len(mdf) * 0.1))
@@ -1344,6 +1292,7 @@ def _compute_per_swing_fatigue_summary(
         'n_swings_post_warmup': int(len(mdf)),
         'warmup_skip_min': round(warmup_skip_ms / 60000.0, 1),
         'source': 'per_swing',
+        'baseline_source': baseline_source,
     }
 
     os.makedirs(out_dir, exist_ok=True)
@@ -1465,11 +1414,14 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
     log(f'Found {len(sessions)} BLE connection(s): {capture_ids_sorted}')
 
     # 2. Stitch all BLE connections into one continuous timeline
+    # Defaults match firmware IMU_ACC_FSR_G=4 / IMU_GYRO_FSR_DPS=1000 (updated 2026-02-25).
+    # Using the old defaults (2.0 / 250.0) would scale gyro 4× too small, causing
+    # zero swings detected when no config file is provided.
     emg_df, imu_df, reconnection_times_s, capture_ids = loader.load_session_stitched(
         sessions,
         use_physical_units=bool(sess_cfg.get('use_physical_units', True)),
-        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 2.0)),
-        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 250.0)),
+        acc_fsr_default_g=float(sess_cfg.get('acc_fsr_default_g', 4.0)),
+        gyro_fsr_default_dps=float(sess_cfg.get('gyro_fsr_default_dps', 1000.0)),
     )
 
     total_dur_s = (
@@ -1605,7 +1557,8 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg,
                                      warmup_skip_ms=warmup_skip_ms)
         _plot_windowed_rms(win_rms_df, reconnection_times_s, out_dir)
-        _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms)
+        _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms,
+                                           ext_baseline_mdf=base.get('mdf'))
 
         _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
                                      total_dur_s, len(swings), len(bout_df), mode)
@@ -1673,8 +1626,13 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
     warmup_skip_ms = float(cfg.get('baseline', {}).get('warmup_skip_min', 0.0)) * 60.0 * 1000.0
     _plot_fatigue_trend_stitched(swing_feat_df, reconnection_times_s, out_dir, cfg,
                                  warmup_skip_ms=warmup_skip_ms)
-    # Per-swing fatigue summary (replaces windowed analyze_fatigue)
-    _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms)
+    # Per-swing fatigue summary (replaces windowed analyze_fatigue).
+    # Pass base['mdf'] so fatigue_summary.csv uses the same baseline as baseline.json
+    # and swing_features.csv (swing_mdf_drop_pct). Without this, the function would
+    # recompute the baseline from the first 10% of post-warmup swings (no RMS filter),
+    # giving a different (lower) value than the RMS-filtered median in baseline.json.
+    _compute_per_swing_fatigue_summary(swing_feat_df, out_dir, warmup_skip_ms=warmup_skip_ms,
+                                       ext_baseline_mdf=base.get('mdf'))
 
     # Session summary
     _save_tennis_session_summary(out_dir, capture_ids, reconnection_times_s,
