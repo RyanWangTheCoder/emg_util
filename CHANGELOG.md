@@ -1,5 +1,44 @@
 # Changelog
 
+## [Unreleased] — 2026-03-07
+
+### Fixed
+- **`detect_swing_windows_from_imu()` in `emg_util.py`**: Added `already_in_dps: bool = True`
+  parameter (default `True` — backward-compatible with all existing callers that pass dps data
+  from `load_session_stitched()`).
+  - `True` (default): gx/gy/gz already in dps — no FSR conversion. Standard path for
+    `load_session_stitched()` data (yaml_runner, tests, direct callers).
+  - `False`: raw LSB values — converts using `gyro_fsr_dps` / `acc_fsr_g` columns.
+    Opt-in for callers that pass raw ADC data.
+  - **Note:** initial implementation used `False` as default, which broke
+    `test_detect_swings_from_imu` (0 swings detected because dps values were divided by
+    the scale factor again). Corrected to `True` to match pre-change behavior.
+
+- **`detect_swings_from_imu()` in `emg_util_yaml_runner.py`**: Replaced ~70-line duplicate
+  implementation with a thin wrapper that delegates to
+  `core.detect_swing_windows_from_imu(already_in_dps=True)`. The previous local copy:
+  - Was missing the window-merge step (merging overlapping `[t_start, t_end]` windows)
+  - Used a simple monotonicity fix for `t_rel_s` instead of `build_time_axis_from_ts()`
+  - Duplicated the peak-finding and min-gap enforcement logic verbatim
+  The yaml_runner now gets the window-merge step for free. No behavior change for current
+  parameters (window merge is a no-op when `pre_ms + post_ms < min_gap_ms`).
+
+### Updated
+- **`HIGH_LEVEL_DESIGN.md`**:
+  - "Offline path" description: updated from "robust z-score" to "fixed 300 dps threshold"
+  - "Swing Detection: Real-time vs Offline" table: expanded to 3 columns (Android / PC plotter /
+    offline), corrected thresholds (300 dps for plotter + offline), corrected debounce (2000ms),
+    added `already_in_dps` implementation note, added window-merge column
+  - Added known misalignment note: Android Java still uses ~150 dps / 300ms (TODO to fix)
+  - "FatigueMonitor: Canonical Implementation" section: updated to reflect `fatigue_monitor.py`
+    as the single source of truth (no longer duplicated between `emg_util.py` and
+    `emg_util_nopandas.py`)
+  - "Key Files" table: added `fatigue_monitor.py` entry
+  - "Known Issues": removed stale #1 (FatigueMonitor duplication — fixed); renumbered;
+    added new #1 (Android threshold misalignment) and new #5 (offline vs real-time baseline
+    RMS filter difference)
+
+
 All notable changes to `emg_util` are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
