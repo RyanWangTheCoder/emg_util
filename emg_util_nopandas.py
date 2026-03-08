@@ -713,14 +713,33 @@ select_baseline_swings_nopandas = select_baseline_swings
 def compute_baseline_from_swing_features(
     swing_feats: List[Dict[str, float]],
 ) -> Dict[str, float]:
-    """Compute robust (median) baseline from per-swing features."""
+    """Compute robust baseline from per-swing features.
+
+    For MDF and imu_mean_acc_dyn: uses the 75th percentile to represent the
+    fresh/best state.  Fresh muscles have the HIGHEST MDF; fresh swings have
+    the HIGHEST dynamic acceleration.  Using the median underestimates the
+    baseline when the first N baseline swings are still in the warm-up phase
+    (low MDF ~100 Hz) while active-play MDF is ~200 Hz — this causes
+    mdf_drop_pct to be negative (MDF "increased" from baseline).
+
+    For RMS / effort proxies: uses the median.  Fatigue increases RMS, so
+    the baseline should be the low-effort (fresh) level, not the peak.
+
+    Mirrors emg_util.compute_baseline_from_swing_features exactly.
+    """
     base: Dict[str, float] = {}
     if not swing_feats:
         return base
     for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg', 'imu_mean_acc_dyn']:
         vals = [r[k] for r in swing_feats if k in r and r[k] is not None and np.isfinite(r[k])]
-        if vals:
-            base[k] = float(np.median(vals))
+        if not vals:
+            continue
+        arr = np.asarray(vals, dtype=np.float64)
+        if k in ('mdf', 'imu_mean_acc_dyn'):
+            # 75th-percentile: fresh state = highest MDF / highest force
+            base[k] = float(np.nanpercentile(arr, 75))
+        else:
+            base[k] = float(np.nanmedian(arr))
     return base
 
 
@@ -826,10 +845,12 @@ def stitch_decoded_session_from_paths(
     step_sec: float = 0.25,
     warmup_skip_min: float = 5.0,
     baseline_swings: int = 20,
-    swing_z_thr: float = 5.0,
+    thr_gyro_dps: float = 300.0,
     swing_pre_ms: float = 250.0,
     swing_post_ms: float = 450.0,
     mdf_pad_ms: float = 300.0,
+    # Legacy alias kept for backward compat — maps to thr_gyro_dps
+    swing_z_thr: Optional[float] = None,
 ) -> Dict:
     """Stitch decoded CSVs from a list of paths and run full analysis.
 
@@ -931,12 +952,15 @@ def stitch_decoded_session_from_paths(
         imu_gy = np.asarray(imu_gy_list, dtype=np.float64)[imu_order]
         imu_gz = np.asarray(imu_gz_list, dtype=np.float64)[imu_order]
 
-    # Compute |acc_mag - 1g| for per-swing IMU fatigue features (physical units, g)
-    # Only meaningful when IMU CSV has physical-unit data (acc_fsr_g written per row by decoder)
+    # Compute |acc_mag - 1g| for per-swing IMU fatigue features (physical units, g).
+    # IMU CSV contains raw LSB values — convert to g using FSR=4g (8192 LSB/g) before
+    # subtracting gravity.  Using raw LSB directly would give |8192 - 1| ≈ 8191 instead
+    # of the correct ~0–3g dynamic range.
+    _ACC_LSB_PER_G = 8192.0  # FSR=4g: 2^15 / 4 = 8192 LSB/g
     imu_acc_dyn: Optional[np.ndarray] = None
     if imu_ts_ms.size > 0:
-        acc_mag = np.sqrt(imu_ax**2 + imu_ay**2 + imu_az**2)
-        imu_acc_dyn = np.abs(acc_mag - 1.0)  # remove gravity component
+        acc_mag_g = np.sqrt(imu_ax**2 + imu_ay**2 + imu_az**2) / _ACC_LSB_PER_G
+        imu_acc_dyn = np.abs(acc_mag_g - 1.0)  # remove gravity component (in g)
 
     # --- Windowed features ---
     _, feats_dict = compute_windowed_features(
@@ -961,10 +985,13 @@ def stitch_decoded_session_from_paths(
     swing_feats: List[Dict[str, float]] = []
     baseline: Dict[str, float] = {}
 
+    # Resolve legacy swing_z_thr alias
+    _thr_gyro = float(swing_z_thr) if swing_z_thr is not None else float(thr_gyro_dps)
+
     if imu_ts_ms.size > 0:
         swing_windows = detect_swing_windows_from_imu(
             imu_ts_ms, imu_ax, imu_ay, imu_az, imu_gx, imu_gy, imu_gz,
-            z_thr=float(swing_z_thr),
+            thr_gyro_dps=_thr_gyro,
             pre_ms=float(swing_pre_ms),
             post_ms=float(swing_post_ms),
             use_gyro=True,
@@ -1025,10 +1052,12 @@ def stitch_decoded_session(
     step_sec: float = 0.25,
     warmup_skip_min: float = 5.0,
     baseline_swings: int = 20,
-    swing_z_thr: float = 5.0,
+    thr_gyro_dps: float = 300.0,
     swing_pre_ms: float = 250.0,
     swing_post_ms: float = 450.0,
     mdf_pad_ms: float = 300.0,
+    # Legacy alias kept for backward compat
+    swing_z_thr: Optional[float] = None,
 ) -> Dict:
     """Load all decoded CSVs from a single decoded/ directory, stitch, and analyze.
 
@@ -1056,10 +1085,11 @@ def stitch_decoded_session(
         step_sec=step_sec,
         warmup_skip_min=warmup_skip_min,
         baseline_swings=baseline_swings,
-        swing_z_thr=swing_z_thr,
+        thr_gyro_dps=thr_gyro_dps,
         swing_pre_ms=swing_pre_ms,
         swing_post_ms=swing_post_ms,
         mdf_pad_ms=mdf_pad_ms,
+        swing_z_thr=swing_z_thr,
     )
 
 
