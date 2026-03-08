@@ -1304,72 +1304,50 @@ def _compute_per_swing_fatigue_summary(
 # Baseline quality filter
 # ---------------------------------------------------------
 
-def _filter_baseline_by_rms(
+def _filter_baseline_by_rms_with_logging(
     base_feats: pd.DataFrame,
     all_swing_feats: pd.DataFrame,
-    out_dir: str,
     rms_fraction: float = 0.25,
     min_keep: int = 3,
 ) -> pd.DataFrame:
-    """Drop noise-dominated swings from the baseline candidate set.
-
-    When the electrode is not yet in good contact at session start (RMS ≈ 0),
-    the MDF of those windows is dominated by broadband noise (≈ 100 Hz) rather
-    than real muscle activity (≈ 150–200 Hz).  Using those swings as the
-    baseline makes every subsequent drop % negative — the opposite of fatigue.
-
-    Strategy: compute the 90th percentile RMS across ALL swings (representing
-    peak player effort); keep only baseline candidates whose RMS ≥ 
-    rms_fraction × session_p90_rms. The median is not robust here because a 
-    session might be >50% inactive/noise swings, pulling the median down to the noise floor.
-    Falls back to a lower threshold or the original set if fewer than min_keep swings survive.
-
-    Args:
-        base_feats:      candidate baseline swing features (subset of all_swing_feats)
-        all_swing_feats: full per-swing feature DataFrame (used for session p90)
-        out_dir:         output directory for diagnostic log message
-        rms_fraction:    keep swings with rms >= rms_fraction * session_p90_rms
-        min_keep:        minimum number of swings to keep; fall back if below this
-
-    Returns:
-        Filtered (or original) base_feats DataFrame.
+    """Wrapper around core.filter_baseline_by_rms that adds diagnostic logging.
+    
+    Delegates to emg_util.filter_baseline_by_rms for the actual filtering logic,
+    then logs the results for diagnostic purposes.
     """
     if base_feats is None or len(base_feats) == 0:
         return base_feats
     if 'rms' not in base_feats.columns or 'rms' not in all_swing_feats.columns:
         return base_feats
 
+    # Compute session p90 RMS for logging
     all_rms = all_swing_feats['rms'].dropna().to_numpy(dtype=float)
     if len(all_rms) < 5:
         return base_feats
-
     session_p90_rms = float(np.nanpercentile(all_rms, 90))
     if session_p90_rms <= 0 or not np.isfinite(session_p90_rms):
         return base_feats
 
-    threshold = rms_fraction * session_p90_rms
-    filtered = base_feats[base_feats['rms'].fillna(0.0) >= threshold]
+    # Call core filter function
+    filtered = core.filter_baseline_by_rms(base_feats, all_swing_feats, rms_fraction, min_keep)
 
-    if len(filtered) >= min_keep:
-        n_dropped = len(base_feats) - len(filtered)
-        if n_dropped > 0:
+    # Log results
+    n_dropped = len(base_feats) - len(filtered)
+    if n_dropped > 0:
+        threshold = rms_fraction * session_p90_rms
+        if len(filtered) >= min_keep:
             log(f'[Baseline] Dropped {n_dropped}/{len(base_feats)} low-RMS swings '
                 f'(threshold={threshold:.2f}, session_p90_rms={session_p90_rms:.2f}). '
                 f'Baseline now uses {len(filtered)} swings.')
-        return filtered.reset_index(drop=True)
-    else:
-        # Fallback to a less aggressive filter if 25% of p90 drops too many
-        threshold_fallback = 0.10 * session_p90_rms
-        filtered_fallback = base_feats[base_feats['rms'].fillna(0.0) >= threshold_fallback]
-        if len(filtered_fallback) >= min_keep:
-            n_dropped = len(base_feats) - len(filtered_fallback)
+        else:
+            threshold_fallback = 0.10 * session_p90_rms
             log(f'[Baseline] Strict filter dropped too many. Used fallback threshold={threshold_fallback:.2f}, '
                 f'dropped {n_dropped}/{len(base_feats)} swings.')
-            return filtered_fallback.reset_index(drop=True)
-
+    elif len(filtered) < len(base_feats):
         log(f'[Baseline] Low-RMS filter would leave only {len(filtered)} swings '
             f'(< min_keep={min_keep}); keeping original {len(base_feats)} swings.')
-        return base_feats
+
+    return filtered
 
 
 # ---------------------------------------------------------
@@ -1541,7 +1519,7 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
         # baseline MDF (noise MDF ≈ 100 Hz vs active-muscle MDF ≈ 150-200 Hz).
         base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
         base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
-        base_feats = _filter_baseline_by_rms(base_feats, swing_feat_df, out_dir)
+        base_feats = _filter_baseline_by_rms_with_logging(base_feats, swing_feat_df)
         base = baseline_from_features(base_feats)
         swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
 
@@ -1573,7 +1551,7 @@ def analyze_tennis_session(log_dir: str, cfg: Dict[str, Any], out_dir: str) -> s
     # don't corrupt the baseline MDF (noise MDF ≈ 100 Hz vs active MDF ≈ 150-200 Hz).
     base_sw = select_baseline_swings(swings, session_t0_ms=0.0, cfg=cfg)
     base_feats = swing_feat_df[swing_feat_df['swing_id'].isin(base_sw['swing_id'])]
-    base_feats = _filter_baseline_by_rms(base_feats, swing_feat_df, out_dir)
+    base_feats = _filter_baseline_by_rms_with_logging(base_feats, swing_feat_df)
     base = baseline_from_features(base_feats)
     swing_feat_df = apply_deltas(swing_feat_df, base, prefix='swing_')
 

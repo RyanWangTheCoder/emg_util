@@ -710,6 +710,69 @@ def select_baseline_swings(
 select_baseline_swings_nopandas = select_baseline_swings
 
 
+def _filter_baseline_by_rms(
+    base_feats: List[Dict[str, float]],
+    all_swing_feats: List[Dict[str, float]],
+    rms_fraction: float = 0.25,
+    min_keep: int = 3,
+) -> List[Dict[str, float]]:
+    """Drop noise-dominated swings from the baseline candidate set (pandas-free).
+
+    When the electrode is not yet in good contact at session start (RMS ≈ 0),
+    the MDF of those windows is dominated by broadband noise (≈ 100 Hz) rather
+    than real muscle activity (≈ 150–200 Hz).  Using those swings as the
+    baseline makes every subsequent drop % negative — the opposite of fatigue.
+
+    Strategy: compute the 90th percentile RMS across ALL swings (representing
+    peak player effort); keep only baseline candidates whose RMS ≥
+    rms_fraction × session_p90_rms. Falls back to a lower threshold or the
+    original set if fewer than min_keep swings survive.
+
+    Mirrors emg_util_yaml_runner._filter_baseline_by_rms exactly.
+
+    Args:
+        base_feats:      candidate baseline swing features (subset of all_swing_feats)
+        all_swing_feats: full per-swing feature list (used for session p90)
+        rms_fraction:    keep swings with rms >= rms_fraction * session_p90_rms
+        min_keep:        minimum number of swings to keep; fall back if below this
+
+    Returns:
+        Filtered (or original) base_feats list.
+    """
+    if not base_feats:
+        return base_feats
+
+    # Extract all RMS values from the full swing set
+    all_rms = [r['rms'] for r in all_swing_feats
+               if 'rms' in r and r['rms'] is not None and np.isfinite(r['rms'])]
+    if len(all_rms) < 5:
+        return base_feats
+
+    session_p90_rms = float(np.nanpercentile(all_rms, 90))
+    if session_p90_rms <= 0 or not np.isfinite(session_p90_rms):
+        return base_feats
+
+    # Primary filter: 25% of session p90
+    threshold = rms_fraction * session_p90_rms
+    filtered = [r for r in base_feats
+                if 'rms' in r and r['rms'] is not None
+                and np.isfinite(r['rms']) and r['rms'] >= threshold]
+
+    if len(filtered) >= min_keep:
+        return filtered
+
+    # Fallback: 10% of session p90 if 25% drops too many
+    threshold_fallback = 0.10 * session_p90_rms
+    filtered_fallback = [r for r in base_feats
+                         if 'rms' in r and r['rms'] is not None
+                         and np.isfinite(r['rms']) and r['rms'] >= threshold_fallback]
+    if len(filtered_fallback) >= min_keep:
+        return filtered_fallback
+
+    # Final fallback: keep original set
+    return base_feats
+
+
 def compute_baseline_from_swing_features(
     swing_feats: List[Dict[str, float]],
 ) -> Dict[str, float]:
@@ -1005,7 +1068,7 @@ def stitch_decoded_session_from_paths(
                 imu_acc_dyn=imu_acc_dyn,
             )
 
-            # Baseline selection
+            # Baseline selection with RMS quality filter
             base_swings = select_baseline_swings(
                 swing_windows, session_t0_ms=t0_ms,
                 warmup_skip_min=float(warmup_skip_min),
@@ -1013,6 +1076,12 @@ def stitch_decoded_session_from_paths(
             )
             base_ids = {int(r['swing_id']) for r in base_swings}
             base_feats = [r for r in swing_feats if int(r['swing_id']) in base_ids]
+
+            # Apply RMS quality filter to drop noise-dominated swings
+            # (matches emg_util_yaml_runner._filter_baseline_by_rms)
+            base_feats = _filter_baseline_by_rms(base_feats, swing_feats,
+                                                   rms_fraction=0.25, min_keep=3)
+
             baseline = compute_baseline_from_swing_features(base_feats)
 
             if baseline:
