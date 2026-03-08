@@ -969,6 +969,64 @@ def compute_swing_emg_features(res: Results, emg_fs_hz: float, swings: pd.DataFr
     return pd.DataFrame(rows)
 
 
+def filter_baseline_by_rms(
+    base_feats: pd.DataFrame,
+    all_swing_feats: pd.DataFrame,
+    rms_fraction: float = 0.25,
+    min_keep: int = 3,
+) -> pd.DataFrame:
+    """Drop noise-dominated swings from the baseline candidate set.
+
+    When the electrode is not yet in good contact at session start (RMS ≈ 0),
+    the MDF of those windows is dominated by broadband noise (≈ 100 Hz) rather
+    than real muscle activity (≈ 150–200 Hz).  Using those swings as the
+    baseline makes every subsequent drop % negative — the opposite of fatigue.
+
+    Strategy: compute the 90th percentile RMS across ALL swings (representing
+    peak player effort); keep only baseline candidates whose RMS ≥
+    rms_fraction × session_p90_rms. The median is not robust here because a
+    session might be >50% inactive/noise swings, pulling the median down to the noise floor.
+    Falls back to a lower threshold or the original set if fewer than min_keep swings survive.
+
+    Args:
+        base_feats:      candidate baseline swing features (subset of all_swing_feats)
+        all_swing_feats: full per-swing feature DataFrame (used for session p90)
+        rms_fraction:    keep swings with rms >= rms_fraction * session_p90_rms
+        min_keep:        minimum number of swings to keep; fall back if below this
+
+    Returns:
+        Filtered (or original) base_feats DataFrame.
+    """
+    if base_feats is None or len(base_feats) == 0:
+        return base_feats
+    if 'rms' not in base_feats.columns or 'rms' not in all_swing_feats.columns:
+        return base_feats
+
+    all_rms = all_swing_feats['rms'].dropna().to_numpy(dtype=float)
+    if len(all_rms) < 5:
+        return base_feats
+
+    session_p90_rms = float(np.nanpercentile(all_rms, 90))
+    if session_p90_rms <= 0 or not np.isfinite(session_p90_rms):
+        return base_feats
+
+    # Primary filter: 25% of session p90
+    threshold = rms_fraction * session_p90_rms
+    filtered = base_feats[base_feats['rms'].fillna(0.0) >= threshold]
+
+    if len(filtered) >= min_keep:
+        return filtered.reset_index(drop=True)
+
+    # Fallback: 10% of session p90 if 25% drops too many
+    threshold_fallback = 0.10 * session_p90_rms
+    filtered_fallback = base_feats[base_feats['rms'].fillna(0.0) >= threshold_fallback]
+    if len(filtered_fallback) >= min_keep:
+        return filtered_fallback.reset_index(drop=True)
+
+    # Final fallback: keep original set
+    return base_feats
+
+
 def select_baseline_swings(swings: pd.DataFrame, session_t0_ms: float,
                            warmup_skip_min: float = 5.0,
                            warmup_skip_swings: int | None = None,
