@@ -1172,6 +1172,110 @@ from fatigue_monitor import FatigueMonitor, preprocess_emg  # noqa: F401  (re-ex
 
 
 # ============================
+# ENV-based activation gating (sports EMG best practice)
+# ============================
+
+def compute_env_gate_threshold(
+    env: np.ndarray,
+    emg_fs_hz: float,
+    mode: str = 'percentile',
+    percentile: float = 75.0,
+    absolute_threshold: float = 1651.0,
+    window_sec: float = 1.0,
+) -> float:
+    """Compute ENV activation threshold for gating MDF/MNF windows.
+
+    Args:
+        env: envelope signal (ADC units, 0-4095 for 12-bit)
+        emg_fs_hz: EMG sampling rate
+        mode: 'percentile' (session-adaptive) or 'absolute' (fixed value)
+        percentile: percentile of 1s ENV windows (e.g. 75 = upper quartile)
+        absolute_threshold: fixed threshold in ADC units (only used if mode='absolute')
+        window_sec: window size for computing ENV mean
+
+    Returns:
+        threshold value (ADC units)
+    """
+    env = np.asarray(env, dtype=np.float64)
+    if env.size == 0:
+        return float('nan')
+
+    if mode == 'absolute':
+        return float(absolute_threshold)
+
+    # Percentile mode: compute threshold from 1s ENV windows
+    win = max(1, int(round(float(window_sec) * float(emg_fs_hz))))
+    n = len(env) // win
+    if n < 10:
+        # Not enough data for windowed stats; use global percentile
+        return float(np.nanpercentile(env, float(percentile)))
+
+    env_mean = np.mean(env[:n * win].reshape(n, win), axis=1)
+    return float(np.nanpercentile(env_mean, float(percentile)))
+
+
+def apply_env_gate_to_swings(
+    swing_feats: List[Dict[str, float]],
+    env: np.ndarray,
+    emg_ts_ms: np.ndarray,
+    emg_fs_hz: float,
+    env_gate_cfg: Dict,
+) -> List[Dict[str, float]]:
+    """Filter swing features by ENV activation gate.
+
+    Adds 'env_active' flag (0/1) to each swing based on whether the mean ENV
+    during the swing window exceeds the session-adaptive threshold.
+
+    Args:
+        swing_feats: list of per-swing feature dicts
+        env: envelope signal (ADC units)
+        emg_ts_ms: EMG timestamp array (ms)
+        emg_fs_hz: EMG sampling rate
+        env_gate_cfg: dict with keys: enable, mode, percentile, absolute_threshold, window_sec
+
+    Returns:
+        swing_feats with 'env_active' field added (0 or 1)
+    """
+    if not env_gate_cfg.get('enable', False):
+        # ENV gating disabled; mark all swings as active
+        for r in swing_feats:
+            r['env_active'] = 1
+        return swing_feats
+
+    if not swing_feats or env.size == 0:
+        return swing_feats
+
+    # Compute threshold
+    thr = compute_env_gate_threshold(
+        env, emg_fs_hz,
+        mode=env_gate_cfg.get('mode', 'percentile'),
+        percentile=float(env_gate_cfg.get('percentile', 75.0)),
+        absolute_threshold=float(env_gate_cfg.get('absolute_threshold', 1651.0)),
+        window_sec=float(env_gate_cfg.get('window_sec', 1.0)),
+    )
+
+    if not np.isfinite(thr):
+        # Fallback: mark all as active
+        for r in swing_feats:
+            r['env_active'] = 1
+        return swing_feats
+
+    # Check each swing
+    for r in swing_feats:
+        t0 = float(r['t_start_ms'])
+        t1 = float(r['t_end_ms'])
+        i0 = int(np.searchsorted(emg_ts_ms, t0, side='left'))
+        i1 = int(np.searchsorted(emg_ts_ms, t1, side='right'))
+        i0 = max(0, min(i0, len(emg_ts_ms) - 1))
+        i1 = max(i0 + 1, min(i1, len(emg_ts_ms)))
+        seg_env = env[i0:i1]
+        env_mean = float(np.nanmean(seg_env)) if seg_env.size else float('nan')
+        r['env_active'] = 1 if (np.isfinite(env_mean) and env_mean >= thr) else 0
+
+    return swing_feats
+
+
+# ============================
 # Optional IMU swing detection (no pandas)
 # ============================
 

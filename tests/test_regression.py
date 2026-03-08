@@ -733,7 +733,224 @@ class TestRegressionBaselines:
 
 
 # ============================================================================
-# Test 7: Error Handling
+# Test 7: ENV Gating (Activation Detection)
+# ============================================================================
+
+@pytest.mark.signal_processing
+@pytest.mark.fast
+class TestENVGating:
+    """Test ENV-based activation gating functions."""
+    
+    def test_compute_env_gate_threshold_percentile(self, loaded_session):
+        """Test ENV threshold computation (percentile mode)."""
+        emg_df = loaded_session["emg_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Get ENV signal (use hardware ENV if available, else compute)
+        if "env" in emg_df.columns:
+            env = emg_df["env"].values[:20000]  # 10 seconds
+        else:
+            raw = emg_df["raw"].values[:20000]
+            processed = fm.preprocess_emg(raw, fs=fs)
+            env = core.envelope(processed, fs=fs)
+        
+        # Compute threshold (percentile mode)
+        threshold = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs,
+            mode='percentile',
+            percentile=75.0,
+            window_sec=1.0,
+        )
+        
+        # Verify output
+        assert isinstance(threshold, float)
+        assert np.isfinite(threshold)
+        assert threshold > 0, "Threshold should be positive"
+        assert threshold < 4095, "Threshold should be within ADC range"
+        
+        # Threshold should be between median and max
+        assert np.median(env) < threshold < np.max(env)
+    
+    def test_compute_env_gate_threshold_absolute(self):
+        """Test ENV threshold computation (absolute mode)."""
+        # Dummy ENV signal
+        env = np.random.rand(10000) * 2000
+        
+        # Compute threshold (absolute mode)
+        threshold = core.compute_env_gate_threshold(
+            env, emg_fs_hz=2000,
+            mode='absolute',
+            absolute_threshold=1651.0,
+        )
+        
+        # Should return the absolute value
+        assert threshold == 1651.0
+    
+    def test_apply_env_gate_to_swings_pandas(self, loaded_session):
+        """Test ENV gating on pandas DataFrame (Windows path)."""
+        emg_df = loaded_session["emg_df"]
+        imu_df = loaded_session["imu_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Detect swings
+        swings_df = core.detect_swing_windows_from_imu(
+            imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0
+        )
+        
+        if len(swings_df) < 5:
+            pytest.skip("Not enough swings for ENV gating test")
+        
+        # Get ENV signal
+        if "env" in emg_df.columns:
+            env = emg_df["env"].values
+        else:
+            raw = emg_df["raw"].values
+            processed = fm.preprocess_emg(raw, fs=fs)
+            env = core.envelope(processed, fs=fs)
+        
+        # Build timestamp array
+        emg_ts_ms = emg_df["ts_ms"].values
+        
+        # ENV gating config
+        env_gate_cfg = {
+            'enable': True,
+            'mode': 'percentile',
+            'percentile': 75.0,
+            'absolute_threshold': 1651.0,
+            'window_sec': 1.0,
+        }
+        
+        # Apply gating
+        gated_swings = core.apply_env_gate_to_swings(
+            swings_df, env, emg_ts_ms, fs, env_gate_cfg
+        )
+        
+        # Verify output
+        assert isinstance(gated_swings, pd.DataFrame)
+        assert len(gated_swings) == len(swings_df)
+        assert 'env_active' in gated_swings.columns
+        
+        # Check env_active values
+        assert all(gated_swings['env_active'].isin([0, 1]))
+        
+        # At least some swings should be active
+        assert gated_swings['env_active'].sum() > 0
+    
+    def test_apply_env_gate_disabled(self, loaded_session):
+        """Test ENV gating when disabled (all swings marked active)."""
+        emg_df = loaded_session["emg_df"]
+        imu_df = loaded_session["imu_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Detect swings
+        swings_df = core.detect_swing_windows_from_imu(
+            imu_df, thr_gyro_dps=300.0, min_gap_ms=2000.0
+        )
+        
+        if len(swings_df) < 5:
+            pytest.skip("Not enough swings")
+        
+        # Dummy ENV
+        env = np.random.rand(len(emg_df)) * 2000
+        emg_ts_ms = emg_df["ts_ms"].values
+        
+        # ENV gating config (disabled)
+        env_gate_cfg = {
+            'enable': False,
+            'mode': 'percentile',
+            'percentile': 75.0,
+        }
+        
+        # Apply gating
+        gated_swings = core.apply_env_gate_to_swings(
+            swings_df, env, emg_ts_ms, fs, env_gate_cfg
+        )
+        
+        # All swings should be marked active when disabled
+        assert all(gated_swings['env_active'] == 1)
+    
+    def test_env_gate_threshold_consistency(self, loaded_session):
+        """Test that ENV threshold is deterministic."""
+        emg_df = loaded_session["emg_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Get ENV signal
+        if "env" in emg_df.columns:
+            env = emg_df["env"].values[:20000]
+        else:
+            raw = emg_df["raw"].values[:20000]
+            processed = fm.preprocess_emg(raw, fs=fs)
+            env = core.envelope(processed, fs=fs)
+        
+        # Compute threshold twice
+        thr1 = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs, mode='percentile', percentile=75.0
+        )
+        thr2 = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs, mode='percentile', percentile=75.0
+        )
+        
+        # Should be identical
+        assert thr1 == thr2
+    
+    def test_env_gate_percentile_range(self, loaded_session):
+        """Test ENV threshold with different percentiles."""
+        emg_df = loaded_session["emg_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Get ENV signal
+        if "env" in emg_df.columns:
+            env = emg_df["env"].values[:20000]
+        else:
+            raw = emg_df["raw"].values[:20000]
+            processed = fm.preprocess_emg(raw, fs=fs)
+            env = core.envelope(processed, fs=fs)
+        
+        # Compute thresholds at different percentiles
+        thr_50 = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs, mode='percentile', percentile=50.0
+        )
+        thr_75 = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs, mode='percentile', percentile=75.0
+        )
+        thr_90 = core.compute_env_gate_threshold(
+            env, emg_fs_hz=fs, mode='percentile', percentile=90.0
+        )
+        
+        # Higher percentile should give higher threshold
+        assert thr_50 < thr_75 < thr_90
+    
+    def test_env_correlation_with_raw(self, loaded_session):
+        """Test that ENV correlates with RAW amplitude (validation)."""
+        emg_df = loaded_session["emg_df"]
+        fs = loaded_session["emg_meta"]["fs_hz"]
+        
+        # Get signals
+        raw = emg_df["raw"].values[:20000]
+        
+        if "env" in emg_df.columns:
+            env = emg_df["env"].values[:20000]
+        else:
+            processed = fm.preprocess_emg(raw, fs=fs)
+            env = core.envelope(processed, fs=fs)
+        
+        # Compute correlation with RAW amplitude
+        raw_amp = np.abs(raw - np.mean(raw))
+        
+        # Downsample to match ENV frequency (ENV is ~3.6 Hz)
+        downsample = 500  # ~4 Hz at 2000 Hz
+        raw_amp_ds = raw_amp[::downsample]
+        env_ds = env[::downsample]
+        
+        # Compute correlation
+        corr = np.corrcoef(raw_amp_ds, env_ds)[0, 1]
+        
+        # Should have positive correlation (log0305: r=0.696)
+        assert corr > 0.5, f"ENV-RAW correlation {corr:.3f} too low (expected > 0.5)"
+
+
+# ============================================================================
+# Test 8: Error Handling
 # ============================================================================
 
 @pytest.mark.error_handling

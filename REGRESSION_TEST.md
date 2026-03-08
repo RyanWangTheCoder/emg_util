@@ -2,8 +2,8 @@
 
 **Purpose:** Ensure consistent behavior of EMG analysis algorithms across code changes using real tennis session data.
 
-**Last Updated:** 2026-03-05  
-**Status:** ✅ **53/53 tests passing (100%)** — 29 pandas + 24 nopandas  
+**Last Updated:** 2026-03-07  
+**Status:** ✅ **61/61 tests passing (100%)** — 37 pandas + 24 nopandas  
 **Execution Time:** ~2.5 minutes (full suite), ~70 seconds (fast tests only)
 
 ---
@@ -453,7 +453,59 @@ assert detector.last_impact_time is not None  # Impact detected
 
 ---
 
-### Test 7: Error Handling
+### Test 7: ENV Gating (Activation Detection)
+
+**Purpose:** Validate ENV-based activation gating for MDF/MNF computation.
+
+**Tests:**
+- `test_compute_env_gate_threshold_percentile` - Percentile-based threshold computation
+- `test_compute_env_gate_threshold_absolute` - Absolute threshold mode
+- `test_apply_env_gate_to_swings_pandas` - Full integration with pandas DataFrame
+- `test_apply_env_gate_disabled` - Disabled mode (all swings marked active)
+- `test_env_gate_threshold_consistency` - Deterministic threshold computation
+- `test_env_gate_percentile_range` - p50 < p75 < p90 ordering
+- `test_env_correlation_with_raw` - ENV-RAW correlation validation (r > 0.5)
+
+**What It Catches:**
+- Incorrect threshold computation
+- ENV gating not applied when enabled
+- All swings rejected (threshold too high)
+- Non-deterministic behavior
+- Poor ENV-RAW correlation (< 0.5)
+- Percentile ordering violations
+
+**Key Concepts:**
+```python
+# ENV as activation proxy
+ENV high (> threshold) → muscle actively contracting → MDF/MNF valid
+ENV low  (< threshold) → muscle at rest → MDF/MNF unreliable
+
+# Percentile-based threshold (session-adaptive)
+threshold = np.percentile(env_mean_1s_windows, 75)  # p75 = upper quartile
+
+# Apply gating to swings
+for swing in swings:
+    env_mean = mean(ENV[swing.t_start:swing.t_end])
+    swing.env_active = 1 if env_mean >= threshold else 0
+
+# Filter before MDF/MNF computation
+active_swings = [s for s in swings if s.env_active == 1]
+```
+
+**Validation (log0305 real data):**
+- ENV-RAW correlation: **r = 0.696** (strong positive)
+- ENV p10/p50/p90: 196 / 1223 / 2183 ADC units
+- Suggested threshold (p75): **1651 ADC units**
+
+**Why ENV Gating:**
+- Rest-period swings produce unreliable MDF (~100 Hz noise floor)
+- Active muscle contraction produces valid MDF (~150-200 Hz)
+- ENV tracks muscle activation intensity (hardware envelope @ 3.6 Hz)
+- Complements IMU activity gating (offline) and RMS quality filter (baseline)
+
+---
+
+### Test 8: Error Handling
 
 **Purpose:** Ensure graceful handling of edge cases.
 
