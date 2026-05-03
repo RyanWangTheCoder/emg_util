@@ -14,7 +14,7 @@
 
 | Rank | Experiment ID | Experiment | Primary value | Paper target |
 |---:|---:|---|---|---|
-| 1 | 1 | Warmup-skip sensitivity figure | Central claim: standard skip misses fatigue | Paper 1 |
+| 1 | 1 | ✅ Warmup-skip sensitivity figure | Central claim: standard skip misses fatigue | Paper 1 |
 | 2 | 2 | Electrode settling MDF/RMS curve | Central mechanism: settling lasts 17–20 min | Paper 1 |
 | 3 | 3 | IMU consistency plot | Validates fatigue vs reduced effort | Paper 1 |
 | 4 | 4 | Contact quality metric plot | Supports proposed EMG quality monitor | Paper 1 |
