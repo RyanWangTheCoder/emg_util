@@ -1,0 +1,55 @@
+PAPER STATISTICS — EMG-IMU Tennis Fatigue Study
+============================================================
+
+log0305 (63.1 min, 626 swings, single BLE connection)
+------------------------------------------------------------
+  log0305_baseline_mdf: 166.016
+  log0305_final_mdf: 140.781
+  log0305_mdf_drop_pct: 15.2
+  log0305_mnf_drop_pct: 3.918
+  log0305_fatigue_onset_s: 812.4
+  log0305_n_swings: 626
+  log0305_duration_min: 63.09
+  log0305_imu_pearson_r: 0.029081054680606955
+  log0305_imu_pearson_p: 0.4676504987395401
+  log0305_settling_min: 8.397574999994442
+  log0305_mdf_early_mean: 124.07069052419355
+  log0305_mdf_early_std: 42.638942131401556
+  log0305_mdf_mid_mean: 167.412109375
+  log0305_mdf_mid_std: 47.15973374293757
+  log0305_mdf_late_mean: 146.93425210674158
+  log0305_mdf_late_std: 45.611889086288215
+  log0305_imu_early_mean: 1677.1112622028027
+  log0305_imu_early_std: 785.9011599416554
+  log0305_imu_mid_mean: 1545.6957481871061
+  log0305_imu_mid_std: 903.1360771599524
+  log0305_imu_late_mean: 1735.772675467526
+  log0305_imu_late_std: 873.3352042927606
+  log0305_p90_rms: 68.20914728505207
+  log0305_qual_early_mean: 0.4995486252336435
+  log0305_qual_late_mean: 0.3395308207070067
+  log0305_pct_below_good: 59.424920127795524
+
+log0303 (87.9 min, 197 swings, 66-min BLE gap)
+------------------------------------------------------------
+  log0303_baseline_mdf: 212.891
+  log0303_final_mdf: 151.811
+  log0303_mdf_drop_pct: 28.691
+  log0303_mnf_drop_pct: 29.115
+  log0303_n_swings: 197
+  log0303_duration_min: 87.89
+  log0303_reconnect_min: 80.26403426666667
+  log0303_seg1_n_swings: 111
+  log0303_seg2_n_swings: 86
+  log0303_imu_pearson_r: -0.06712619801364918
+  log0303_imu_pearson_p: 0.3486438745582841
+  log0303_p90_rms: 74.73998322352874
+  log0303_seg2_sat_swings: 25
+  log0303_seg1_mdf_mean: 182.43243243243242
+  log0303_seg1_mdf_std: 71.63537089642521
+  log0303_seg2_mdf_mean: 130.58684593023256
+  log0303_seg2_mdf_std: 89.72336623380974
+  log0303_imu_seg1_mean: 1154.0816792874994
+  log0303_imu_seg2_mean: 1105.2589820183782
+  log0303_acc_seg1_mean: 1.6388454840327482
+  log0303_acc_seg2_mean: 1.0018189070402201

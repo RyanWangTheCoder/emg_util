@@ -6,7 +6,11 @@
     { "name": "Android bleApp", "path": "../btLeApp/FastBleLib" },
     { "name": "Athelet app", "path": "../btLeApp/app" }
   ],
+  
   "settings": {
+    "python.defaultInterpreterPath": "/local/mnt/workspace/wangx/miniconda3/envs/fft-env/bin/python",
+    "python.terminal.activateEnvironment": true,
+  
     "window.openFilesInNewWindow": "off",
     "git.openRepositoryInParentFolders": "never",
 
