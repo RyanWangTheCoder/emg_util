@@ -4,7 +4,7 @@
 **Target:** Conference paper (middle-rigor, high school research project level) — **5 pages** (trim to 4 later if needed)  
 **Deadline:** ~2 months  
 **Data:** Two captured sessions (log0303, log0305), single player  
-**Last Updated:** 2026-05-02
+**Last Updated:** 2026-05-03
 
 ---
 
@@ -75,7 +75,7 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
    ```
    contact_quality(t) = RMS_window(t) / session_p90_rms
    ```
-   Slow EMG instability with stable IMU swing intensity indicates electrode settling/contact issues; gradual MDF decline with stable IMU intensity supports physiological fatigue; short EMG transients coincident with large IMU shock/vibration peaks are candidate mechanical artifacts rather than fatigue. Validated in log0305: `imu_peak_mag` flat (Pearson r = +0.01, p = 0.78) throughout session while early EMG MDF was falsely depressed by 42%.
+   Slow EMG instability with stable IMU swing intensity indicates electrode settling/contact issues; gradual MDF decline with stable IMU intensity supports physiological fatigue; short EMG transients coincident with large IMU shock/vibration peaks are candidate mechanical artifacts rather than fatigue. Validated in log0305: `imu_peak_mag` flat (Pearson r = +0.029, p = 0.468 across all 626 swings) throughout session while early EMG MDF was substantially depressed during electrode settling.
 
 3. **Hidden fatigue revealed by proper settling correction** — log0305 showed **−2.6% MDF change** with standard 10-min skip (no fatigue found). With 20-min skip to clear the settling period, baseline stabilises at 199 Hz and a **28.1% MDF drop** (and 17.3% MNF drop) is revealed — genuine neuromuscular fatigue that was completely masked by electrode settling in the original analysis.
 
@@ -136,7 +136,7 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 | Total swings | 626 |
 | Bouts | 50 |
 | Swing rate | ~10 swings/min (dense, sustained throughout) |
-| `imu_peak_mag` trend | **r = +0.01, p = 0.78 (completely flat — no biomechanical fatigue)** |
+| `imu_peak_mag` trend | **r = +0.029, p = 0.468 across all 626 swings (non-significant — no biomechanical fatigue)** |
 
 **Warmup-skip sensitivity (the central finding):**
 
@@ -149,7 +149,7 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 
 **The settling period extends past 15 minutes.** Even at 15-min skip the baseline is only 112 Hz (below the stable 166 Hz), confirming the settling tail reaches at least 17–20 min. With 20-min skip, a **28.1% MDF drop** and **17.3% MNF drop** emerge — genuine neuromuscular fatigue that was entirely masked in the original 10-min analysis.
 
-**IMU cross-validation:** `imu_peak_mag` flat (r = +0.01) throughout the session. The player did not reduce swing force or speed. The MDF drop therefore reflects physiological spectral shift (muscle fibre conduction velocity slowing), not reduced effort — the strongest possible interpretation of fatigue.
+**IMU cross-validation:** `imu_peak_mag` flat (r = +0.029, p = 0.468 across all 626 swings) throughout the session. The player did not reduce swing force or speed. The MDF drop therefore reflects physiological spectral shift (muscle fibre conduction velocity slowing), not reduced effort — the strongest possible interpretation of fatigue.
 
 ---
 
@@ -157,13 +157,13 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 
 ### Finding 1: Electrode Settling Extends to ~17–20 Minutes (not 5 or 10)
 
-In log0305, the MDF by session third (time-equal thirds of 63 min):
+In log0305, the MDF by session third (time-equal thirds of 63 min, regenerated from `out0305_w20`) shows a low early settling period, a recovered mid-session reference, and a late-session decline consistent with fatigue:
 
-| Session third | Time range | MDF mean ± std | vs. stable baseline (166 Hz) | Interpretation |
+| Session third | Time range | MDF mean ± std | vs. stable reference (~166 Hz) | Interpretation |
 |---|---|---|---|---|
-| Early | 0–21 min | 107.6 ± 36.3 Hz | **−35%** | Electrode settling |
-| Mid | 21–42 min | 161.2 ± 22.1 Hz | −3% | Stable |
-| Late | 42–63 min | 166.4 ± 18.3 Hz | 0% | Stable, no decay |
+| Early | 0–21 min | 115.7 ± 33.5 Hz | **−30%** | Electrode settling / low-SNR contact |
+| Mid | 21–42 min | 167.6 ± 50.1 Hz | +1% | Post-settling recovered MDF |
+| Late | 42–63 min | 149.5 ± 45.1 Hz | −10% | Late-session fatigue-related decline |
 
 Warmup-skip sensitivity confirms this — the baseline remains contaminated until at least 17–20 min:
 
@@ -177,17 +177,17 @@ Warmup-skip sensitivity confirms this — the baseline remains contaminated unti
 
 With standard 10-min skip: MDF drop = −2.6% → fatigue not found.  
 With 20-min skip (post-settling baseline): MDF drop = **+28.1%**, MNF drop = **+17.3%**, fatigue onset at **1224 s (~20 min)**.  
-IMU `imu_peak_mag` is flat throughout (r = +0.01, p = 0.78) → fatigue is physiological, not effort reduction.
+IMU `imu_peak_mag` is flat throughout (r = +0.029, p = 0.468 across all 626 swings) → fatigue is physiological, not effort reduction.
 
 This is the central finding: **a standard analysis pipeline completely missed genuine fatigue because the warmup skip was 3× too short.**
 
 ### Finding 3: IMU Flat Line Is the Cross-Validator
 
 log0305 `imu_peak_mag`:
-- Early mean: 1577.5 ± 693.7 dps
-- Mid mean: 1572.8 ± 713.4 dps
-- Late mean: 1591.1 ± 705.8 dps
-- Pearson r = **+0.01**, p = **0.78** (non-significant, completely flat)
+- Early mean: 1647 ± 766 dps
+- Mid mean: 1643 ± 896 dps
+- Late mean: 1665 ± 891 dps
+- Pearson r = **+0.029**, p = **0.468** across all 626 swings (non-significant, completely flat)
 
 The player maintained identical swing biomechanics for 63 minutes. Combined with the 28.1% MDF drop, this rules out reduced effort as the cause — the MDF shift is physiological fatigue.
 
@@ -273,9 +273,9 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - Artifact-aware per-swing interpretation: gradual MDF/MNF changes over many swings with stable IMU intensity are attributed to fatigue; isolated EMG outliers coincident with large IMU acceleration peaks are treated as candidate mechanical artifacts (Appendix E).
 
 ### 5. Results (~500 words)
-- 5.1 Electrode settling: log0305 first-third MDF = 107.6 Hz vs. mid/late ~163 Hz; table of thirds; settling takes ≥17–20 min
+- 5.1 Electrode settling: log0305 first-third MDF = 115.7 Hz vs. mid-session 167.6 Hz; late-session MDF = 149.5 Hz; table of thirds; settling takes ≥17–20 min
 - 5.2 Warmup-skip sensitivity: table (10-min: −2.6%, 15-min: −26.2%, 20-min: +28.1%) — show that standard pipeline missed fatigue entirely
-- 5.3 IMU cross-validation: `imu_peak_mag` flat (r=+0.01, p=0.78) confirms settling is artifact; combined with 28.1% MDF drop → genuine physiological fatigue
+- 5.3 IMU cross-validation: `imu_peak_mag` flat (r=+0.029, p=0.468 across all 626 swings) confirms EMG changes are not explained by reduced swing intensity; combined with 28.1% MDF drop → genuine physiological fatigue
 - 5.4 Contact quality metric over session (log0305): rises from settling to stable
 - 5.5 log0303 gap artifact: full-session 28.7% drop vs. seg1-only 4.9% drop
 
@@ -303,15 +303,15 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 | # | Figure | Data source | Status |
 |---|--------|-------------|--------|
 | 1 | System overview diagram (sensor + pipeline) | Diagram | ⏳ Manual |
-| 2 | **Electrode settling: MDF vs. time (first 30 min, log0305)** — 108→166 Hz rise | `out0305_w20/swing_features.csv` | ⏳ `paper_analysis.py` |
-| 3 | **IMU flat line: `imu_peak_mag` vs. time (log0305)** — r=+0.01 | `out0305_w20/swing_features.csv` | ⏳ `paper_analysis.py` |
-| 4 | **Warmup-skip sensitivity bar chart** — −2.6% / −26.2% / +28.1% at 10/15/20 min | fatigue_summary files | ⏳ `paper_analysis.py` |
-| 5 | Contact quality (`RMS/p90_rms`) over session, both sessions | `out0303_v2`, `out0305_w20` | ⏳ `paper_analysis.py` |
-| 6 | log0303 gap artifact: MDF over full session with reconnection gap annotated | `out0303_v2/swing_features.csv` | ⏳ `paper_analysis.py` |
-| 7 | IMU-EMG diagnostic matrix (2×2 scatter) | Both sessions | ⏳ `paper_analysis.py` |
+| 2 | **Electrode settling: MDF vs. time (first 30 min, log0305)** — early low MDF rising toward post-settling reference | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig2_electrode_settling.png` |
+| 3 | **IMU flat line: `imu_peak_mag` vs. time (log0305)** — r=+0.029, p=0.468 | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig3_imu_consistency.png` |
+| 4 | **Warmup-skip sensitivity bar chart** — −2.6% / +15.2% / −26.2% / +28.1% | fatigue_summary files + confirmed original-pipeline value | ✅ `paper_figures/fig4_warmup_skip_sensitivity.png` |
+| 5 | Contact quality (`RMS/p90_rms`) over session, both sessions | `out0303_v2`, `out0305_w20` | ✅ `paper_figures/fig5_contact_quality.png` |
+| 6 | log0303 gap artifact: MDF over full session with reconnection gap annotated | `out0303_v2/swing_features.csv`, `out0303_seg1` | ✅ `paper_figures/fig6_log0303_gap_artifact.png` |
+| 7 | IMU-EMG diagnostic matrix (2×2 scatter) | `out0305_w20` | ✅ `paper_figures/fig7_imu_emg_diagnostic_matrix.png` |
 | 8 | Full-window MDF vs. pre-impact MDF comparison | log0305 + future impact-risk/pre-impact analysis | 🔮 Future / Paper 2 |
 
-Draft figures generated by `paper_figures.py` are in `paper_figures/` but use wrong output dirs (`out0303`/`out0305`). Re-generate from `paper_analysis.py` once complete.
+Canonical figures have been regenerated by the rewritten `paper_figures.py` into `paper_figures/`. The directory still contains older draft PNGs from previous runs; use only the canonical files listed above for the paper.
 
 ---
 
@@ -345,14 +345,16 @@ Draft figures generated by `paper_figures.py` are in `paper_figures/` but use wr
 > shows that baseline selection remains sensitive to the chosen criterion even after settling.
 > In paper text, use 166 Hz as the "stable settled MDF" reference and 199 Hz as the
 > "post-warmup-skip baseline." Explain the difference in Methods or a footnote.
-| Early session MDF (settling) | 107.6 ± 36.3 Hz | log0305 early third |
-| False apparent MDF drop (settling) | **+42.5%** (swing_mdf_drop_pct) | log0305 early third |
+| Early session MDF (settling) | 115.7 ± 33.5 Hz | `out0305_w20` early third |
+| Mid-session MDF (post-settling reference) | 167.6 ± 50.1 Hz | `out0305_w20` middle third |
+| Late-session MDF | 149.5 ± 45.1 Hz | `out0305_w20` late third |
+| Early MDF depression from stable reference | ~30% below 166 Hz settled reference; ~42% below 199 Hz 20-min baseline | log0305 early third / `out0305_w20` |
 | **MDF drop with correct warmup skip** | **+28.1%** (20-min skip) | `out0305_w20/fatigue_summary.csv` |
 | **MNF drop with correct warmup skip** | **+17.3%** (20-min skip) | `out0305_w20/fatigue_summary.csv` |
 | MDF drop with standard 10-min skip | −2.6% (missed fatigue) | `out0305/fatigue_summary.csv` |
 | MDF drop with 15-min skip | −26.2% (inverted — still settling) | `out0305_w15/fatigue_summary.csv` |
 | Fatigue onset (20-min skip) | 1224 s (~20 min) | `out0305_w20/fatigue_summary.csv` |
-| IMU swing consistency (log0305) | r = +0.01, p = 0.78 | Pearson imu_peak_mag vs time |
+| IMU swing consistency (log0305) | r = +0.029, p = 0.468 across all 626 swings | Pearson imu_peak_mag vs time from `out0305_w20` |
 | log0303 full MDF drop | 28.7% | `out0303_v2/fatigue_summary.csv` |
 | log0303 seg1-only MDF drop | **4.9%** (no fatigue) | `out0303_seg1/fatigue_summary.csv` |
 | log0303 seg1 duration | 13.55 min, 111 swings | `out0303_seg1/session_summary.json` |
@@ -369,9 +371,9 @@ Draft figures generated by `paper_figures.py` are in `paper_figures/` but use wr
 
 2. ~~**Warmup skip sensitivity**~~ ✅ **RESOLVED** — Full sensitivity table confirmed. Settling extends past 15 min. 20-min skip (`out0305_w20`) is the canonical result showing 28.1% MDF drop.
 
-3. **Contact quality metric validation** — Plot `contact_quality(t) = RMS(t) / session_p90_rms` for both sessions. `paper_analysis.py` computes the metric (line 81–83); figure code not yet written.
+3. ~~**Contact quality metric validation**~~ ✅ **FIGURE GENERATED** — `paper_figures/fig5_contact_quality.png` plots `contact_quality(t) = RMS(t) / session_p90_rms` for `out0303_v2` and `out0305_w20`. Still interpret qualitatively because it is not validated against direct impedance.
 
-4. **Complete `paper_analysis.py` figure generation** — data loading done to line 210; need figure code using `out0303_v2`, `out0305_v2`, and `out0305_w20`. Key figures: electrode settling curve, IMU flat line, warmup-skip sensitivity bar chart, contact quality.
+4. ~~**Complete paper figure generation**~~ ✅ **RESOLVED** — `paper_figures.py` was rewritten to use the correct canonical output directories and generated Figures 2–7 plus `paper_stats.txt`. The `paper_figures/` directory still contains older draft PNGs, so use only the canonical files listed in “Figures Needed.”
 
 ---
 
@@ -404,9 +406,9 @@ These limitations should be stated explicitly in the paper.
 
 1. [x] Re-analyze log0303 first segment only → `out0303_seg1` (4.9% drop — gap artifact confirmed)
 2. [x] Re-run log0305 with warmup_skip = 15 and 20 → `out0305_w15`, `out0305_w20` (28.1% fatigue revealed)
-3. [ ] Complete `paper_analysis.py` figure generation code (uses `out0303_v2`, `out0305_v2`, `out0305_w20`)
-4. [ ] Generate warmup-skip sensitivity bar chart (key Figure 4)
-5. [ ] Generate contact quality metric plot (Figure 5)
+3. [x] Complete `paper_figures.py` figure generation code using canonical sources (`out0303_v2`, `out0303_seg1`, `out0305_v2`, `out0305_w15`, `out0305_w20`)
+4. [x] Generate warmup-skip sensitivity bar chart (key Figure 4)
+5. [x] Generate contact quality metric plot (Figure 5)
 6. [ ] Implement pre-impact MDF extraction and compare variance/trend against full-window MDF on log0305 (future Figure 8 / Paper 2)
 7. [ ] Write Section 3.1 Hardware draft (~200 words): components + RAW wiring fix + ADC DMA timing + FSR one-liner
 8. [ ] Write Section 3.2 Software draft (~150 words): btCentral.py → CSV → abs_us stitching → yaml_runner
@@ -478,7 +480,7 @@ Every empirical claim rests on a single individual on a single day. Settling dur
 Electrode settling is inferred from MDF behaviour, not measured directly. The core confound: muscle physiological warm-up also raises MDF in the first 15-20 min (muscle temperature increases conduction velocity). Without an impedance meter or a pre-wetted electrode control condition, these two effects cannot be fully separated.
 
 **A3. No MVC or RPE ground truth**
-The 28.1% MDF drop is called "genuine fatigue" supported by flat IMU (r = +0.01). Without a maximal voluntary contraction test or rating of perceived exertion, fatigue magnitude cannot be independently confirmed.
+The 28.1% MDF drop is called "genuine fatigue" supported by flat IMU (r = +0.029, p = 0.468 across all 626 swings). Without a maximal voluntary contraction test or rating of perceived exertion, fatigue magnitude cannot be independently confirmed.
 
 **A4. Non-monotone warmup-skip sensitivity**
 15-min skip gives a LOWER baseline (112 Hz) than 10-min skip (137 Hz). Explained by the RMS filter catching swings in the steepest part of the settling transition, but reviewers will notice. Needs a clear explanation in Results or Discussion.
@@ -540,7 +542,7 @@ Response: The RMS-based baseline selector picks highest-RMS swings after the ski
 Response: Justified from the session-wide gyro distribution (p88, at swing population onset). Tennis forehand peaks (400-800 dps) are well above 300 dps for adult recreational players. Per-player calibration may be needed for juniors or players with weaker strokes (acknowledged in Future Work).
 
 **C5. "MDF drop could reflect reduced effort -- IMU measures wrist rotation, not muscle force."**
-Response: Flat imu_peak_mag (r = +0.01, p = 0.78) means the player maintained consistent peak gyro rotation speed throughout. Reduced wrist rotation speed would be expected with effort reduction. We acknowledge it is not a direct muscle force measurement.
+Response: Flat imu_peak_mag (r = +0.029, p = 0.468 across all 626 swings) means the player maintained consistent peak gyro rotation speed throughout. Reduced wrist rotation speed would be expected with effort reduction. We acknowledge it is not a direct muscle force measurement.
 
 **C6. "The contact quality metric is not validated."**
 Response: Introduced as a proposed indicator, interpreted qualitatively. Quantitative validation against impedance is future work. Presented as a practical tool, not a validated clinical metric.

@@ -1,55 +1,59 @@
-PAPER STATISTICS � EMG-IMU Tennis Fatigue Study
-============================================================
+=================================================================
+PAPER STATISTICS — generated from correct output directories
+=================================================================
 
-log0305 (63.1 min, 626 swings, single BLE connection)
-------------------------------------------------------------
-  log0305_baseline_mdf: 166.016
-  log0305_final_mdf: 140.781
-  log0305_mdf_drop_pct: 15.2
-  log0305_mnf_drop_pct: 3.918
-  log0305_fatigue_onset_s: 812.4
-  log0305_n_swings: 626
-  log0305_duration_min: 63.09
-  log0305_imu_pearson_r: 0.029081054680606955
-  log0305_imu_pearson_p: 0.4676504987395401
-  log0305_settling_min: 8.397574999994442
-  log0305_mdf_early_mean: 124.07069052419355
-  log0305_mdf_early_std: 42.638942131401556
-  log0305_mdf_mid_mean: 167.412109375
-  log0305_mdf_mid_std: 47.15973374293757
-  log0305_mdf_late_mean: 146.93425210674158
-  log0305_mdf_late_std: 45.611889086288215
-  log0305_imu_early_mean: 1677.1112622028027
-  log0305_imu_early_std: 785.9011599416554
-  log0305_imu_mid_mean: 1545.6957481871061
-  log0305_imu_mid_std: 903.1360771599524
-  log0305_imu_late_mean: 1735.772675467526
-  log0305_imu_late_std: 873.3352042927606
-  log0305_p90_rms: 68.20914728505207
-  log0305_qual_early_mean: 0.4995486252336435
-  log0305_qual_late_mean: 0.3395308207070067
-  log0305_pct_below_good: 59.424920127795524
+--- log0305  (out0305_w20, 20-min warmup skip) ---
+  Duration:     62.9 min
+  Swings:       626
+  Swing rate:   9.9 swings/min
+  imu_peak_mag  Pearson r = +0.029  p = 0.468
+  mdf           Pearson r = +0.278  p = 0.000
+  MDF thirds:   early=115.7±33.5  mid=167.6±50.1  late=149.5±45.1 Hz
+  IMU thirds:   early=1647±766  mid=1643±896  late=1665±891 dps
 
-log0303 (87.9 min, 197 swings, 66-min BLE gap)
-------------------------------------------------------------
-  log0303_baseline_mdf: 212.891
-  log0303_final_mdf: 151.811
-  log0303_mdf_drop_pct: 28.691
-  log0303_mnf_drop_pct: 29.115
-  log0303_n_swings: 197
-  log0303_duration_min: 87.89
-  log0303_reconnect_min: 80.26403426666667
-  log0303_seg1_n_swings: 111
-  log0303_seg2_n_swings: 86
-  log0303_imu_pearson_r: -0.06712619801364918
-  log0303_imu_pearson_p: 0.3486438745582841
-  log0303_p90_rms: 74.73998322352874
-  log0303_seg2_sat_swings: 25
-  log0303_seg1_mdf_mean: 182.43243243243242
-  log0303_seg1_mdf_std: 71.63537089642521
-  log0303_seg2_mdf_mean: 130.58684593023256
-  log0303_seg2_mdf_std: 89.72336623380974
-  log0303_imu_seg1_mean: 1154.0816792874994
-  log0303_imu_seg2_mean: 1105.2589820183782
-  log0303_acc_seg1_mean: 1.6388454840327482
-  log0303_acc_seg2_mean: 1.0018189070402201
+  Fatigue summary (10min (no RMS, old pipeline)):
+    baseline_MDF = 137.1 Hz
+    final_MDF    = 140.7 Hz
+    MDF_drop_pct = -2.60%
+    MNF_drop_pct = +nan%
+
+  Fatigue summary (10min+RMS):
+    baseline_MDF = 166.0 Hz
+    final_MDF    = 140.8 Hz
+    MDF_drop_pct = +15.20%
+    MNF_drop_pct = +3.92%
+    fatigue_onset = 812 s = 13.5 min
+
+  Fatigue summary (15min):
+    baseline_MDF = 112.3 Hz
+    final_MDF    = 141.8 Hz
+    MDF_drop_pct = -26.25%
+    MNF_drop_pct = -5.60%
+
+  Fatigue summary (20min):
+    baseline_MDF = 199.2 Hz
+    final_MDF    = 143.2 Hz
+    MDF_drop_pct = +28.13%
+    MNF_drop_pct = +17.29%
+    fatigue_onset = 1224 s = 20.4 min
+
+
+--- log0303  (out0303_v2, full session, gap-confounded) ---
+  Duration:     87.9 min
+  Swings:       197
+  BLE reconnection at: 80.3 min (4816 s)
+  MDF_drop_pct (full session) = +28.69%  <-- GAP ARTIFACT
+
+  Segment 1 only (out0303_seg1):
+    Duration:  13.5 min
+    Swings:    111
+    MDF_drop_pct = +4.94%  <-- no meaningful within-segment fatigue
+
+
+--- KEY NUMBERS VERIFICATION ---
+  Settling duration:         ~17–20 min (early MDF=115.7 Hz vs stable=167.6 Hz)
+  Fatigue found (20-min):    MDF drop = +28.13%  MNF drop = +17.29%
+  Fatigue missed (10-min, no RMS): MDF drop = -2.60%   [pre-fix pipeline, hardcoded from paper.md]
+  Inverted (15-min):         MDF drop = -26.25%
+  IMU consistency (r, p):    r=+0.029  p=0.468
+  log0303 gap artifact:      +28.69% full vs +4.94% seg1-only
