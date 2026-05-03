@@ -276,8 +276,10 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - **Practical recommendation:** Extend warmup skip to ≥20 min for forearm snap-electrode deployments in field tennis. The pipeline parameter `warmup_skip_min` should default to 20 for this sensor/placement combination.
 - **IMU cross-validation:** The IMU is already on the device for swing detection — using it as a quality monitor adds zero hardware cost. The decision rule (IMU consistent + MDF depressed → settling; IMU consistent + MDF dropping → fatigue) turns a qualitative observation into a testable, automatable criterion.
 - Why log0305 showed genuine fatigue once corrected: 626 swings at ~10/min for 63 min represents significant cumulative forearm flexor load, consistent with 28.1% MDF drop even without perceptible biomechanical degradation.
+- **Motion artifact landscape in tennis sEMG (~100 words):**
+  > Wrist-worn EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources — electrode settling, skin stretch (0–20 Hz), cable triboelectric noise, powerline interference, and rest-period baseline noise — are substantially mitigated by the current pipeline: the 50 Hz high-pass filter rejects skin stretch; the on-board MyoWare amplifier limits the unamplified signal path to the snap connector length (~3 cm), eliminating cable sway artifact [Boyer 2023, Symeonidou 2018]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating (300 dps) excludes rest-period windows. The primary unmitigated source is ball-impact impulsive vibration (200–600 Hz), which falls within the EMG analysis band and cannot be removed by filtering alone. The IMU acceleration spike at ball contact provides a synchronised trigger that could gate or mask the impact sample window before spectral estimation — identified as the highest-priority future work item (see Appendix E). REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R18] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
 - Limitations: single player, two sessions, no RPE or MVC ground truth, settling duration likely varies with player sweat rate, skin condition, ambient temperature
-- Future work: multi-player study, adaptive warmup skip based on contact quality metric, RPE integration, real-time settling detection in Android app
+- Future work: multi-player study, adaptive warmup skip based on contact quality metric, IMU-guided motion artifact algorithms (see Appendix E), RPE integration, real-time settling detection in Android app
 
 ### 7. Conclusion (~150 words)
 - Wearable sEMG for tennis has practical challenges beyond motion artifact
@@ -421,7 +423,14 @@ These limitations should be stated explicitly in the paper.
 - [R14] Cerone GL, Botter A, Gazzoni M. "A modular, smart, and wearable system for high density sEMG detection." *IEEE Trans Biomed Eng.* 2019;66(12):3371-3380. PMID: 30869608. DOI: 10.1109/TBME.2019.2904398
 - [R15] Yang K, McErlain-Naylor SA, Isaia B, Callaway A, et al. "E-textiles for sports and fitness sensing: current state, challenges, and future opportunities." *Sensors.* 2024;24(4):1058. DOI: 10.3390/s24041058 *(PMID: verify before submission)*
 
-> **Note:** PMIDs confirmed: R1–R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608). Still to verify: R13 (conference proceedings), R15 PMID, R16–R17 PMIDs.
+### Motion Artifacts and Cable Noise
+- [R16] Boyer M, Bouyer L, Roy JS, Campeau-Lecours A. "Reducing noise, artifacts and interference in single-channel EMG signals: a review." *Sensors.* 2023;23(6):2927. DOI: 10.3390/s23062927
+- [R17] Symeonidou ER, Nordin AD, Hairston WD, Ferris DP. "Effects of cable sway, electrode surface area, and electrode mass on electroencephalography signal quality during motion." *Sensors.* 2018;18(4):1073. DOI: 10.3390/s18041073
+
+### Vendor Documentation
+- [R18] SparkFun Electronics. *MyoWare 2.0 Muscle Sensor Advanced Guide.* 2023. https://cdn.sparkfun.com/assets/learn_tutorials/1/9/5/6/MyoWare_v2_AdvancedGuide-Updated.pdf
+
+> **Note:** PMIDs confirmed: R1-R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608). Still to verify: R13 (conference proceedings), R15-R17 PMIDs.
 
 ---
 
@@ -507,106 +516,425 @@ Response: Commercial research-grade systems cost $5,000-$30,000. The MyoWare 2.0
 
 ### D. Skin-Electrode Impedance Measurement — Practical Guide
 
-This section documents how to directly measure electrode-skin impedance to corroborate the
-settling finding (Limitation A2). Addresses Reviewer Concern C2.
+This section documents how to measure electrode-skin contact/impedance to corroborate the electrode-settling finding (Limitation A2) and address Reviewer Concern C2. The key correction is that the measurement must be made at the **electrode snap / electrode lead side**, not at ESP32 ADC pins. ESP32 GPIO32 (`RAW`) and GPIO39 (`ENV`) are **post-MyoWare processed outputs**, so they cannot measure electrode-skin impedance.
 
 #### D1. What Skin-Electrode Impedance Is
 
-The electrode-skin interface is not a pure resistor. It behaves as a complex impedance:
+The electrode-skin interface is not a pure resistor. It behaves as a frequency-dependent complex impedance:
 
-  Z = Rskin + Rcontact in series with (Cdouble_layer || Rct)
+```text
+Z ≈ Rskin + Rcontact + electrode polarization impedance
+```
 
-where Cdouble_layer is the electrochemical double-layer capacitance and Rct is the charge
-transfer resistance. The impedance is frequency-dependent: at DC the capacitor blocks current
-(high impedance); at 1 kHz the capacitor passes current (much lower impedance). SENIAM
-recommends verifying impedance < 5 kOhm at 1 kHz before clinical EMG recording.
+A more detailed equivalent circuit includes the stratum-corneum resistance, contact resistance, charge-transfer resistance, and electrochemical double-layer capacitance at the Ag/AgCl electrode-electrolyte interface. At DC, the capacitive component charges and blocks steady current, so a standard multimeter often reports a much larger and drifting value. At AC frequencies such as 1 kHz, the capacitive component conducts more readily, so the measured impedance is lower and more relevant to EMG signal quality.
 
-Expected values for MyoWare 2.0 snap electrodes on forearm:
+Expected order-of-magnitude values for MyoWare 2.0 snap electrodes on unabraded forearm skin:
 
-  t = 0 min  (dry skin)     : 50-150 kOhm @ 1 kHz    (DC: OL or 500-2000 kOhm)
-  t = 10 min (partially wet): 10-30 kOhm  @ 1 kHz    (DC: 100-500 kOhm)
-  t = 20 min (sweat-hydrated): 2-8 kOhm   @ 1 kHz    (DC: 20-100 kOhm)
-  Gel electrode (reference) : 1-5 kOhm    @ 1 kHz    (DC: 5-30 kOhm)
+| Condition | Approx. 1 kHz impedance | Approx. multimeter DC resistance |
+|---|---:|---:|
+| t = 0 min, dry skin | 50–150 kΩ | OL or 500–2000 kΩ |
+| t = 10 min, partially hydrated | 10–30 kΩ | 100–500 kΩ |
+| t = 20 min, sweat-hydrated | 2–8 kΩ | 20–100 kΩ |
+| Gel/prepared electrode reference | 1–5 kΩ | 5–30 kΩ |
 
-#### D2. Can a Standard Multimeter Be Used?
+The exact values vary strongly with skin preparation, sweat rate, electrode age, pressure, placement, and meter type. The important result for this project is the **time trend**: high initial contact impedance/resistance that falls over ~15–20 minutes as sweat hydrates the interface.
 
-Yes -- with caveats. A multimeter in DC resistance (Ohm) mode applies a small DC voltage.
-The capacitive component of the electrode-skin interface causes:
-  1. Unstable/drifting reading for the first 5-10 seconds (capacitor charging)
-  2. Readings that overestimate AC impedance at EMG frequencies by a factor of ~5-20x
+#### D2. Which Electrode Pair to Measure
 
-Despite the overestimation, the TREND is correct: a multimeter will clearly show OL or
-hundreds of kOhm at t=0 dropping to tens of kOhm by t=20 min -- the same settling timeline
-as the MDF curve. This is sufficient to corroborate the settling finding in a pilot study.
+MyoWare uses a 3-electrode configuration:
 
-Paper Methods caveat (add this sentence):
-  "Electrode-skin resistance was measured in DC resistance mode (multimeter); values
-  overestimate AC impedance at EMG frequencies (~1 kHz) by a factor of 5-20x but correctly
-  reflect the temporal settling trend."
+```text
+EMG+ / SIG+    active electrode
+EMG- / SIG-    active electrode
+REF / GND      reference electrode
+```
 
-#### D3. Measurement Tools Comparison
+The EMG channel is primarily the differential signal between the two active electrodes. Therefore the **primary contact-quality measurement** should be:
 
-  Tool                  Cost    Accuracy          Trend?  Best for
-  -----------------------------------------------------------------------
-  Multimeter (owned)    $0      DC only, 5-20x    YES     Paper 1 pilot study -- use now
-                                overestimate
-  LCR meter (Amazon)    ~$25    AC at 1 kHz       YES     Paper 1 formal measurement
-                                accurate
-  AD5933 on ESP32 I2C   ~$10    Continuous,       YES     Paper 2 / journal version
-                                automated, logged
+```text
+Probe A → EMG+ snap
+Probe B → EMG- snap
+```
 
-#### D4. How to Measure with a Multimeter (Do This Now)
+The active-to-reference pairs are useful secondary checks for asymmetric or single-electrode contact problems:
+
+```text
+Probe A → EMG+ snap
+Probe B → REF snap
+
+Probe A → EMG- snap
+Probe B → REF snap
+```
+
+Recommended recording table:
+
+| Measurement | Purpose | Priority |
+|---|---|---|
+| `Z(+,-)` or `R(+,-)` | Primary EMG differential path quality | Required |
+| `Z(+,REF)` or `R(+,REF)` | Detect poor EMG+ or REF contact | Optional but useful |
+| `Z(-,REF)` or `R(-,REF)` | Detect poor EMG- or REF contact | Optional but useful |
+
+This is more informative than measuring only `EMG+` to `REF`, because the actual EMG spectrum depends most directly on the active-electrode differential path.
+
+#### D3. Important Wiring and Safety Rule
+
+Measure at the **electrode snaps/leads**, with the MyoWare board disconnected from the electrodes.
+
+Recommended physical setup:
+
+```text
+Electrodes adhered to forearm
+        ↓
+Electrode snap leads accessible
+        ↓
+MyoWare board disconnected
+        ↓
+Multimeter/LCR probes touch the electrode snap leads
+```
+
+Do **not** measure at:
+
+```text
+ESP32 GPIO32 / RAW
+ESP32 GPIO39 / ENV
+MyoWare RAW output
+MyoWare ENV output
+```
+
+Those points are after the MyoWare analog front-end and do not represent electrode-skin impedance.
+
+Also avoid measuring while MyoWare is simultaneously connected to the electrodes, because the meter injects a test signal/current and the reading can include:
+
+```text
+skin path + electrode contact + MyoWare input bias/leakage path
+```
+
+That can disturb the MyoWare input bias and contaminate EMG if recording is active. If a quick check must be done with the board attached, treat the value only as a rough troubleshooting indicator, not as a clean electrode-skin measurement.
+
+#### D4. Can a Standard Multimeter Be Used?
+
+Yes — with caveats. A multimeter in DC resistance (`Ω`) mode applies a small DC test voltage/current. Because the electrode-skin interface has capacitance and electrochemical polarization, the reading may:
+
+1. Drift for the first 5–10 seconds while the interface charges.
+2. Overestimate 1 kHz AC impedance by roughly 5–20×.
+3. Depend on probe polarity and meter model.
+
+Despite this, a multimeter is useful for a pilot study because the **trend** is meaningful: dry/high resistance at t=0 should fall toward a lower stable value after sweating/settling.
+
+Paper Methods caveat:
+
+> Electrode-skin resistance was measured before recording using a digital multimeter in DC resistance mode. Because DC resistance overestimates the frequency-dependent AC impedance relevant to EMG, these values were interpreted as a qualitative settling indicator rather than an absolute impedance measurement.
+
+#### D5. Multimeter Protocol — Do This Now
 
 Setup:
-  - Apply electrodes on forearm as normal
-  - Multimeter set to highest Ohm range (2 MOhm or 20 MOhm)
-  - Probe A: touch to EMG+ snap (center electrode, over muscle belly)
-  - Probe B: touch to REF snap (outer electrode, away from muscle)
 
-Protocol:
-  - Wait 5-10 seconds for reading to stabilise before recording
-  - If display shows OL (overload): record as ">2 MOhm" -- expected at t=0 dry skin
-  - Take readings at t = 0, 5, 10, 15, 20, 30 min
-  - Player rests arm still for 10 seconds per reading -- no session interruption needed
-  - Expected plot: monotone drop from OL/high at t=0 to stable value by t=20 min
+```text
+1. Apply the three snap electrodes to the forearm in the normal MyoWare placement.
+2. Leave the MyoWare board disconnected from the electrode snaps.
+3. Set the multimeter to resistance mode, preferably 2 MΩ or 20 MΩ range.
+4. Have the player keep the arm still during each reading.
+```
+
+Measurements at each time point:
+
+```text
+Primary:
+  EMG+ ↔ EMG-
+
+Secondary:
+  EMG+ ↔ REF
+  EMG- ↔ REF
+```
+
+Timing:
+
+```text
+t = 0, 5, 10, 15, 20, 30 min
+```
+
+Procedure:
+
+```text
+1. Touch probes firmly to the snap metal contacts.
+2. Wait 5–10 seconds for the value to stabilize.
+3. If display shows OL, record as "> meter range" (e.g., ">2 MΩ").
+4. Record all three pair values.
+5. After the final reading, connect MyoWare and start EMG recording.
+```
+
+Suggested data table:
+
+| Time (min) | R(+,-) | R(+,REF) | R(-,REF) | Notes |
+|---:|---:|---:|---:|---|
+| 0 |  |  |  | dry / initial |
+| 5 |  |  |  |  |
+| 10 |  |  |  |  |
+| 15 |  |  |  |  |
+| 20 |  |  |  | expected near stable |
+| 30 |  |  |  | optional |
 
 What to look for:
-  - OL or >500 kOhm at t=0 confirms poor initial contact (dry electrode)
-  - Reading stabilising at 20-100 kOhm by t=20 min confirms hydration-driven settling
-  - If reading is already low at t=0: skin was pre-wetted or electrode was re-used wet
 
-#### D5. LCR Meter (Better Option, ~$25)
+- `R(+,-)` falling over time supports electrode settling.
+- One active-to-reference pair much higher than the other suggests one electrode has poor contact.
+- Already-low resistance at t=0 suggests the skin/electrode was pre-wetted or the electrode was reused while wet.
+- Non-monotone values can happen if pressure changes, probe contact changes, or sweat accumulates unevenly; focus on overall trend, not each single point.
 
-An LCR meter measures impedance at AC frequencies (typically 100 Hz, 1 kHz, 10 kHz).
-At 1 kHz, readings directly match the frequency range relevant to EMG quality.
+#### D6. LCR Meter Protocol — Better If Available
 
-Recommended products (search on Amazon):
-  - BSIDE ESR02 Pro    : ~$25, measures at 100 Hz / 1 kHz / 10 kHz
-  - UNI-T UT612        : ~$35, slightly better build quality
-  - Victor VC6013      : ~$25, basic but functional
+An LCR meter is better than a multimeter because it measures AC impedance at a chosen frequency. If available, use:
 
-Set to 1 kHz mode. Same probe placement and protocol as multimeter above.
-These values can be directly cited as "electrode-skin impedance at 1 kHz" in the paper.
+```text
+Frequency: 1 kHz
+Reported value: impedance magnitude |Z|
+Primary pair: EMG+ ↔ EMG-
+Secondary pairs: EMG+ ↔ REF, EMG- ↔ REF
+```
 
-#### D6. AD5933 Integration into Firmware (Best Option for Paper 2)
+Use the same time points:
 
-The AD5933 (Analog Devices) is an I2C impedance converter chip that sweeps from 1-100 kHz.
-It can be added to the existing ESP32 I2C bus (which already runs ICM-20948, MAX30105,
-MAX17048) with no additional wiring except two electrode connections.
+```text
+t = 0, 5, 10, 15, 20, 30 min
+```
 
-Where to buy:
-  - Chip (AD5933YRSZ)         : ~$6-8 at Mouser (mouser.com) or DigiKey (digikey.com)
-  - Breakout board             : ~$8-15 on AliExpress (search "AD5933 breakout")
-  - Eval board (EVAL-AD5933EBZ): ~$35-50 at DigiKey -- for bench prototyping first
+Paper Methods wording if using LCR:
 
-Firmware sketch:
-  // Every 60 seconds, read impedance from AD5933 via I2C
-  // Set frequency = 1000 Hz, trigger single measurement
-  // Read real + imaginary components
-  // Compute |Z| = sqrt(real^2 + imag^2) / gain_factor
-  // Log to new impedance_log.csv column: dev_us, impedance_ohms
-  // (or add as TLV_IMPEDANCE 0x04 to BLE stream)
+> Electrode-skin impedance was measured at 1 kHz using an LCR meter between the two active EMG electrodes, with additional active-to-reference measurements used to identify asymmetric electrode contact. Measurements were performed before EMG recording while the MyoWare sensor was disconnected from the electrode snaps.
 
-Benefit for the paper: impedance curve and MDF curve on the same time axis from the same
-session -- directly and automatically answers Reviewer C2 with no manual measurements.
-This is the target implementation for Paper 2 field validation.
+Budget LCR/ESR meters found online may be adequate for trend validation, but record the model and test frequency. If the meter cannot select frequency, report the meter's default frequency and avoid comparing absolute values against literature thresholds.
+
+#### D7. Measurement Tools Comparison
+
+| Tool | Cost | Measures | Disrupts session? | Best use |
+|---|---:|---|---|---|
+| Digital multimeter | $0 if owned | DC resistance | Yes if done during recording; fine pre-session | Immediate pilot validation |
+| LCR meter | ~$25–80 | AC impedance, ideally 1 kHz | Yes if manually probed; fine pre-session | Stronger Paper 1 validation |
+| AD5933 USB eval board | ~$50–150 | AC impedance sweep | Yes; bench instrument | Bench prototyping only |
+| Custom AD5933/MAX30001 path | Future PCB | Logged AC impedance | Can be non-disruptive if isolated/switched | Paper 2 / journal hardware revision |
+
+#### D8. AD5933 / Continuous Impedance — Future Hardware, Not a Quick Add-On
+
+The AD5933 is an impedance converter IC, but most boards found online are large USB evaluation boards intended for bench testing. Those are not practical for in-session tennis measurement.
+
+A true wearable integration would require more than simply connecting AD5933 wires to the existing electrode snaps. It should include:
+
+```text
+electrode snaps
+   ├── MyoWare EMG input path
+   └── impedance path through analog switch / isolation network
+          └── AD5933 or similar impedance AFE
+```
+
+The firmware would need to briefly switch modes:
+
+```text
+normal mode:     electrodes connected to MyoWare for EMG
+impedance mode:  MyoWare isolated, impedance circuit connected briefly, measurement taken
+```
+
+Why isolation/switching matters:
+
+- The impedance circuit injects an AC excitation signal.
+- That excitation can contaminate EMG if applied during normal recording.
+- Parallel connection can change the MyoWare input bias and electrode loading.
+- Calibration resistors and gain calibration are required for meaningful values.
+
+So AD5933/MAX30001-style impedance logging is a good **future hardware revision**, but not required for the current conference paper.
+
+#### D9. Paper-Ready Interpretation
+
+For the current paper, the safest wording is:
+
+> Direct continuous electrode-skin impedance was not measured during play. Instead, contact settling was inferred from the time evolution of EMG spectral features and RMS-derived contact quality, and cross-validated against stable IMU swing intensity. A supplementary pre-session electrode resistance check can be used to verify the same settling trend, but DC resistance values should be interpreted qualitatively because they overestimate AC impedance at EMG frequencies.
+
+If pre-session multimeter/LCR data are collected, update Limitation A2 from "No direct impedance measurement" to:
+
+> Direct in-session impedance was not measured. However, pre-session pairwise electrode resistance/impedance measurements showed the expected decrease over the warm-up period, supporting the interpretation that early-session MDF depression was driven by electrode-skin settling.
+
+---
+
+### E. Novel IMU-Guided Motion Artifact Algorithms (Tennis-Specific)
+
+This section documents brainstormed algorithms for mitigating motion artifacts
+specific to tennis wrist-worn EMG, leveraging the IMU data already captured.
+None are implemented yet. Ranked by effort vs. novelty.
+
+---
+
+#### E1. Ball-Impact Window Masking
+**Priority: Highest — low effort, directly addresses the one unmitigated artifact**
+
+Problem:
+Ball-racket contact generates a 2-5ms impulsive vibration (200-600 Hz) that propagates
+up the arm into the electrode. This falls within the EMG analysis band and biases MDF
+upward — opposite of fatigue. The IMU acc_mag spikes sharply at ball contact, providing
+a precise synchronised trigger.
+
+Algorithm:
+  acc_dyn = |acc_mag - 1g|
+  impact_idx = argmax(acc_dyn within swing window)
+  if acc_dyn[impact_idx] > IMPACT_THR_G (e.g. 3.0g):
+      mask +-20ms around impact_idx before Welch PSD
+      emg_clean = emg_seg[mask]
+  else:
+      emg_clean = emg_seg  # no significant impact detected
+
+Implementation: ~15 lines in emg_util.py. Add to compute_swing_emg_features().
+Config key: swing_detection.impact_mask_thr_g (default 0 = disabled).
+
+Novel aspect: Transient impulsive artifact from ball contact has not been addressed
+in the EMG artifact literature. IMU provides an independent, causally prior trigger
+(impact causes artifact, so IMU detects it first).
+
+---
+
+#### E2. Between-Swing Noise Floor Tracker (Continuous Contact Monitor)
+**Priority: High — extends the contact_quality metric from static to continuous**
+
+Problem:
+contact_quality(t) = RMS(t) / session_p90_rms is currently computed per swing.
+But contact quality changes continuously throughout the session:
+- Rising early (settling) -- low impedance not yet achieved
+- Stable mid-session -- good contact
+- Rising again late (sweat + movement loosening electrode) -- degradation
+
+Algorithm:
+  For each pair of consecutive swings i, i+1:
+      find rest windows where gyro_mag < REST_THR_DPS (e.g. 50 dps) for > 500ms
+      rest_rms[i] = rms(preprocess_emg(emg_in_rest_window))
+
+  noise_floor_trend = smooth(rest_rms, window=5_swings)
+  contact_quality_continuous = 1 / noise_floor_trend  (normalised to session median)
+
+  If noise_floor_trend rises late-session (after stable mid-session plateau):
+      flag electrode_degrading = True
+      warn: late-session results may be artifact-contaminated
+
+Novel aspect: Uses IMU to identify rest windows precisely (independent of EMG),
+then uses those windows as in-situ contact probes -- continuous quality signal
+throughout the session, not just at baseline selection.
+
+---
+
+#### E3. IMU-Adaptive High-Pass Filter Cutoff
+**Priority: Medium -- low effort, moderate novelty**
+
+Problem:
+Fixed 50 Hz HPF cutoff is a compromise. Optimal cutoff depends on motion intensity:
+during rest, a lower cutoff (30 Hz) preserves more useful EMG signal; during high-speed
+swings, a higher cutoff (80 Hz) better rejects motion artifact.
+
+Algorithm:
+  gyro_mag = sqrt(gx^2 + gy^2 + gz^2)  # computed per swing window
+  if gyro_mag_peak < 100 dps:  hp_cutoff = 30 Hz
+  elif gyro_mag_peak < 300 dps: hp_cutoff = 50 Hz
+  else:                          hp_cutoff = 80 Hz
+
+  emg_filtered = bandpass(emg_seg, hp_cutoff, 450, fs)
+
+Novel aspect: Adaptive filtering driven by synchronised IMU (external, causally prior)
+rather than blind EMG statistics. Existing adaptive EMG filters use EMG itself -- IMU
+provides motion context that precedes the artifact.
+
+---
+
+#### E4. IMU-Regression Artifact Cancellation (Per-Swing)
+**Priority: Medium -- medium effort, strong academic foundation**
+
+Problem:
+Sustained wrist acceleration physically displaces the electrode during a swing,
+generating low-frequency artifact linearly proportional to acceleration (electrode
+displacement ~ force ~ acc). The acc-artifact relationship is stable within a
+short window and can be estimated by regression.
+
+Algorithm:
+  # Per swing window (1300ms = short enough for linearity assumption)
+  artifact_proxy = lowpass(acc_dyn, cutoff=20Hz, fs=200)   # 200 Hz IMU
+  artifact_upsampled = resample(artifact_proxy, len(emg_seg))  # -> 2000 Hz
+  beta = lstsq(artifact_upsampled, emg_seg)[0]  # least squares coefficient
+  emg_clean = emg_seg - beta * artifact_upsampled
+  mdf = mnf_mdf(emg_clean, fs)
+
+Foundation: Clancy & Hogan (1994) adaptive regression, applied per-swing with
+IMU as the artifact proxy -- not previously done for racket sports.
+Beta itself is a quality metric: large |beta| = high electrode-motion coupling
+= poor contact or loose electrode.
+
+---
+
+#### E5. Phase-Gated MDF: Pre-Impact vs. Post-Impact Comparison
+**Priority: Medium -- medium effort, high novelty for racket sports**
+
+Problem:
+A tennis swing window spans multiple biomechanical phases with different artifact
+profiles. MDF from the full 1300ms window mixes clean pre-impact signal with
+artifact-contaminated impact and follow-through periods.
+
+Phases identified from IMU:
+  Backswing:       gyro rising, acc moderate     -- lower artifact
+  Forward swing:   gyro peak, acc rising          -- moderate artifact
+  Impact:          acc_dyn spikes (3-8g, 2-5ms)  -- highest artifact
+  Follow-through:  gyro decaying, acc moderate    -- moderate artifact
+
+Algorithm:
+  impact_ms = IMU-detected acc_dyn peak
+  pre_impact_emg = emg_window[impact_ms - 250 : impact_ms - 20]  # 230ms pre-impact
+  mdf_pre  = mnf_mdf(pre_impact_emg, fs)   # cleaner estimate
+  mdf_full = mnf_mdf(emg_window, fs)        # current estimate
+  artifact_flag = abs(mdf_pre - mdf_full) > 20 Hz  # divergence = impact artifact
+
+  Use mdf_pre as the primary fatigue metric when artifact_flag is True.
+
+Novel aspect: Phase-stratified MDF computation for racket sports. IMU provides
+phase boundaries for free. Extends Paper 1 contribution: IMU not only detects
+whether fatigue is real (Paper 1) but also guides WHICH part of the signal to
+use for spectral estimation (this work).
+
+---
+
+#### E6. Stroke-Type Stratified Fatigue Analysis
+**Priority: Low (high effort) -- but highest novelty, strong paper potential**
+
+Problem:
+Forehands, backhands, serves, and volleys recruit forearm flexors differently
+and have different motion artifact profiles. Mixing all stroke types in one
+fatigue trend adds unexplained variance. A serve (overhead, full shoulder
+rotation) and a forehand (wrist-dominated) should not be compared directly.
+
+Algorithm:
+  Per swing, extract IMU shape features:
+    dominant_axis = argmax([std(gx), std(gy), std(gz)])
+    gyro_peak     = max(gyro_mag)
+    acc_peak      = max(acc_dyn)
+    rise_time_ms  = time from gyro_onset to gyro_peak
+    shape_match   = DTW distance to stored stroke templates
+
+  stroke_type = classifier.predict(features)  # forehand/backhand/serve/volley
+
+  Separate fatigue trends per stroke type:
+    mdf_forehand = trend([s.mdf for s in swings if s.stroke == 'forehand'])
+    mdf_backhand = trend([s.mdf for s in swings if s.stroke == 'backhand'])
+
+Novel aspect: No published work stratifies EMG fatigue trends by stroke type
+using IMU-based classification in tennis. Removes a major source of inter-swing
+MDF variance that all prior tennis EMG studies ignore.
+
+Implementation note: Requires labelled stroke data to train the classifier.
+Could use the 626 swings from log0305 with manual annotation as training data.
+
+---
+
+#### Summary Table
+
+  Priority  | ID | Algorithm                          | Effort | Novelty | Paper target
+  ----------|----|-----------------------------------|--------|---------|-------------
+  Highest   | E1 | Ball-impact window masking         | Low    | Medium  | Paper 1 future work / Paper 2
+  High      | E2 | Noise floor tracker (continuous)   | Med    | Medium  | Paper 1 future work
+  Medium    | E3 | Adaptive HPF cutoff                | Low    | Medium  | Paper 2
+  Medium    | E4 | IMU regression artifact cancel     | Med    | High    | Paper 2
+  Medium    | E5 | Phase-gated MDF pre/post impact    | Med    | High    | Paper 2
+  Low/Novel | E6 | Stroke-type stratified fatigue     | High   | Highest | Separate paper
+
+All six algorithms require only data already collected (IMU + EMG CSV files).
+E1 can be prototyped in one afternoon on the existing log0305 dataset.
