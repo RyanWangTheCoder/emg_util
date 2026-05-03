@@ -25,6 +25,12 @@ swing_detection:
   pre_ms: 250
   post_ms: 450
   mdf_pad_ms: 300
+  # E1: Ball-impact window masking (Appendix E1 in paper.md)
+  # When acc_dyn peaks above this threshold within the swing window, mask
+  # +-impact_mask_half_ms around the impact before Welch PSD.
+  # Set to 0.0 to disable (backward-compatible default).
+  impact_mask_thr_g: 0.0    # g; 3.0 recommended for tennis; 0 = disabled
+  impact_mask_half_ms: 20   # ms; half-width of masked region around impact peak
 baseline:
   mode: swing
   warmup_skip_min: 10

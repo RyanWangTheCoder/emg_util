@@ -930,6 +930,8 @@ def per_swing_emg_features_stitched(
     pad_ms = float(cfg.get('swing_detection', {}).get('mdf_pad_ms', 300.0))
     zc_thr = float(cfg.get('features', {}).get('zc_thr', 0.01))
     ssc_thr = float(cfg.get('features', {}).get('ssc_thr', 0.01))
+    impact_thr_g = float(cfg.get('swing_detection', {}).get('impact_mask_thr_g', 0.0))
+    impact_half_ms = float(cfg.get('swing_detection', {}).get('impact_mask_half_ms', 20.0))
 
     # Pre-sort EMG by abs_us for fast binary-search indexing
     emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
@@ -1006,6 +1008,42 @@ def per_swing_emg_features_stitched(
                 imu_mean_acc_dyn = float(np.nanmean(seg_acc))
                 imu_peak_acc_dyn = float(np.nanmax(seg_acc))
 
+        # E1: Ball-impact window masking
+        # Find the peak acc_dyn in the PADDED IMU window. If it exceeds
+        # impact_thr_g, mask +-impact_half_ms around the peak from the
+        # preprocessed EMG before computing a second Welch PSD estimate.
+        # 'proc' is already computed on the full contiguous window above, so
+        # the filter is not affected by the mask — we only mask for the PSD.
+        impact_detected = False
+        impact_acc_dyn_g = np.nan
+        mdf_impact_masked = np.nan
+        if impact_thr_g > 0 and imu_ts_arr is not None and raw_pad.size >= 32:
+            t0p_ms = t0_ms - pad_ms
+            t1p_ms = t1_ms + pad_ms
+            ip0 = int(np.searchsorted(imu_ts_arr, t0p_ms, side='left'))
+            ip1 = int(np.searchsorted(imu_ts_arr, t1p_ms, side='right'))
+            seg_acc_pad = imu_acc_dyn[ip0:ip1]
+            seg_imu_ts_pad = imu_ts_arr[ip0:ip1]
+            if seg_acc_pad.size > 0:
+                pk_idx = int(np.argmax(seg_acc_pad))
+                pk_val = float(seg_acc_pad[pk_idx])
+                if pk_val >= impact_thr_g:
+                    impact_detected = True
+                    impact_acc_dyn_g = pk_val
+                    impact_t_ms = float(seg_imu_ts_pad[pk_idx])
+                    # Build per-sample timestamp array for the padded EMG window.
+                    # abs_us_arr[j0:j1] has exactly len(raw_pad) entries.
+                    abs_us_pad = abs_us_arr[j0:j1]
+                    impact_us = impact_t_ms * 1000.0
+                    half_us = impact_half_ms * 1000.0
+                    keep = ((abs_us_pad < impact_us - half_us) |
+                            (abs_us_pad > impact_us + half_us))
+                    # Apply mask to the already-preprocessed signal so the
+                    # bandpass/notch filter is unaffected (contiguous input).
+                    proc_masked = proc[keep[:len(proc)]]
+                    if proc_masked.size >= 32:
+                        _, mdf_impact_masked = core.mnf_mdf(proc_masked, fs)
+
         rows.append({
             'swing_id': int(r['swing_id']),
             't_start_ms': t0_ms,
@@ -1025,6 +1063,9 @@ def per_swing_emg_features_stitched(
             'ssc': ssc,
             'mnf': float(mnf) if mnf is not None else np.nan,
             'mdf': float(mdf) if mdf is not None else np.nan,
+            'impact_detected': impact_detected,
+            'impact_acc_dyn_g': impact_acc_dyn_g,
+            'mdf_impact_masked': float(mdf_impact_masked) if np.isfinite(mdf_impact_masked) else np.nan,
         })
 
     return pd.DataFrame(rows)
