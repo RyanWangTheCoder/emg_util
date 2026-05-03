@@ -1,0 +1,104 @@
+session:
+  log_dir: ''
+  emg_glob: emg_log_*.csv
+  imu_glob: imu_log_*.csv
+  vitals_path: vitals_log.csv
+  emg_fs_hz: 2000
+  imu_fs_fallback_hz: 200
+  use_physical_units: true
+  acc_fsr_default_g: 8      # matches current hardware: ±8g (was 4, then 2)
+  gyro_fsr_default_dps: 2000  # matches current hardware: ±2000 dps (was 1000, then 250)
+  out_dir: out
+  # Optional human-readable label for this tennis session (used in plot titles)
+  label: ''
+features:
+  mode: both
+  compute_windowed: false
+  zc_thr: 0.01
+  ssc_thr: 0.01
+swing_detection:
+  use_gyro: true
+  thr_gyro_dps: 300       # fixed gyro threshold in dps (replaces z-score)
+  thr_acc_g: 0.0          # optional acc gate in g (0=disabled, 1.5=strict)
+  min_gap_ms: 2000        # min ms between swings -- matches plotter debounce=2s
+  # legacy z-score params (no longer used): baseline_s, z_thr, min_consec
+  pre_ms: 250
+  post_ms: 450
+  mdf_pad_ms: 300
+baseline:
+  mode: swing
+  warmup_skip_min: 20     # PAPER EXPERIMENT: extended from 10 to 20
+  warmup_skip_swings: 0
+  baseline_swings: 20
+  baseline_window_sec: 60
+bout:
+  gap_thr_s: 10
+  gap_thr_long_s: 30
+  rest_dur_s: 4
+  imu_z_low: 1.2
+  imu_z_high: 2.5
+  emg_env_low_pct: 25
+  emg_env_high_pct: 60
+  merge_short_rest_s: 6
+  min_bout_swings: 3
+plots:
+  enable: true
+  full_duration: true
+  emg_max_points: 300000
+  do_fatigue: true
+  win_sec: 1.0
+  step_sec: 0.25
+  paged:
+    enable: false
+    page_sec: 5.0
+    page_start_sec: 0.0
+    page_count: 0
+    page_step_sec: null
+diagnostics:
+  swing_overlay:
+    enable: true
+    save_name: swing_overlay.png
+    plot_env_mean: true
+    two_y_axes: true
+  emg_imu_correlation:
+    enable: true
+    method: pearson
+    save_name: emg_imu_correlation.json
+  activity_overlay:
+    enable: true
+    save_name: imu_activity_overlay.png
+    plot_swings: true
+    plot_signal: intensity
+activity_gating:
+  enable: true
+  mode: work_period
+  intensity: hybrid
+  w_gyro: 0.8
+  w_acc: 0.2
+  acc_dyn_method: abs_mag_minus_1g
+  smooth_ms: 250
+  expand_ms: 400
+  p_high: 90
+  p_low: 75
+  min_active_ms: 1000
+  merge_gap_ms: 2000
+  skip_min: 0
+  filter_swings: false
+
+
+health:
+  enable: true
+  window_s: 1.0
+  bad_persist_s: 2.0
+  emg_zero_frac_bad: 0.9
+  emg_flat_std_bad: 1.0
+  emg_gap_bad_us: 200000
+  filter_swings_by_emg_bad: true
+
+env_gating:
+  enable: true
+  mode: percentile
+  percentile: 75
+  absolute_threshold: 1651
+  window_sec: 1.0
+  apply_to: mdf_only
