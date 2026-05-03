@@ -27,7 +27,7 @@ Muscle fatigue monitoring during sports is important for performance optimizatio
 3. **Forearm placement and mechanical artifact constraint** — wrist/forearm placement is practical for tennis, but it exposes the electrode interface and lead wires to rapid wrist rotation, grip changes, cable tugging, snap-connector micro-motion, and racket-impact vibration. These effects can create short-duration motion artifacts distinct from the slower sweat-driven settling process.
 4. **Result:** EMG-based fatigue metrics (e.g., MDF drop) are unreliable during portions of a session where electrode contact is unstable — and the system has no way to know this without an external reference.
 
-**Key insight:** The IMU (already on the sensor for swing detection) provides exactly that external reference. If the IMU says "consistent swing biomechanics" but EMG shows an anomalous signal, the problem is the electrode, not the muscle.
+**Key insight:** The IMU (already on the sensor for swing detection) provides exactly that external reference. If the IMU says "consistent swing biomechanics" but EMG shows an anomalous signal, the problem is the electrode, not the muscle. A further design constraint is **forearm-only deployment**: no sensors are mounted on the racket, avoiding added weight, battery burden, altered swing feel, and multi-device synchronization. Tennis-specific artifact handling therefore uses the existing forearm EMG+IMU signals; external audio/video are validation tools only.
 
 ---
 
@@ -218,7 +218,7 @@ The player maintained identical swing biomechanics for 63 minutes. Combined with
 #### 2.1 EMG Fatigue in Tennis
 Prior EMG fatigue studies in tennis have been predominantly laboratory-based. Rota et al. [PMID 24239164] measured upper limb EMG fatigue across a tennis-specific fatiguing protocol, finding muscle-group-specific fatigue patterns. Wang et al. [PMID 30729865] showed forearm flexor fatigue correlates with reduced serve ball speed. Girard et al. [PMID 20030784] documented spinal and peripheral neuromuscular adaptations during prolonged tennis play. These studies used controlled lab conditions with gel electrodes, skin abrasion, and MVC-normalised measurements — none addressed what happens when the same electrode configuration is worn on a real court without skin preparation.
 
-More recently, Rigozzi et al. [R16] used MyoWare sensors on the forearm extensor muscles of tennis players to compare stroke technique between experienced and recreational players, and Kramberger et al. [R17] deployed a wearable system for injury prevention monitoring in a single tennis player over a training season. Neither study addressed electrode settling dynamics or used IMU data to cross-validate EMG signal quality.
+More recently, Rigozzi et al. [R16] deployed MyoWare sensors on the forearm **extensor** muscles of tennis players to compare grip strength, muscle activity, and shock transmission between experienced and recreational players during forehand strokes. They found recreational players exhibited elevated extensor activity during follow-through, increasing lateral elbow tendinopathy risk. Notably, their placement targets extensor muscles (dorsal forearm, injury risk focus) whereas the present study places electrodes on the forearm **flexor** muscles (ventral forearm, fatigue focus) — the two placements are complementary but distinct. Neither Rigozzi et al. nor Kramberger et al. [R17], who deployed a wearable system for injury prevention monitoring in a single tennis player over a training season, addressed electrode settling dynamics or used IMU data to cross-validate EMG signal quality.
 
 **Gap:** No prior work characterises electrode settling duration for forearm snap electrodes in field tennis, or quantifies how settling contaminates spectral fatigue metrics.
 
@@ -228,7 +228,7 @@ SENIAM guidelines [Hermens et al. 2000, J. Electromyogr. Kinesiol.] are the stan
 **Gap:** No prior work quantifies the settling duration for sport snap-electrodes under field conditions, or examines the effect of settling on spectral fatigue metrics (MDF/MNF) specifically.
 
 #### 2.3 Motion Artifacts from Electrode and Cable Movement
-Wearable biopotential recordings are also affected by fast mechanical artifacts caused by electrode-skin motion, cable movement, mounting force changes, and impact vibration. Cömert and Hyttinen showed that controlled electrode motion produces measurable changes in skin-electrode impedance and surface potential [R21], and later developed a repeatable electrode-motion artifact assessment system demonstrating that applied force, electrode location, and electrode structure affect artifact magnitude [R23]. Related work showed that contact pressure and padding strongly affect motion artifact susceptibility in wearable electrodes [R22]. Recent wearable EMG work has proposed foam-based mechanical suppression of motion artifacts [R24], and broader EMG reviews identify motion artifact and interference as major obstacles for robust single-channel wearable EMG [R18, R25].
+Wearable biopotential recordings are also affected by fast mechanical artifacts caused by electrode-skin motion, cable movement, mounting force changes, and impact vibration. Cömert and Hyttinen [R21] showed that controlled electrode motion produces measurable changes in skin-electrode impedance and surface potential, and later developed a repeatable electrode-motion artifact assessment system demonstrating that applied force, electrode location, and electrode structure affect artifact magnitude [R23]. Cömert et al. [R22] showed that contact pressure and padding strongly affect motion artifact susceptibility in wearable electrodes. Takagi et al. [R24] proposed foam-based mechanical suppression of motion artifacts in wearable EMG, and Roland [R25] reviewed motion artifact suppression for insulated EMG in myoelectric prosthesis control; both identify motion artifact and interference as major obstacles for robust single-channel wearable EMG [R18].
 
 These findings are directly relevant to forearm tennis sEMG: rapid wrist rotation, cable strain, grip changes, and ball-racket impact can perturb snap electrodes and lead wires. Unlike slow sweat-driven settling, these artifacts occur on the time scale of individual swings or impacts and therefore require mechanical stabilisation plus IMU-based artifact context, not only a longer warmup skip.
 
@@ -270,14 +270,14 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - Warmup-skip sensitivity test: re-run analysis at 10, 15, 20 min to quantify baseline contamination
 - IMU quality cross-validation: compare `imu_peak_mag` Pearson r vs time; if flat (|r| < 0.1) while early MDF is depressed → settling artifact, not fatigue
 - Contact quality metric: `contact_quality(t) = RMS(t) / session_p90_rms`; thresholds: >0.25 reliable, <0.10 contact loss
-- Artifact-aware per-swing interpretation: gradual MDF/MNF changes over many swings with stable IMU intensity are treated as fatigue-related trends, while isolated EMG outliers or spikes coincident with large IMU acceleration/gyro shock peaks are treated as candidate mechanical artifacts. In this paper, this principle is used qualitatively for interpretation; Appendix E outlines future quantitative shock-gated and phase-gated algorithms.
+- Artifact-aware per-swing interpretation: gradual MDF/MNF changes over many swings with stable IMU intensity are attributed to fatigue; isolated EMG outliers coincident with large IMU acceleration peaks are treated as candidate mechanical artifacts (Appendix E).
 
 ### 5. Results (~500 words)
-- 4.1 Electrode settling: log0305 first-third MDF = 107.6 Hz vs. mid/late ~163 Hz; table of thirds; settling takes ≥17–20 min
-- 4.2 Warmup-skip sensitivity: table (10-min: −2.6%, 15-min: −26.2%, 20-min: +28.1%) — show that standard pipeline missed fatigue entirely
-- 4.3 IMU cross-validation: `imu_peak_mag` flat (r=+0.01, p=0.78) confirms settling is artifact; combined with 28.1% MDF drop → genuine physiological fatigue
-- 4.4 Contact quality metric over session (log0305): rises from settling to stable
-- 4.5 log0303 gap artifact: full-session 28.7% drop vs. seg1-only 4.9% drop
+- 5.1 Electrode settling: log0305 first-third MDF = 107.6 Hz vs. mid/late ~163 Hz; table of thirds; settling takes ≥17–20 min
+- 5.2 Warmup-skip sensitivity: table (10-min: −2.6%, 15-min: −26.2%, 20-min: +28.1%) — show that standard pipeline missed fatigue entirely
+- 5.3 IMU cross-validation: `imu_peak_mag` flat (r=+0.01, p=0.78) confirms settling is artifact; combined with 28.1% MDF drop → genuine physiological fatigue
+- 5.4 Contact quality metric over session (log0305): rises from settling to stable
+- 5.5 log0303 gap artifact: full-session 28.7% drop vs. seg1-only 4.9% drop
 
 ### 6. Discussion (~400 words)
 - **Electrode settling interpretation:**
@@ -286,7 +286,7 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - **IMU cross-validation:** The IMU is already on the device for swing detection — using it as a quality monitor adds zero hardware cost. The decision rule (IMU consistent + MDF depressed → settling; IMU consistent + MDF dropping → fatigue) turns a qualitative observation into a testable, automatable criterion.
 - Why log0305 showed genuine fatigue once corrected: 626 swings at ~10/min for 63 min represents significant cumulative forearm flexor load, consistent with 28.1% MDF drop even without perceptible biomechanical degradation.
 - **Motion artifact landscape in tennis sEMG (~100 words):**
-  > Wrist/forearm EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources include slow electrode settling, skin stretch, cable or snap-connector tugging, triboelectric/electromagnetic pickup in moving leads, powerline interference, rest-period baseline noise, and ball-impact vibration. The current pipeline mitigates several of these: the 50 Hz high-pass filter reduces low-frequency skin-stretch artifacts; the on-board MyoWare amplifier keeps the unamplified lead path short, reducing but not eliminating cable-sway artifact [R18, R19]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating excludes rest-period windows. The least-resolved artifact source is ball-impact impulsive vibration, which can contaminate MDF/MNF because it falls within or near the EMG analysis band. The IMU acceleration spike at ball contact provides a synchronised trigger that could gate or mask the impact sample window before spectral estimation — identified as the highest-priority future work item (see Appendix E). REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R20] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
+  > Wrist/forearm EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources include slow electrode settling, skin stretch, cable or snap-connector tugging, triboelectric/electromagnetic pickup in moving leads, powerline interference, rest-period baseline noise, and ball-impact vibration. The current pipeline mitigates several of these: the 50 Hz high-pass filter reduces low-frequency skin-stretch artifacts; placing the MyoWare amplifier close to the electrodes keeps the high-impedance unamplified path short, reducing but not eliminating cable-sway artifact [R18, R19]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating excludes rest-period windows. The least-resolved artifact source is ball-impact impulsive vibration, which can contaminate MDF/MNF because it falls within or near the EMG analysis band. A forearm IMU jerk or acceleration event near the expected contact phase provides a candidate impact-risk trigger, but not confirmed ball-contact timing. Future validation should use low-burden audio or video labels — for example, IMU-gated acoustic onset detection from a phone microphone — rather than adding deployed racket-mounted hardware that changes swing feel and introduces battery and synchronization burden. REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R20] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
 - Limitations: single player, two sessions, no RPE or MVC ground truth, settling duration likely varies with player sweat rate, skin condition, ambient temperature
 - Future work: multi-player study, adaptive warmup skip based on contact quality metric, IMU-guided motion artifact algorithms (see Appendix E), RPE integration, real-time settling detection in Android app
 
@@ -309,6 +309,7 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 | 5 | Contact quality (`RMS/p90_rms`) over session, both sessions | `out0303_v2`, `out0305_w20` | ⏳ `paper_analysis.py` |
 | 6 | log0303 gap artifact: MDF over full session with reconnection gap annotated | `out0303_v2/swing_features.csv` | ⏳ `paper_analysis.py` |
 | 7 | IMU-EMG diagnostic matrix (2×2 scatter) | Both sessions | ⏳ `paper_analysis.py` |
+| 8 | Full-window MDF vs. pre-impact MDF comparison | log0305 + future impact-risk/pre-impact analysis | 🔮 Future / Paper 2 |
 
 Draft figures generated by `paper_figures.py` are in `paper_figures/` but use wrong output dirs (`out0303`/`out0305`). Re-generate from `paper_analysis.py` once complete.
 
@@ -329,11 +330,21 @@ Draft figures generated by `paper_figures.py` are in `paper_figures/` but use wr
 
 | Fact | Value | Source |
 |------|-------|--------|
-| Motion artifact correlation | r = 0.006 | log0305 analysis (RESEARCH_REPORT.md) |
+| Motion artifact correlation | r = 0.006 — **verify variables before citing** (see RESEARCH_REPORT.md; likely EMG envelope vs IMU acceleration, but confirm exact columns) | log0305 analysis (RESEARCH_REPORT.md) |
 | Electrode settling duration | **≥17–20 min** | log0305 warmup-skip sensitivity |
 | Baseline MDF at 10-min skip | 112–137 Hz (contaminated) | `out0305`, `out0305_w15` |
 | Baseline MDF at 20-min skip | 199.2 Hz (stable) | `out0305_w20` |
 | Stable post-settling MDF | ~166 Hz | `out0305_v2` baseline.json |
+| 20-min warmup baseline MDF | 199.2 Hz | `out0305_w20` baseline.json |
+
+> **166 Hz vs 199 Hz — important distinction for paper:**
+> The 166 Hz figure comes from `out0305_v2`, where the RMS-based baseline selector
+> (10-min skip + RMS filter) happened to pick post-settling swings. The 199 Hz figure
+> comes from `out0305_w20`, where the 20-min fixed skip guarantees a post-settling window.
+> Both show that early 10–15 min baselines are contaminated, but their difference (33 Hz)
+> shows that baseline selection remains sensitive to the chosen criterion even after settling.
+> In paper text, use 166 Hz as the "stable settled MDF" reference and 199 Hz as the
+> "post-warmup-skip baseline." Explain the difference in Methods or a footnote.
 | Early session MDF (settling) | 107.6 ± 36.3 Hz | log0305 early third |
 | False apparent MDF drop (settling) | **+42.5%** (swing_mdf_drop_pct) | log0305 early third |
 | **MDF drop with correct warmup skip** | **+28.1%** (20-min skip) | `out0305_w20/fatigue_summary.csv` |
@@ -371,6 +382,7 @@ To keep the paper honest:
 - We are **not** claiming generalizability beyond a single player
 - We are **not** claiming 17–20 min is a universal settling time — it's observed in one session (log0305); other sessions/players/electrodes may differ
 - We are **not** claiming to have fully solved cable friction, snap-connector motion, or racket-impact vibration artifacts — current evidence supports IMU-based interpretation and future artifact-gating algorithms, not complete artifact elimination
+- We are **not** claiming that forearm IMU acceleration or jerk peaks are confirmed ball-contact timestamps; they are candidate impact-risk events requiring audio/video or controlled-protocol validation
 - log0303 does **not** provide a valid within-session fatigue result (gap artifact)
 - The 28.1% MDF drop in log0305 (20-min skip) is the only clean fatigue result; we have one session supporting it
 
@@ -395,14 +407,15 @@ These limitations should be stated explicitly in the paper.
 3. [ ] Complete `paper_analysis.py` figure generation code (uses `out0303_v2`, `out0305_v2`, `out0305_w20`)
 4. [ ] Generate warmup-skip sensitivity bar chart (key Figure 4)
 5. [ ] Generate contact quality metric plot (Figure 5)
-6. [ ] Write Section 3.1 Hardware draft (~200 words): components + RAW wiring fix + ADC DMA timing + FSR one-liner
-7. [ ] Write Section 3.2 Software draft (~150 words): btCentral.py → CSV → abs_us stitching → yaml_runner
-8. [ ] Write Section 3.3 Swing Detection draft (~150 words): 300 dps fixed threshold rationale, 2000 ms debounce rationale
-9. [ ] Write Section 2 Related Work draft (~350 words) — template already in Paper Structure above; need to confirm PMIDs and fill in exact journal names
-10. [ ] Write Introduction draft (~300 words)
-11. [ ] Write Methods draft (~400 words)
-12. [ ] Write Results draft (~500 words)
-13. [ ] Write Discussion + Conclusion (~550 words)
+6. [ ] Implement pre-impact MDF extraction and compare variance/trend against full-window MDF on log0305 (future Figure 8 / Paper 2)
+7. [ ] Write Section 3.1 Hardware draft (~200 words): components + RAW wiring fix + ADC DMA timing + FSR one-liner
+8. [ ] Write Section 3.2 Software draft (~150 words): btCentral.py → CSV → abs_us stitching → yaml_runner
+9. [ ] Write Section 3.3 Swing Detection draft (~150 words): 300 dps fixed threshold rationale, 2000 ms debounce rationale
+10. [ ] Write Section 2 Related Work draft (~350 words) — template already in Paper Structure above; need to confirm PMIDs and fill in exact journal names
+11. [ ] Write Introduction draft (~300 words)
+12. [ ] Write Methods draft (~400 words)
+13. [ ] Write Results draft (~500 words)
+14. [ ] Write Discussion + Conclusion (~550 words)
 
 ---
 
@@ -413,7 +426,7 @@ These limitations should be stated explicitly in the paper.
 - [R2] Wang LH, Lo KC, Su FC. "Skill level and forearm muscle fatigue effects on ball speed in tennis serve." *Sports Biomechanics.* 2019;18(5):566–579. PMID: 30729865
 - [R3] Girard O, Racinais S, Micallef JP, Millet GP. "Spinal modulations accompany peripheral fatigue during prolonged tennis playing." *Scand J Med Sci Sports.* 2011;21(3):455–464. PMID: 20030784
 - [R4] Fabre JB, Martin V, Gondin J, Cottin F, Grelot L. "Effect of playing surface properties on neuromuscular fatigue in tennis." *Med Sci Sports Exerc.* 2012;44(1):75–83. PMID: 22653323
-- [R16] Rigozzi CJ, Vio GA, Poronnik P. "Muscle activity, and shock transmission between the forehand stroke technique of experienced and recreational tennis players using a novel wearable device." *Sensors.* 2023;23(11):5146. DOI: 10.3390/s23115146
+- [R16] Rigozzi CJ, Vio GA, Poronnik P. "Comparison of grip strength, forearm muscle activity, and shock transmission between the forehand stroke technique of experienced and recreational tennis players using a novel wearable device." *Sensors.* 2023;23(11):5146. PMID: 37299874. DOI: 10.3390/s23115146
 - [R17] Kramberger I, Filipčič A, Germič A, Kos M. "Real-life application of a wearable device towards injury prevention in tennis: A single-case study." *Sensors.* 2022;22(12):4436. DOI: 10.3390/s22124436
 
 ### Electrode-Skin Impedance and Signal Quality
@@ -442,10 +455,15 @@ These limitations should be stated explicitly in the paper.
 - [R24] Takagi T, Tomita N, Sato S, Yamamoto M, Takamatsu S, Itoh T. "Wearable EMG measurement device using polyurethane foam for motion artifact suppression." *Sensors.* 2024;24(10):2985. PMID: 38793840. DOI: 10.3390/s24102985
 - [R25] Roland T. "Motion artifact suppression for insulated EMG to control myoelectric prostheses." *Sensors.* 2020;20(4):1031. PMID: 32075031. DOI: 10.3390/s20041031
 
+### Acoustic Event Detection / Sports Audio Validation
+- [R26] Bello JP, Daudet L, Abdallah S, Duxbury C, Davies M, Sandler MB. "A tutorial on onset detection in music signals." *IEEE Signal Process Mag.* 2005;22(5):44–54. DOI: 10.1109/MSP.2005.1511798 (**foundational onset detection reference — spectral flux, onset strength**)
+- [R27] Dixon S. "Onset detection revisited." *Proc Int Conf Digital Audio Effects (DAFx).* 2006. (**spectral flux onset feature — standard citation for spectral-flux-based detection**)
+- [R28] Ghosh A, Rüegg M, Tröster G. "Detecting racket sports events using wearable sensors." *Proc ACM ISWC.* 2015. *(verify year/venue — search "racket sport event detection wearable audio IMU")* (**wearable-based racket impact detection; audio + IMU fusion for squash/tennis**)
+
 ### Vendor Documentation
 - [R20] SparkFun Electronics. *MyoWare 2.0 Muscle Sensor Advanced Guide.* 2023. https://cdn.sparkfun.com/assets/learn_tutorials/1/9/5/6/MyoWare_v2_AdvancedGuide-Updated.pdf
 
-> **Note:** PMIDs confirmed: R1-R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608), R21 (25404355), R22 (23565970), R23 (25500614), R24 (38793840), R25 (32075031). Still to verify: R13 (conference proceedings), R15 PMID, R16-R19 PMIDs.
+> **Note:** PMIDs confirmed: R1-R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608), R16 (37299874), R21 (25404355), R22 (23565970), R23 (25500614), R24 (38793840), R25 (32075031). Still to verify: R13 (conference proceedings), R15 PMID, R17-R19 PMIDs, R26 DOI, R27 proceedings year, R28 venue/year.
 
 ---
 
@@ -777,183 +795,456 @@ If pre-session multimeter/LCR data are collected, update Limitation A2 from "No 
 
 ### E. Novel IMU-Guided Motion Artifact Algorithms (Tennis-Specific)
 
-This section documents a staged algorithm framework for mitigating tennis-specific EMG artifacts using the synchronised IMU data already captured. The current paper implements the first stage: settling-aware baseline selection, contact-quality interpretation, and IMU-based swing-consistency validation. The remaining algorithms are proposed extensions that use the same EMG+IMU dataset to handle fast mechanical artifacts from cable motion, electrode micro-motion, and racket-impact vibration. They should be framed as future work unless implemented and validated on additional logs.
+For Paper 1, only the settling-aware baseline selection, contact-quality interpretation, and IMU swing-consistency validation are claimed as implemented. The algorithms in E1–E8 are treated as algorithmic extensions or validation roadmap items unless explicitly marked implemented.
+
+#### Design Principle: Forearm-Only Deployment
+
+The deployed system is intentionally a single body-worn unit (EMG + IMU on forearm). No
+hardware is added to the racket. Added racket weight changes the swing dynamics and balance
+point in ways competitive players notice acutely (even 2-3g at the handle); a wireless racket
+sensor also requires a second battery, second BLE stack, and clock synchronisation that
+reintroduces the timestamp alignment problem we already solved. External sensors (video,
+microphone, instrumented racket) are validation tools only -- they are not required in the
+deployed system.
+
+The algorithms below are ranked by readiness for implementation. All use only the data
+already captured (EMG RAW + ENV at 2000 Hz, IMU acc + gyro at 200 Hz, existing log0303 and
+log0305). None require new hardware to prototype; some are enhanced by optional audio/video
+validation.
 
 ---
 
-#### E1. Ball-Impact Window Masking
-**Priority: Highest — low effort, directly addresses the one unmitigated artifact**
+#### E1. Forearm-Only Impact-Risk Gating (revised)
 
-Problem:
-Ball-racket contact generates a 2-5ms impulsive vibration (200-600 Hz) that propagates
-up the arm into the electrode. This falls within the EMG analysis band and biases MDF
-upward — opposite of fatigue. The IMU acc_mag spikes sharply at ball contact, providing
-a precise synchronised trigger.
+**Previously called "Ball-Impact Window Masking". Renamed and reframed.**
 
-Algorithm:
-  acc_dyn = |acc_mag - 1g|
-  impact_idx = argmax(acc_dyn within swing window)
-  if acc_dyn[impact_idx] > IMPACT_THR_G (e.g. 3.0g):
-      mask +-20ms around impact_idx before Welch PSD
-      emg_clean = emg_seg[mask]
-  else:
-      emg_clean = emg_seg  # no significant impact detected
+**The core idea:**
+Ball-racket contact is a brief mechanical impulse (~3-5ms). Vibration travels from the racket
+through the grip into the forearm, appearing in both the IMU (as a jerk event) and the EMG
+(as a hypothesised broadband transient that may occupy part of the EMG analysis band). The actual artifact frequency range should be estimated empirically by comparing EMG PSD near high-jerk events against pre-impact windows; 200–500 Hz is a working hypothesis, not an assumed correction band. This artifact is:
+  - short (ms scale), not gradual (seconds scale like fatigue)
+  - time-locked to ball contact, not to voluntary muscle activation
+  - potentially inside the 50-450 Hz EMG analysis band
+  - not removable by standard bandpass filtering
+  - unique to racket sports -- not addressed in general EMG artifact literature [Boyer 2023]
 
-Implementation: ~15 lines in emg_util.py. Add to compute_swing_emg_features().
-Config key: swing_detection.impact_mask_thr_g (default 0 = disabled).
+The IMU provides a candidate trigger; the EMG provides a second confirmation channel.
 
-Novel aspect: Transient impulsive artifact from ball contact has not been addressed
-in the EMG artifact literature. IMU provides an independent, causally prior trigger
-(impact causes artifact, so IMU detects it first).
+**Why "impact-risk" not "impact detection":**
+The forearm sensor cannot confirm ball contact with certainty. The IMU jerk peak could be
+arm deceleration rather than transmitted impact shock. Therefore the output is a continuous
+RISK SCORE, not a binary detection. High-risk windows are flagged; the MDF from those windows
+is treated with lower confidence or replaced by the pre-impact phase estimate (E5).
+
+**Composite impact-risk score (all from existing hardware):**
+
+  impact_risk_score =
+      w1 * z(imu_jerk_peak) * in_contact_phase   # IMU: transient mechanical event,
+                                                  #      only scored in plausible window
+    + w2 * z(emg_hf_energy)                      # EMG RAW: candidate high-freq burst
+                                                  #          (band TBD by Experiment 10;
+                                                  #          200-500 Hz is working hypothesis)
+    + w3 * z(emg_transient_score)                 # EMG: brief spike unlike voluntary
+                                                  #      activation (fast rise, <10ms)
+    + w4 * z(env_postimpact_change_score)         # ENV: post-impact envelope dip or
+                                                  #      perturbation (50-150ms post impact)
+    + w5 * z(audio_onset_score)                   # Audio (optional, if available):
+                                                  #      IMU-gated acoustic onset
+
+  If audio not collected: w5 = 0. Score degrades gracefully to IMU+EMG subset.
+
+**Phase gate -- the most important constraint:**
+Ball contact is expected to occur near a consistent phase of the swing relative to the
+gyro peak, but the exact timing offset should be validated with video or audio labels.
+The working hypothesis -- based on the general biomechanics of forehand stroke execution
+where peak wrist rotation precedes ball contact -- is a phase window of approximately
+30-200ms after the gyro peak. Events outside this window are more likely arm deceleration,
+follow-through, or non-contact swings:
+
+  in_contact_phase = 1 if (t_gyro_peak + 30ms) < t_event < (t_gyro_peak + 200ms) else 0
+
+The window bounds [30ms, 200ms] are working estimates pending video/audio validation
+(see E8 Level 3). They should not be cited as established values without that confirmation.
+
+This constraint eliminates the majority of false positives from arm deceleration
+(which peaks at t > 200ms post gyro-peak) and from backswing events (t < 30ms pre-contact).
+
+**Mechanical transmission delay:**
+The vibration impulse travels from the racket frame through the grip, hand, wrist, soft
+tissue, and forearm sensor mount. The delay from true ball contact to the forearm IMU response
+is likely on the order of tens of milliseconds, but should be measured empirically rather
+than assumed. If audio/video validation confirms a tight delay distribution, the forearm-only
+detector is credible.
+
+**Implementation status:**
+  - E1v1 (sample masking) IMPLEMENTED 2026-05-03: config key impact_mask_thr_g,
+    output columns impact_detected / impact_acc_dyn_g / mdf_impact_masked.
+  - Result: mean MDF shift = 0.12 Hz (near zero). Sample-level masking of +-20ms
+    removes only ~3% of the 1300ms window; Welch PSD is dominated by its segment
+    average -- per-sample removal is insufficient.
+  - E1v2 (pre-impact phase MDF, Welch-segment rejection): PLANNED -- see E5.
 
 ---
+
 
 #### E2. Between-Swing Noise Floor Tracker (Continuous Contact Monitor)
-**Priority: High — extends the contact_quality metric from static to continuous**
 
 Problem:
-contact_quality(t) = RMS(t) / session_p90_rms is currently computed per swing.
-But contact quality changes continuously throughout the session:
-- Rising early (settling) -- low impedance not yet achieved
-- Stable mid-session -- good contact
-- Rising again late (sweat + movement loosening electrode) -- degradation
+contact_quality(t) = RMS(t) / session_p90_rms is computed per swing but contact quality
+changes continuously: rising during settling (early session), stable mid-session, potentially
+rising again late-session as sweat loosens the electrode.
 
 Algorithm:
-  For each pair of consecutive swings i, i+1:
-      find rest windows where gyro_mag < REST_THR_DPS (e.g. 50 dps) for > 500ms
+  For each gap between consecutive swings:
+      find rest windows where gyro_mag < 50 dps for > 500ms (IMU-defined quiet periods)
       rest_rms[i] = rms(preprocess_emg(emg_in_rest_window))
 
   noise_floor_trend = smooth(rest_rms, window=5_swings)
-  contact_quality_continuous = 1 / noise_floor_trend  (normalised to session median)
 
-  If noise_floor_trend rises late-session (after stable mid-session plateau):
+  If noise_floor_trend rises monotonically late-session after a stable plateau:
       flag electrode_degrading = True
-      warn: late-session results may be artifact-contaminated
+      warn: late-session MDF results less reliable
 
-Novel aspect: Uses IMU to identify rest windows precisely (independent of EMG),
-then uses those windows as in-situ contact probes -- continuous quality signal
-throughout the session, not just at baseline selection.
+Novel aspect: IMU defines rest windows independently of EMG (no chicken-and-egg). The rest
+window RMS is a continuous in-situ impedance proxy throughout the session, not just at
+baseline selection time.
 
 ---
 
 #### E3. IMU-Adaptive High-Pass Filter Cutoff
-**Priority: Medium -- low effort, moderate novelty**
 
 Problem:
-Fixed 50 Hz HPF cutoff is a compromise. Optimal cutoff depends on motion intensity:
-during rest, a lower cutoff (30 Hz) preserves more useful EMG signal; during high-speed
-swings, a higher cutoff (80 Hz) better rejects motion artifact.
+Fixed 50 Hz HPF is a compromise. During rest (gyro < 50 dps) a 30 Hz cutoff preserves
+more EMG signal; during high-speed swings (gyro > 300 dps) an 80 Hz cutoff rejects more
+motion artifact.
 
 Algorithm:
-  gyro_mag = sqrt(gx^2 + gy^2 + gz^2)  # computed per swing window
-  if gyro_mag_peak < 100 dps:  hp_cutoff = 30 Hz
-  elif gyro_mag_peak < 300 dps: hp_cutoff = 50 Hz
-  else:                          hp_cutoff = 80 Hz
+  gyro_mag_peak = max gyro_mag in the swing window
+  hp_cutoff = 30 Hz  if gyro_mag_peak < 100 dps
+            = 50 Hz  if gyro_mag_peak < 300 dps
+            = 80 Hz  otherwise
 
-  emg_filtered = bandpass(emg_seg, hp_cutoff, 450, fs)
-
-Novel aspect: Adaptive filtering driven by synchronised IMU (external, causally prior)
-rather than blind EMG statistics. Existing adaptive EMG filters use EMG itself -- IMU
-provides motion context that precedes the artifact.
+Novel aspect: Adaptive filtering driven by synchronised IMU (external, causally prior to
+artifact) rather than blind EMG statistics. Motion causes artifact, so IMU is known first.
 
 ---
 
 #### E4. IMU-Regression Artifact Cancellation (Per-Swing)
-**Priority: Medium -- medium effort, strong academic foundation**
 
 Problem:
-Sustained wrist acceleration physically displaces the electrode during a swing,
-generating low-frequency artifact linearly proportional to acceleration (electrode
-displacement ~ force ~ acc). The acc-artifact relationship is stable within a
-short window and can be estimated by regression.
+Sustained wrist acceleration physically displaces the electrode, generating low-frequency
+artifact linearly proportional to acceleration (electrode displacement ~ force ~ acc).
+This is the Clancy & Hogan (1994) mechanism, applied per-swing.
 
 Algorithm:
-  # Per swing window (1300ms = short enough for linearity assumption)
   artifact_proxy = lowpass(acc_dyn, cutoff=20Hz, fs=200)   # 200 Hz IMU
-  artifact_upsampled = resample(artifact_proxy, len(emg_seg))  # -> 2000 Hz
-  beta = lstsq(artifact_upsampled, emg_seg)[0]  # least squares coefficient
+  artifact_upsampled = resample(artifact_proxy, len(emg_seg))  # upsample to 2000 Hz
+  beta = lstsq(artifact_upsampled, emg_seg)[0]
   emg_clean = emg_seg - beta * artifact_upsampled
-  mdf = mnf_mdf(emg_clean, fs)
+  mdf_regression = mnf_mdf(emg_clean, fs)
 
-Foundation: Clancy & Hogan (1994) adaptive regression, applied per-swing with
-IMU as the artifact proxy -- not previously done for racket sports.
-Beta itself is a quality metric: large |beta| = high electrode-motion coupling
-= poor contact or loose electrode.
+  beta is also a quality metric: large |beta| = high electrode-motion coupling =
+  poor contact or loose electrode.
+
+Foundation: Clancy & Hogan 1994 adaptive regression, applied per-swing with IMU as
+the artifact proxy -- not previously done for racket sports.
 
 ---
 
-#### E5. Phase-Gated MDF: Pre-Impact vs. Post-Impact Comparison
-**Priority: Medium -- medium effort, high novelty for racket sports**
+#### E5. Pre-Impact Phase MDF (Welch-Segment Rejection)
 
 Problem:
-A tennis swing window spans multiple biomechanical phases with different artifact
-profiles. MDF from the full 1300ms window mixes clean pre-impact signal with
-artifact-contaminated impact and follow-through periods.
+E1v1 masks individual samples (~3% of window) -- too small to affect Welch average.
+The Welch PSD uses 1024-sample (512ms) segments. Impact contamination affects entire
+segments, not individual samples.
 
-Phases identified from IMU:
-  Backswing:       gyro rising, acc moderate     -- lower artifact
-  Forward swing:   gyro peak, acc rising          -- moderate artifact
-  Impact:          acc_dyn spikes (3-8g, 2-5ms)  -- highest artifact
-  Follow-through:  gyro decaying, acc moderate    -- moderate artifact
+Two complementary approaches:
 
-Algorithm:
-  impact_ms = IMU-detected acc_dyn peak
-  pre_impact_emg = emg_window[impact_ms - 250 : impact_ms - 20]  # 230ms pre-impact
-  mdf_pre  = mnf_mdf(pre_impact_emg, fs)   # cleaner estimate
-  mdf_full = mnf_mdf(emg_window, fs)        # current estimate
-  artifact_flag = abs(mdf_pre - mdf_full) > 20 Hz  # divergence = impact artifact
+Approach A -- Pre-impact phase MDF (preferred):
+  impact_t_ms = IMU acc_dyn peak timestamp (or audio-confirmed timestamp)
+  pre_impact_emg = emg_window[impact_t_ms - 600ms : impact_t_ms - 20ms]  # 580ms clean
+  mdf_pre = mnf_mdf(pre_impact_emg, fs, nperseg=512)  # 3 Welch segments from clean signal
 
-  Use mdf_pre as the primary fatigue metric when artifact_flag is True.
+  Physiological basis: pre-impact window is the active muscle loading phase -- muscle
+  contracting toward ball contact. Highest fatigue signal, lowest artifact.
+  Post-impact contains vibration ringdown and follow-through; both contaminate MDF.
 
-Novel aspect: Phase-stratified MDF computation for racket sports. IMU provides
-phase boundaries for free. Extends Paper 1 contribution: IMU not only detects
-whether fatigue is real (Paper 1) but also guides WHICH part of the signal to
-use for spectral estimation (this work).
+Approach B -- Welch-segment rejection (fallback):
+  For each Welch segment [seg_start, seg_end] in the 1300ms window:
+      if segment overlaps [impact_t_ms - 40ms, impact_t_ms + 40ms]: exclude
+  Compute MDF from remaining clean segments (typically 3-4 of 5 total).
+  Use when pre-impact window is too short (< 300ms) due to early impact timing.
+
+Approach A preferred: physiologically correct, simple to describe, 580ms gives 3 Welch
+segments at nperseg=512 -- adequate spectral resolution (fs/nperseg = 3.9 Hz per bin).
 
 ---
 
 #### E6. Stroke-Type Stratified Fatigue Analysis
-**Priority: Low (high effort) -- but highest novelty, strong paper potential**
 
 Problem:
-Forehands, backhands, serves, and volleys recruit forearm flexors differently
-and have different motion artifact profiles. Mixing all stroke types in one
-fatigue trend adds unexplained variance. A serve (overhead, full shoulder
-rotation) and a forehand (wrist-dominated) should not be compared directly.
+Forehands, backhands, serves, and volleys recruit forearm flexors differently and have
+different motion artifact profiles. Mixing stroke types in one fatigue trend adds
+unexplained variance. A serve and a forehand should not be pooled in the same MDF trend.
 
 Algorithm:
-  Per swing, extract IMU shape features:
+  Per swing, extract IMU trajectory features:
     dominant_axis = argmax([std(gx), std(gy), std(gz)])
     gyro_peak     = max(gyro_mag)
     acc_peak      = max(acc_dyn)
     rise_time_ms  = time from gyro_onset to gyro_peak
-    shape_match   = DTW distance to stored stroke templates
+    shape_score   = DTW distance to stored stroke-type templates
 
-  stroke_type = classifier.predict(features)  # forehand/backhand/serve/volley
+  stroke_type = classifier.predict(features)  # forehand / backhand / serve / volley
+  mdf_forehand_trend = [s.mdf for s in swings if s.stroke_type == 'forehand']
 
-  Separate fatigue trends per stroke type:
-    mdf_forehand = trend([s.mdf for s in swings if s.stroke == 'forehand'])
-    mdf_backhand = trend([s.mdf for s in swings if s.stroke == 'backhand'])
-
-Novel aspect: No published work stratifies EMG fatigue trends by stroke type
-using IMU-based classification in tennis. Removes a major source of inter-swing
-MDF variance that all prior tennis EMG studies ignore.
-
-Implementation note: Requires labelled stroke data to train the classifier.
-Could use the 626 swings from log0305 with manual annotation as training data.
+Novel aspect: No published work stratifies EMG fatigue by stroke type using IMU
+classification in tennis. 823 swings (log0303 + log0305) are available;
+~100 swings with video annotation provide a training set.
 
 ---
 
-#### Summary Table
+#### E7. IMU-Gated Acoustic Impact Labeling (Validation Tool)
 
-  Priority  | ID | Algorithm                          | Effort | Novelty | Paper target
-  ----------|----|-----------------------------------|--------|---------|-------------
-  Highest   | E1 | Ball-impact window masking         | Low    | Medium  | Paper 1 future work / Paper 2
-  High      | E2 | Noise floor tracker (continuous)   | Med    | Medium  | Paper 1 future work
-  Medium    | E3 | Adaptive HPF cutoff                | Low    | Medium  | Paper 2
-  Medium    | E4 | IMU regression artifact cancel     | Med    | High    | Paper 2
-  Medium    | E5 | Phase-gated MDF pre/post impact    | Med    | High    | Paper 2
-  Low/Novel | E6 | Stroke-type stratified fatigue     | High   | Highest | Separate paper
+Purpose: This is a VALIDATION TOOL, not a deployed algorithm. Audio is never part of the
+deployed wrist sensor. It provides a third independent modality for validating whether the
+forearm IMU jerk peak reliably corresponds to ball contact.
 
-All six algorithms require only data already collected (IMU + EMG CSV files).
-E1 can be prototyped in one afternoon on the existing log0305 dataset.
+Three-modality independence:
+  EMG:   muscle + electrode signal -- fails when electrode contact is poor
+  IMU:   body motion / transmitted shock -- fails when impact is soft or arm decelerates
+  Audio: external acoustic impact cue -- fails when environment is noisy
+
+Each fails independently. When all three agree: high confidence. Two agree: moderate.
+One fires alone: flag uncertain.
+
+Why audio is a "noisy weak reference" not ground truth:
+A tennis court audio stream contains ball-racket contact, ball bounce, shoe squeak,
+player yelling/grunting, other players' hits, racket scrape, wind, echo, HVAC.
+Raw amplitude is useless as a ground truth. Impact events must be discriminated
+by their physical signature.
+
+Ball-racket contact acoustic signature (physically discriminating):
+  Duration:    3-5ms (hard court), 5-8ms (clay) -- much shorter than any other event
+  Rise time:   < 1ms -- near-instantaneous (true impulse)
+  Decay:       fast exponential ~20-50ms ringdown
+  Spectrum:    string resonance 200-600 Hz + harmonics to ~2 kHz; broadband > 1 kHz
+
+Player grunting (different in every dimension):
+  Duration:    100-500ms
+  Rise time:   20-100ms (vocal onset is gradual)
+  Spectrum:    fundamental 100-300Hz (male) + harmonics; concentrated below 2 kHz
+  NOT impulsive -- separable by onset sharpness and duration
+
+Discriminating audio features:
+  audio_rms_5ms       = energy in 5ms window (brief for impact, sustained for voice)
+  onset_strength      = d/dt(log(rms)) -- high for impact, low for sustained sounds
+  spectral_centroid   = high for impact (1-5 kHz dominant), lower for voice
+  spectral_flux       = sharp spectral change at impact onset
+  band_energy_2k_8k   = energy in 2-8 kHz (impact-rich, voice-poor)
+  band_energy_100_800 = energy in 100-800 Hz (voice-rich, use as contrast)
+
+  impact_audio_score =
+      z(onset_strength)
+    + z(band_energy_2k_8k)
+    + z(spectral_flux)
+    - z(band_energy_100_800)
+
+IMU phase gating makes audio reliable on a noisy court:
+  1. Detect swing from forearm gyro (300 dps -- already done)
+  2. Define contact_search_window = [t_gyro_peak - 100ms, t_gyro_peak + 250ms]
+  3. Search audio only within contact_search_window
+  4. Accept onset if impact_audio_score > threshold AND peak_width < 10ms
+
+  This rejects:
+    Another court's hit:   audio peak present but NO forearm swing -> rejected by gating
+    Player yelling:        energy present but low spectral centroid / broad duration
+    Ball bounce:           occurs outside swing window (before or after)
+    Echo:                  arrives > 50ms after first onset -> take first onset only
+
+Scientific payoff -- the delay distribution:
+  delay = audio_impact_time - imu_jerk_peak_time  (measured across N accepted swings)
+
+  If delay is tight: mean delay on the order of tens of milliseconds, std < 20ms
+    -> forearm jerk tracks ball contact (not arm deceleration)
+    -> mean delay estimates mechanical vibration transmission time through the kinetic chain
+       (racket -> grip -> hand -> forearm; rough intuition: soft tissue
+        transmission is slow relative to rigid materials, so a few cm of tissue
+        path could account for ~10-30ms -- this should be measured, not assumed)
+    -> forearm-only impact-risk gating is physically credible
+    -> this delay is not yet measured in the tennis wearable literature
+
+  If delay is wide or random:
+    -> forearm jerk cannot reliably locate ball contact at the chosen threshold
+    -> need to raise jerk threshold or use composite score
+    -> either result is publishable and informative
+
+Mechanical transmission path (physical basis for expecting a short but nonzero delay):
+  Ball contact (t=0)
+  -> racket frame vibration
+  -> grip-hand contact
+  -> hand/wrist soft tissue and joints
+  -> forearm sensor mount
+  -> forearm sensor reads the event
+The delay should be estimated from the data rather than assumed from material speeds.
+
+Synchronisation via startup clap (no new hardware):
+  Player taps sensor board against racket at session start.
+  Creates simultaneously:
+    1. IMU acc_dyn spike -> visible in imu_log CSV with microsecond timestamp
+    2. Audio transient -> visible in phone recording with sub-ms precision
+    3. Visual event -> visible in video if recording
+  The IMU timestamp bridges the BLE clock to the phone clock.
+  Clock drift: < 1ms/min on modern phones -> < 60ms over 60 min session.
+  For < 30ms accuracy: add second clap at end for linear drift correction.
+
+High-confidence subset strategy (reviewer-safe):
+  Sort swings by impact_audio_score. Accept top 40-60%.
+  Report: "N/626 swings had high-confidence audio labels."
+  Use only accepted subset for delay distribution analysis.
+  This is standard weakly-supervised labeling; reviewers from audio/ML will recognise it.
+
+Serves as the ideal first experiment:
+  - No incoming ball bounce before contact (cleaner audio than rally groundstrokes)
+  - Single isolated impact per swing, high contact force (loud, easy to detect)
+  - Highly stereotyped biomechanics -> consistent delay distribution expected
+  Protocol: 20-30 serves, phone mic recording, startup clap sync.
+
+---
+
+#### E8. Experimental Validation Protocol (2-Month Roadmap)
+
+All levels achievable with existing hardware + phone. No racket sensor required.
+
+Level 0 -- Internal consistency check (1 afternoon, no new data needed)
+  Use existing log0305. Compare EMG PSD in 50ms windows at detected jerk events
+  vs. 50ms windows away from jerk events (during the same swing but pre-contact phase).
+  If PSD near jerk events shows elevated 200-500 Hz energy: impact artifact confirmed.
+  If no difference: transmitted vibration is below noise floor at the forearm.
+  Code: ~30 lines in a notebook using existing swing_features.csv + raw EMG logs.
+  This is the critical sanity check before any other experiment.
+
+Level 1 -- Racket tap while relaxed (30 min, no new hardware)
+  Player seated, forearm muscles confirmed relaxed (EMG RMS < 10% of contraction level).
+  Record forearm IMU + EMG during:
+    (a) Tap the sensor board directly -- mechanical baseline, no transmission
+    (b) Tap the sensor cable -- tests cable-induced artifact
+    (c) Tap the racket face with a ball -- tests mechanical transmission through arm
+    (d) Tap the racket frame -- compares frame vs. string resonance
+    (e) Empty slow swing -- voluntary muscle activation without impact
+  Expected: condition (c) shows EMG transient and IMU jerk with no voluntary activation.
+  This definitively proves mechanical transmission to the electrode exists and characterises
+  the artifact waveform at known timing. Any EMG seen in (c) is artifact by definition.
+
+Level 2 -- Empty swing vs. ball-contact protocol (45 min, no new hardware)
+  Player performs:
+    20 empty forehands (no ball, full swing speed)
+    20 ball-contact forehands (hitting a ball, similar swing speed)
+    10 soft contacts (half-speed)
+    10 hard contacts (maximum effort)
+  Compute per-swing: acc_jerk_peak, emg_hf_energy_candidate_band (rename once
+  Experiment 10 confirms the artifact frequency band), gyro_phase_of_jerk_peak.
+  ROC / AUC analysis: do these features separate empty vs. contact swings?
+    AUC > 0.80 -> forearm-only impact-risk gating viable as a binary gate
+    AUC 0.60-0.80 -> useful as a soft risk score, not binary
+    AUC < 0.60 -> forearm transmission insufficient; need audio or video labels
+  This directly answers whether the forearm-only algorithm is physically feasible
+  and gives an objective performance bound for the paper.
+
+Level 3 -- Phone video annotation (1 session, phone on tripod)
+  Record one 30-min session at 120 fps (most modern phones support this).
+  Timing resolution: 8.3ms per frame -- adequate for +-30ms validation.
+  Startup clap visible and audible in video -> sync point.
+  Manually annotate ball contact frames for ~40 swings (~20 min annotation time).
+  Compare video contact times to IMU phase gate prediction.
+  Validates: "does contact occur within [t_gyro_peak + 30ms, t_gyro_peak + 200ms]?"
+
+Level 4 -- IMU-gated audio labeling (1 session + 2 hours analysis)
+  Record session with phone mic (44.1 kHz, sync via startup clap).
+  Implement audio pipeline (steps in E7).
+  Accept top 50% by impact_audio_score as high-confidence labels.
+  Compute delay distribution (audio_peak_time - imu_jerk_peak_time).
+  If mean delay = 10-30ms, std < 20ms: forearm-only detection validated.
+  If result is positive: write up as a results section for Paper 2.
+
+Level 5 -- Pre-impact MDF A/B comparison (1 week coding + existing data)
+  Implement E5 Approach A (pre-impact phase MDF) in emg_util_yaml_runner.py.
+  New config keys: impact_phase_pre_ms (default 600), impact_phase_guard_ms (default 20).
+  New output column: mdf_pre_impact alongside existing mdf.
+  Run on log0305 w20 config: compare mdf vs. mdf_pre_impact across 626 swings.
+  Expected: mdf_pre_impact has lower per-swing variance (cleaner signal source).
+  Compare fatigue trend slope: does pre-impact MDF show steeper or cleaner decline?
+
+Level 6 -- Noise floor tracker implementation (3 days + existing data)
+  Implement E2 in emg_util_yaml_runner.py.
+  Output: noise_floor_trend column in swing_features.csv.
+  Visualise for log0305: should show high noise floor early (settling), stable mid-session.
+  This corroborates the settling mechanism from the electrode side (not just from MDF
+  behaviour), directly strengthening the paper's settling claim against reviewer C2.
+
+Level 7 -- Stroke classification prototype (2-4 weeks)
+  Manually annotate stroke type for ~100 swings from log0305 using video from Level 3.
+  Extract IMU shape features. Train k-NN or decision tree (no deep learning needed).
+  Evaluate separation of 4 stroke types; compute per-type fatigue trends.
+  Target: show variance reduction in MDF trend when types are separated.
+
+---
+
+#### Validation Hierarchy Summary
+
+  Level | Method                         | Added burden     | Timing accuracy | Purpose
+  ------|-------------------------------|------------------|-----------------|---------------------------
+  0     | Internal PSD consistency      | None             | N/A             | Sanity check (1 afternoon)
+  1     | Racket tap while relaxed      | 30 min session   | ~5ms (IMU)      | Isolate mechanical transmission
+  2     | Empty vs. contact protocol    | 45 min session   | N/A             | Test separability (ROC/AUC)
+  3     | Phone video 120 fps           | Phone on tripod  | 8ms/frame       | Validate phase gate timing
+  4     | IMU-gated audio (phone mic)   | Phone recording  | sub-ms          | Delay distribution validation
+  5     | Racket-mounted accelerometer  | High (research)  | sub-ms          | Lab reference only (not deployed)
+
+Levels 0-4: achievable in the next 2 months with existing hardware + phone.
+Level 5: research-only; only if Levels 1-4 confirm the forearm-only approach.
+
+---
+
+#### Algorithm Implementation Roadmap (2 Months)
+
+  Week 1-2:
+    [ ] Level 0 internal PSD check (30 lines notebook, existing log0305)
+    [ ] Level 1 racket tap experiment (30 min)
+    [ ] E5v2: implement pre-impact phase MDF in emg_util_yaml_runner.py
+    [ ] Run log0305 w20: compare mdf vs. mdf_pre_impact distributions
+
+  Week 3-4:
+    [ ] Level 2 empty vs. contact protocol (45 min session)
+    [ ] ROC/AUC analysis of forearm-only feature separability
+    [ ] E2: implement noise floor tracker, visualise for log0305
+    [ ] E3: implement adaptive HPF, A/B test on log0305
+
+  Week 5-6:
+    [ ] Level 3 video annotation (1 session at 120 fps)
+    [ ] Level 4 audio pipeline (if Level 2 AUC > 0.70)
+    [ ] E4 IMU regression: prototype per-swing artifact cancellation
+
+  Week 7-8:
+    [ ] Level 7 stroke classification prototype (if video available)
+    [ ] Consolidate validated findings for Paper 2 system section
+    [ ] Update paper.md: promote validated algorithms, demote unvalidated to future work
+    [ ] Draft Paper 2 Section 7 (field validation) using confirmed results
+
+---
+
+#### Updated Algorithm Summary
+
+  Priority  | ID | Algorithm                               | Status        | 2-month target
+  ----------|----|-----------------------------------------|---------------|------------------------------
+  Highest   | E8 | Levels 0-2 validation experiments      | Not started   | Week 1-4 (enables all others)
+  Highest   | E5 | Pre-impact phase MDF                    | Not started   | Week 1-2
+  High      | E2 | Noise floor tracker (continuous)        | Not started   | Week 3-4
+  High      | E7 | IMU-gated audio labeling                | Not started   | Week 5-6 (if AUC > 0.70)
+  Medium    | E3 | Adaptive HPF cutoff                     | Not started   | Week 5-6
+  Medium    | E4 | IMU regression artifact cancel          | Not started   | Week 7-8
+  Medium    | E6 | Stroke-type stratified fatigue          | Not started   | After video annotation
+  Done      | E1 | Forearm-only impact-risk gating v1      | DONE 2026-05  | v2 = E5 pre-impact phase
+
+All Level 0-4 validation experiments require only existing hardware + phone.
+Racket-mounted sensor is not in the 2-month plan.
