@@ -24,7 +24,7 @@ Muscle fatigue monitoring during sports is important for performance optimizatio
 
 1. **Electrode contact quality degrades** over time due to sweat loosening the 3-electrode snap connectors, reducing signal integrity mid-session.
 2. **Electrode settling** — at session start, the dry electrode-skin interface has high impedance. It takes time (potentially 15–20 min, not the commonly assumed 5 min) to achieve stable, low-impedance contact.
-3. **Forearm placement constraint** — wrist/forearm is the only practical placement during tennis, but it is subject to motion from grip changes and racket vibration.
+3. **Forearm placement and mechanical artifact constraint** — wrist/forearm placement is practical for tennis, but it exposes the electrode interface and lead wires to rapid wrist rotation, grip changes, cable tugging, snap-connector micro-motion, and racket-impact vibration. These effects can create short-duration motion artifacts distinct from the slower sweat-driven settling process.
 4. **Result:** EMG-based fatigue metrics (e.g., MDF drop) are unreliable during portions of a session where electrode contact is unstable — and the system has no way to know this without an external reference.
 
 **Key insight:** The IMU (already on the sensor for swing detection) provides exactly that external reference. If the IMU says "consistent swing biomechanics" but EMG shows an anomalous signal, the problem is the electrode, not the muscle.
@@ -71,11 +71,11 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 
 1. **Electrode settling characterization** — quantify how long forearm EMG takes to stabilize in a real tennis session. Data confirms settling extends to **at least 17–20 minutes**, not the commonly assumed 5 min. During settling, MDF is depressed **~42% below** the stable baseline, creating a false fatigue appearance. Standard 10-min and 15-min warmup skips are both insufficient (baseline still contaminated at 15 min: 112 Hz vs. stable 166 Hz).
 
-2. **IMU-based EMG quality monitor** — propose a practical quality metric:
+2. **IMU-conditioned EMG quality monitoring** — propose an artifact-aware interpretation framework in which IMU features provide independent motion context for EMG reliability. A practical slow-contact metric is:
    ```
    contact_quality(t) = RMS_window(t) / session_p90_rms
    ```
-   When IMU swing intensity is consistent (biomechanics unchanged) but `contact_quality` is low → electrode contact issue, not fatigue. Validated in log0305: `imu_peak_mag` flat (Pearson r = +0.01, p = 0.78) throughout session while early EMG MDF was falsely depressed by 42%.
+   Slow EMG instability with stable IMU swing intensity indicates electrode settling/contact issues; gradual MDF decline with stable IMU intensity supports physiological fatigue; short EMG transients coincident with large IMU shock/vibration peaks are candidate mechanical artifacts rather than fatigue. Validated in log0305: `imu_peak_mag` flat (Pearson r = +0.01, p = 0.78) throughout session while early EMG MDF was falsely depressed by 42%.
 
 3. **Hidden fatigue revealed by proper settling correction** — log0305 showed **−2.6% MDF change** with standard 10-min skip (no fatigue found). With 20-min skip to clear the settling period, baseline stabilises at 199 Hz and a **28.1% MDF drop** (and 17.3% MNF drop) is revealed — genuine neuromuscular fatigue that was completely masked by electrode settling in the original analysis.
 
@@ -89,12 +89,13 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 - **EMG:** MyoWare 2.0 muscle sensor, 2000 Hz, 12-bit ADC, forearm flexor placement (3-electrode snap configuration)
 - **IMU:** ICM-20948 9-axis, 200 Hz, ±2000 dps gyro / ±8g accelerometer
 - **MCU:** ESP32, BLE streaming, binary TLV protocol with CRC16
-- **Additional:** MAX30102 SpO2/HR (not used in this study)
+- **Additional:** MAX30105 SpO2/HR (not used in this study)
 - **Cost:** ~$99 total hardware cost
 
 ### Key Hardware Engineering Points (worth mentioning for novelty)
 - ADC DMA at 40 kHz with 10× oversampling → decimated to 2000 Hz (zero CPU overhead, ±25 µs timestamp accuracy)
 - Direct solder bypass of RAW signal from MyoWare to ESP32 GPIO32 (pogo pin connection was mechanically unreliable during movement)
+- Lead routing and strain relief: electrode leads are high impedance before the MyoWare amplifier, so cable motion can introduce artifact through electrode tugging, triboelectric effects, and environmental pickup. Leads should be long enough to avoid pulling during full wrist rotation, but short and secured enough to avoid free-swinging loops. The MyoWare board and snap connectors should be stabilised with tape, elastic wrap, foam, or compression sleeve to reduce racket-impact vibration.
 - Dual-output MyoWare: RAW pin (for spectral analysis) + ENV pin (hardware envelope, for contact quality monitoring)
 
 ### Software Pipeline
@@ -226,13 +227,20 @@ SENIAM guidelines [Hermens et al. 2000, J. Electromyogr. Kinesiol.] are the stan
 
 **Gap:** No prior work quantifies the settling duration for sport snap-electrodes under field conditions, or examines the effect of settling on spectral fatigue metrics (MDF/MNF) specifically.
 
-#### 2.3 IMU-EMG Fusion
+#### 2.3 Motion Artifacts from Electrode and Cable Movement
+Wearable biopotential recordings are also affected by fast mechanical artifacts caused by electrode-skin motion, cable movement, mounting force changes, and impact vibration. Cömert and Hyttinen showed that controlled electrode motion produces measurable changes in skin-electrode impedance and surface potential [R21], and later developed a repeatable electrode-motion artifact assessment system demonstrating that applied force, electrode location, and electrode structure affect artifact magnitude [R23]. Related work showed that contact pressure and padding strongly affect motion artifact susceptibility in wearable electrodes [R22]. Recent wearable EMG work has proposed foam-based mechanical suppression of motion artifacts [R24], and broader EMG reviews identify motion artifact and interference as major obstacles for robust single-channel wearable EMG [R18, R25].
+
+These findings are directly relevant to forearm tennis sEMG: rapid wrist rotation, cable strain, grip changes, and ball-racket impact can perturb snap electrodes and lead wires. Unlike slow sweat-driven settling, these artifacts occur on the time scale of individual swings or impacts and therefore require mechanical stabilisation plus IMU-based artifact context, not only a longer warmup skip.
+
+**Gap:** Prior work studies controlled electrode motion, textile electrodes, or general wearable EMG artifact suppression, but does not address racket-sport forearm sEMG where mechanical artifacts are time-locked to high-speed swings and ball-impact vibration.
+
+#### 2.4 IMU-EMG Fusion
 Taborri et al. [Appl. Bionics Biomech. 2020] reviewed sport biomechanics applications of combined inertial, force, and EMG sensors, concluding IMU+EMG is the most informative wearable combination. Bangaru et al. [Sensors 2022] fused forearm EMG and IMU with RNN for fatigue monitoring in construction workers. Nair et al. [2024] demonstrated ML-based fatigue prediction from combined IMU+EMG signals. MultiSenseBadminton [Sci. Data 2024, PMID 38580698] collected a 25-player IMU+EMG dataset for racket sport analysis. In all of these, IMU and EMG are fused as co-equal feature sources for classification models.
 
-**Gap:** No prior work uses IMU as an *independent quality validator* for EMG: checking whether swing biomechanics are consistent while EMG metrics are anomalous, to distinguish electrode settling artifact from genuine physiological fatigue.
+**Gap:** No prior work uses IMU as an *independent quality validator* for EMG: checking whether swing biomechanics are consistent while EMG metrics are anomalous, to distinguish electrode settling artifact from genuine physiological fatigue or to identify tennis-specific mechanical artifacts.
 
-#### 2.4 Summary of Novelty
-This work is, to our knowledge, the first to: (1) quantify forearm electrode settling duration in field tennis (≥17–20 min vs. the 5–10 min assumed in the literature); (2) demonstrate that a standard analysis pipeline misses genuine fatigue entirely when the warmup skip is 3× too short; (3) use the IMU — already present for swing detection — as a zero-cost quality cross-validator to distinguish electrode artifact from physiological fatigue; and (4) characterise the cross-segment gap artifact that appears when BLE reconnection gaps are treated as continuous sessions.
+#### 2.5 Summary of Novelty
+This work is, to our knowledge, the first to: (1) quantify forearm electrode settling duration in field tennis (≥17–20 min vs. the 5–10 min assumed in the literature); (2) demonstrate that a standard analysis pipeline misses genuine fatigue entirely when the warmup skip is 3× too short; (3) use the IMU — already present for swing detection — as a zero-cost context sensor for EMG validity, distinguishing slow contact settling, stable-effort fatigue trends, and candidate fast mechanical artifacts; and (4) characterise the cross-segment gap artifact that appears when BLE reconnection gaps are treated as continuous sessions.
 
 ### 3. System Design (~500 words)
 
@@ -262,6 +270,7 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - Warmup-skip sensitivity test: re-run analysis at 10, 15, 20 min to quantify baseline contamination
 - IMU quality cross-validation: compare `imu_peak_mag` Pearson r vs time; if flat (|r| < 0.1) while early MDF is depressed → settling artifact, not fatigue
 - Contact quality metric: `contact_quality(t) = RMS(t) / session_p90_rms`; thresholds: >0.25 reliable, <0.10 contact loss
+- Artifact-aware per-swing interpretation: gradual MDF/MNF changes over many swings with stable IMU intensity are treated as fatigue-related trends, while isolated EMG outliers or spikes coincident with large IMU acceleration/gyro shock peaks are treated as candidate mechanical artifacts. In this paper, this principle is used qualitatively for interpretation; Appendix E outlines future quantitative shock-gated and phase-gated algorithms.
 
 ### 5. Results (~500 words)
 - 4.1 Electrode settling: log0305 first-third MDF = 107.6 Hz vs. mid/late ~163 Hz; table of thirds; settling takes ≥17–20 min
@@ -277,7 +286,7 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - **IMU cross-validation:** The IMU is already on the device for swing detection — using it as a quality monitor adds zero hardware cost. The decision rule (IMU consistent + MDF depressed → settling; IMU consistent + MDF dropping → fatigue) turns a qualitative observation into a testable, automatable criterion.
 - Why log0305 showed genuine fatigue once corrected: 626 swings at ~10/min for 63 min represents significant cumulative forearm flexor load, consistent with 28.1% MDF drop even without perceptible biomechanical degradation.
 - **Motion artifact landscape in tennis sEMG (~100 words):**
-  > Wrist-worn EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources — electrode settling, skin stretch (0–20 Hz), cable triboelectric noise, powerline interference, and rest-period baseline noise — are substantially mitigated by the current pipeline: the 50 Hz high-pass filter rejects skin stretch; the on-board MyoWare amplifier limits the unamplified signal path to the snap connector length (~3 cm), eliminating cable sway artifact [Boyer 2023, Symeonidou 2018]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating (300 dps) excludes rest-period windows. The primary unmitigated source is ball-impact impulsive vibration (200–600 Hz), which falls within the EMG analysis band and cannot be removed by filtering alone. The IMU acceleration spike at ball contact provides a synchronised trigger that could gate or mask the impact sample window before spectral estimation — identified as the highest-priority future work item (see Appendix E). REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R18] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
+  > Wrist/forearm EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources include slow electrode settling, skin stretch, cable or snap-connector tugging, triboelectric/electromagnetic pickup in moving leads, powerline interference, rest-period baseline noise, and ball-impact vibration. The current pipeline mitigates several of these: the 50 Hz high-pass filter reduces low-frequency skin-stretch artifacts; the on-board MyoWare amplifier keeps the unamplified lead path short, reducing but not eliminating cable-sway artifact [R18, R19]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating excludes rest-period windows. The least-resolved artifact source is ball-impact impulsive vibration, which can contaminate MDF/MNF because it falls within or near the EMG analysis band. The IMU acceleration spike at ball contact provides a synchronised trigger that could gate or mask the impact sample window before spectral estimation — identified as the highest-priority future work item (see Appendix E). REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R20] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
 - Limitations: single player, two sessions, no RPE or MVC ground truth, settling duration likely varies with player sweat rate, skin condition, ambient temperature
 - Future work: multi-player study, adaptive warmup skip based on contact quality metric, IMU-guided motion artifact algorithms (see Appendix E), RPE integration, real-time settling detection in Android app
 
@@ -361,6 +370,7 @@ To keep the paper honest:
 - We are **not** claiming to have proven fatigue physiologically — no RPE or MVC ground truth
 - We are **not** claiming generalizability beyond a single player
 - We are **not** claiming 17–20 min is a universal settling time — it's observed in one session (log0305); other sessions/players/electrodes may differ
+- We are **not** claiming to have fully solved cable friction, snap-connector motion, or racket-impact vibration artifacts — current evidence supports IMU-based interpretation and future artifact-gating algorithms, not complete artifact elimination
 - log0303 does **not** provide a valid within-session fatigue result (gap artifact)
 - The 28.1% MDF drop in log0305 (20-min skip) is the only clean fatigue result; we have one session supporting it
 
@@ -424,13 +434,18 @@ These limitations should be stated explicitly in the paper.
 - [R15] Yang K, McErlain-Naylor SA, Isaia B, Callaway A, et al. "E-textiles for sports and fitness sensing: current state, challenges, and future opportunities." *Sensors.* 2024;24(4):1058. DOI: 10.3390/s24041058 *(PMID: verify before submission)*
 
 ### Motion Artifacts and Cable Noise
-- [R16] Boyer M, Bouyer L, Roy JS, Campeau-Lecours A. "Reducing noise, artifacts and interference in single-channel EMG signals: a review." *Sensors.* 2023;23(6):2927. DOI: 10.3390/s23062927
-- [R17] Symeonidou ER, Nordin AD, Hairston WD, Ferris DP. "Effects of cable sway, electrode surface area, and electrode mass on electroencephalography signal quality during motion." *Sensors.* 2018;18(4):1073. DOI: 10.3390/s18041073
+- [R18] Boyer M, Bouyer L, Roy JS, Campeau-Lecours A. "Reducing noise, artifacts and interference in single-channel EMG signals: a review." *Sensors.* 2023;23(6):2927. DOI: 10.3390/s23062927
+- [R19] Symeonidou ER, Nordin AD, Hairston WD, Ferris DP. "Effects of cable sway, electrode surface area, and electrode mass on electroencephalography signal quality during motion." *Sensors.* 2018;18(4):1073. DOI: 10.3390/s18041073
+- [R21] Cömert A, Hyttinen J. "Impedance spectroscopy of changes in skin-electrode impedance induced by motion." *Biomed Eng Online.* 2014;13:149. PMID: 25404355. DOI: 10.1186/1475-925X-13-149
+- [R22] Cömert A, Honkala M, Hyttinen J. "Effect of pressure and padding on motion artifact of textile electrodes." *Biomed Eng Online.* 2013;12:26. PMID: 23565970. DOI: 10.1186/1475-925X-12-26
+- [R23] Cömert A, Hyttinen J. "A motion artifact generation and assessment system for the rapid testing of surface biopotential electrodes." *Physiol Meas.* 2015;36(1):1-25. PMID: 25500614. DOI: 10.1088/0967-3334/36/1/1
+- [R24] Takagi T, Tomita N, Sato S, Yamamoto M, Takamatsu S, Itoh T. "Wearable EMG measurement device using polyurethane foam for motion artifact suppression." *Sensors.* 2024;24(10):2985. PMID: 38793840. DOI: 10.3390/s24102985
+- [R25] Roland T. "Motion artifact suppression for insulated EMG to control myoelectric prostheses." *Sensors.* 2020;20(4):1031. PMID: 32075031. DOI: 10.3390/s20041031
 
 ### Vendor Documentation
-- [R18] SparkFun Electronics. *MyoWare 2.0 Muscle Sensor Advanced Guide.* 2023. https://cdn.sparkfun.com/assets/learn_tutorials/1/9/5/6/MyoWare_v2_AdvancedGuide-Updated.pdf
+- [R20] SparkFun Electronics. *MyoWare 2.0 Muscle Sensor Advanced Guide.* 2023. https://cdn.sparkfun.com/assets/learn_tutorials/1/9/5/6/MyoWare_v2_AdvancedGuide-Updated.pdf
 
-> **Note:** PMIDs confirmed: R1-R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608). Still to verify: R13 (conference proceedings), R15-R17 PMIDs.
+> **Note:** PMIDs confirmed: R1-R4 (PMID 24239164, 30729865, 20030784, 22653323), R6 (38632263), R8 (29769821), R9 (35380969), R10 (32676126), R11 (36560096), R12 (38580698), R14 (30869608), R21 (25404355), R22 (23565970), R23 (25500614), R24 (38793840), R25 (32075031). Still to verify: R13 (conference proceedings), R15 PMID, R16-R19 PMIDs.
 
 ---
 
@@ -459,6 +474,9 @@ Indoor recreational tennis, one session date. Sweat rate and settling time depen
 **A7. log0303 provides no valid within-session fatigue result**
 The 28.7% MDF drop in log0303 is a gap artifact. The only clean fatigue finding is log0305 (20-min skip). One session. State explicitly.
 
+**A8. Cable and electrode motion artifacts not separately quantified**
+The study did not independently quantify cable tugging, snap-connector micro-motion, electrode slip, or racket-impact vibration artifacts. These effects may contaminate individual swing windows, especially near ball contact. The current analysis mitigates this risk by relying on per-session trends, robust warmup-skip sensitivity, and IMU consistency rather than single transient EMG spikes, but controlled cable-motion and impact tests are future work.
+
 ---
 
 ### B. Areas to Enhance (future work priorities)
@@ -483,6 +501,9 @@ One session with electrodes pre-wetted with saline before application. If settli
 
 **B7. Test multi-player threshold generalisation**
 The 300 dps swing threshold is validated on one player's session distribution. Test on additional players of different sizes and skill levels.
+
+**B8. Controlled cable-motion and racket-impact artifact test**
+Record relaxed-arm baseline while deliberately tapping/moving the cable, tapping the MyoWare board, and applying racket-impact vibration without voluntary contraction. Compare loose cable, taped cable, and compression-sleeve conditions using EMG RMS/PSD outlier counts and IMU shock peaks. This directly validates the fast-artifact branch of the IMU-conditioned EMG quality framework.
 
 ---
 
@@ -756,9 +777,7 @@ If pre-session multimeter/LCR data are collected, update Limitation A2 from "No 
 
 ### E. Novel IMU-Guided Motion Artifact Algorithms (Tennis-Specific)
 
-This section documents brainstormed algorithms for mitigating motion artifacts
-specific to tennis wrist-worn EMG, leveraging the IMU data already captured.
-None are implemented yet. Ranked by effort vs. novelty.
+This section documents a staged algorithm framework for mitigating tennis-specific EMG artifacts using the synchronised IMU data already captured. The current paper implements the first stage: settling-aware baseline selection, contact-quality interpretation, and IMU-based swing-consistency validation. The remaining algorithms are proposed extensions that use the same EMG+IMU dataset to handle fast mechanical artifacts from cable motion, electrode micro-motion, and racket-impact vibration. They should be framed as future work unless implemented and validated on additional logs.
 
 ---
 

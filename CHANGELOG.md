@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased] — 2026-05-03
+
+### Added
+- **E1 Ball-impact window masking** (`emg_util_yaml_runner.py`, `config.yaml`):
+  First implementation of IMU-guided impact artifact mitigation (Appendix E1, paper.md).
+  - New config keys under `swing_detection`:
+    - `impact_mask_thr_g` (default 0.0 = disabled): acc_dyn threshold in g to declare
+      a ball impact within the swing window.
+    - `impact_mask_half_ms` (default 20): half-width in ms of the masked region around
+      the detected impact peak.
+  - New per-swing output columns in `swing_features.csv`:
+    - `impact_detected` (bool): True when acc_dyn peak >= threshold.
+    - `impact_acc_dyn_g`: peak acc_dyn value at the detected impact (g).
+    - `mdf_impact_masked`: MDF recomputed after masking impact samples from the
+      preprocessed EMG signal.
+  - Preprocessing (bandpass + notch) still runs on the full contiguous window to avoid
+    filter edge artifacts; masking applied to preprocessed signal before Welch PSD only.
+  - Backward-compatible: existing configs without these keys default to
+    `impact_mask_thr_g=0.0` (disabled), leaving `mdf` unchanged.
+
+### Experimental results (log0305, warmup_skip=20min, thr=3.0g)
+  - 507/626 swings (81%) had acc_dyn >= 3.0g; mean peak acc_dyn = 11.08g.
+  - Mean MDF shift (masked - original): +0.12 Hz; std: 14.0 Hz.
+  - Finding: sample-level masking of +-20ms has near-zero mean effect. The removed
+    samples represent only ~3% of the 1300ms window; Welch PSD is dominated by its
+    segment average, so per-sample removal is insufficient.
+  - Next iteration (planned): two better approaches identified:
+    A. Welch-segment rejection -- exclude PSD segments overlapping +-40ms impact window.
+    B. Pre-impact MDF -- compute MDF only from [t_impact-600ms, t_impact-20ms] (cleaner
+       pre-contact muscle activation phase, ~580ms). Approach B preferred: physiologically
+       correct, simpler, ~580ms gives adequate Welch resolution with nperseg=512.
+  - Affected: `emg_util_yaml_runner.py` only; no nopandas port required (PC-only feature).
+
+---
+
 ## [Unreleased] — 2026-03-07
 
 ### Fixed
