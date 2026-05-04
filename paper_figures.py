@@ -543,45 +543,63 @@ mdf = df05["mdf"]
 
 # colour by session third
 q1, q2 = t.quantile(1/3), t.quantile(2/3)
-thirds_lbl = ["Early (0–21 min)\nSettling", "Mid (21–42 min)\nStable", "Late (42–63 min)\nFatigue"]
-third_colors = ["tomato", "gold", "steelblue"]
-masks = [t <= q1, (t > q1) & (t <= q2), t > q2]
+thirds_data = [
+    (t <= q1,                "Early (0–21 min)\nSettling",   "tomato"),
+    ((t > q1) & (t <= q2),  "Mid (21–42 min)\nStable",      "gold"),
+    (t > q2,                 "Late (42–63 min)\nFatigue",    "steelblue"),
+]
 
-for mask, lbl, col in zip(masks, thirds_lbl, third_colors):
+for mask, lbl, col in thirds_data:
     ax.scatter(mag[mask], mdf[mask], s=10, alpha=0.40, color=col,
-               label=f"{lbl}\n  n={mask.sum()}", zorder=2)
+               label=f"{lbl}  (n={mask.sum()})", zorder=2)
 
-# median crosshairs per third
-for mask, col in zip(masks, third_colors):
+# median crosshairs per third (filled circles)
+for mask, lbl, col in thirds_data:
     mx, my = mag[mask].median(), mdf[mask].median()
-    ax.plot(mx, my, "o", ms=11, color=col, markeredgecolor="black",
-            markeredgewidth=1.2, zorder=4)
+    ax.plot(mx, my, "o", ms=13, color=col, markeredgecolor="black",
+            markeredgewidth=1.5, zorder=5)
+    ax.annotate(f"Median\n{my:.0f} Hz\n{mx:.0f} dps",
+                xy=(mx, my), xytext=(mx + 80, my + 12),
+                fontsize=7, color=col,
+                arrowprops=dict(arrowstyle="-", color=col, lw=0.8))
 
-# quadrant reference lines
+# stable settled MDF reference
+ax.axhline(166, color="seagreen", linewidth=1.4, linestyle="--", alpha=0.8, zorder=3,
+           label="Stable settled reference ≈ 166 Hz")
+
+# quadrant reference lines at medians of all data
 med_mag = mag.median()
 med_mdf = mdf.median()
-ax.axvline(med_mag, color="gray", linewidth=1.0, linestyle=":", alpha=0.6)
-ax.axhline(med_mdf, color="gray", linewidth=1.0, linestyle=":", alpha=0.6)
+ax.axvline(med_mag, color="gray", linewidth=0.9, linestyle=":", alpha=0.5, zorder=1)
+ax.axhline(med_mdf, color="gray", linewidth=0.9, linestyle=":", alpha=0.5, zorder=1)
 
-# quadrant labels
+# quadrant labels — positioned correctly:
+# y > med_mdf = high MDF (top), y < med_mdf = low MDF (bottom)
+# x < med_mag = low IMU (left),  x > med_mag = high IMU (right)
 for qx, qy, qtxt in [
-    (0.05, 0.95, "Low IMU + Low MDF\n→ Settling / bad contact"),
-    (0.55, 0.95, "High IMU + Low MDF\n→ High effort, still fatigued"),
-    (0.05, 0.45, "Low IMU + High MDF\n→ Low effort, fresh"),
-    (0.55, 0.45, "High IMU + High MDF\n→ High effort, fresh"),
+    (0.03, 0.97, "Low IMU + High MDF\n→ Low effort, spectral quality intact"),
+    (0.55, 0.97, "High IMU + High MDF\n→ Full effort, fresh"),
+    (0.03, 0.32, "Low IMU + Low MDF\n→ Settling or reduced effort"),
+    (0.55, 0.32, "High IMU + Low MDF\n→ Full effort + depressed MDF\n    = settling or fatigue"),
 ]:
-    ax.text(qx, qy, qtxt, transform=ax.transAxes, fontsize=7.5,
-            ha="left" if qx < 0.5 else "left", va="top",
-            color="dimgray",
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.5))
+    ax.text(qx, qy, qtxt, transform=ax.transAxes, fontsize=7.2,
+            ha="left", va="top", color="dimgray",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.55))
 
-ax.set_xlabel("IMU Peak Gyro Magnitude (dps)\n← effort proxy →", fontsize=11)
+# key narrative annotation
+ax.text(0.50, 0.03,
+        "Early and Late both cluster at LOW MDF with SIMILAR IMU to Mid\n"
+        "→ low MDF is not caused by reduced swing effort in either case",
+        transform=ax.transAxes, fontsize=8.5, ha="center", va="bottom",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
+
+ax.set_xlabel("IMU Peak Gyro Magnitude (dps)  ←  effort proxy  →", fontsize=11)
 ax.set_ylabel("EMG Median Frequency — MDF (Hz)\n← low = settling or fatigue →", fontsize=11)
 ax.set_title("Figure 7  |  IMU-EMG Diagnostic Matrix (log0305)\n"
-             "Early swings: low MDF despite normal IMU  →  settling not fatigue",
+             "Early + Late both show low MDF at normal IMU — settling and fatigue, not effort reduction",
              fontsize=11)
-ax.legend(fontsize=8.5, loc="lower right")
-ax.grid(True, alpha=0.25)
+ax.legend(fontsize=8, loc="lower right")
+ax.grid(True, alpha=0.20)
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig7_imu_emg_diagnostic_matrix.png"), dpi=150)
 plt.close()
