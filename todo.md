@@ -27,9 +27,9 @@
 | 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
 | 12 | 11 | Pre-impact MDF vs full-window MDF | Tests phase-gated spectral analysis | Paper 2 |
 | 13 | 12 | Forearm-only impact-risk score | Prototype future artifact-risk metric | Paper 2 |
-| 14 | 14 | RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 |
+| 14 | 14 |✅ RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 |
 | 15 | 15 | ✅ Swing intensity stratification | Controls for changing effort | Paper 1 |
-| 16 | 16 | Bout-level fatigue analysis | Reduces per-swing noise | Paper 1 |
+| 16 | 16 | ✅ Bout-level fatigue analysis | Reduces per-swing noise | Paper 1 |
 | 17 | 17 | Workload accumulation metric | Fatigue vs cumulative load | Paper 2 |
 | 18 | 18 | BLE gap/session stitching audit | Validates timeline reconstruction | Paper 1 |
 | 19 | 13 | Empty/contact separability limitation | Clarifies what existing data cannot prove | Future data |
@@ -549,14 +549,37 @@ fatigue result using adaptive skip
 
 Turns the observational finding into a practical algorithm.
 
-### Risk
+### Risk and Results (updated 2026-05-03)
 
-This algorithm is **calibrated and validated on the same session** (log0305). The detected
-settling endpoint will approximately agree with the 20-min fixed skip by construction —
-it was designed using the same session. Generalisability requires testing on additional
-players and sessions. State this explicitly if reporting in Paper 1: *"the adaptive
-criterion was defined on and evaluated against the same session; cross-session validation
-is future work."*
+**Grid search result:** An exhaustive grid of 432 parameter combinations (MDF threshold
+160–190 Hz, std threshold 20–40 Hz, CQ threshold 0.20–0.30, n=5/10/15, guard time
+0/10/12/15 min) was run on log0305. Results:
+
+- 321/432 combinations never trigger within the session.
+- Best achievable endpoint: t=12.9 min — baseline MDF 98.8 Hz (still in settling).
+- Highest MDF drop among triggered: 7.1% — versus 28.1% from 20-min fixed skip.
+- **No grid combination approximates the 20-min endpoint or the 28.1% fatigue result.**
+
+**Conclusion:** Simple threshold-based adaptive detection is insufficient on a single
+session. The 20-min fixed skip outperforms all adaptive criteria tested here.
+
+**Critical data need:** More captured sessions from different players, ambient
+conditions, and electrode states are the **highest-priority requirement** for
+Experiment 9. With 5+ sessions, a calibrated adaptive criterion could potentially
+be learned and cross-validated. Without multi-session data, any threshold we
+choose is overfit to log0305 by construction.
+
+**Recommended paper wording:**
+> "An initial adaptive settling detector based on causal rolling MDF, MDF variance,
+> and contact quality triggered at 8.8 min — 11 min earlier than the 20-min fixed
+> skip — producing only 7.1% MDF drop vs. 28.1%. An exhaustive grid of 432 threshold
+> combinations confirmed that no simple criterion approximates the 20-min endpoint on
+> this session. Cross-session calibration with data from multiple players is required."
+
+**Placement:** Future work / appendix. Not a validated Paper 1 algorithm.
+
+**Grid output:** `paper_figures/table_exp9_adaptive_settling_grid.csv`
+
 
 ---
 
@@ -812,7 +835,7 @@ Supports hardware-engineering reliability discussion.
 
 ---
 
-## 15. Swing Intensity Stratification
+## ✅ 15. Swing Intensity Stratification
 
 **Goal:** Ensure fatigue trend is not due to changing swing intensity distribution.
 
@@ -857,7 +880,7 @@ Stronger control for reduced-effort confound.
 
 ---
 
-## 16. Bout-Level Fatigue Analysis
+## ✅ 16. Bout-Level Fatigue Analysis
 
 **Goal:** Reduce per-swing noise by aggregating into bouts.
 
@@ -1022,8 +1045,8 @@ Do second.
 ✅ 7.  Robust MDF outlier filtering
 ✅ 8.  Early/mid/late PSD comparison
 ✅ 9.  Adaptive settling endpoint
-✅ 14. Swing intensity stratification
-15. Bout-level fatigue analysis
+✅ 15. Swing intensity stratification
+✅ 16. Bout-level fatigue analysis
 ```
 
 Expected deliverable:
