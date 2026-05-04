@@ -1051,11 +1051,59 @@ table9 = pd.DataFrame([{
     "fixed_bsl_mdf":    fixed_bsl,
     "fixed_drop_pct":   fixed_drop,
     "gap_minutes":      round(20.0 - adapt_t, 1),
-    "note": "Adaptive triggers ~10 min early; baseline still in settling transition",
+    "note": (
+        "Adaptive triggers ~10 min early; baseline still in settling transition. "
+        "No grid combination (432 tested) approximates the 20-min fixed endpoint. "
+        "Multi-session data required to calibrate any adaptive criterion."
+    ),
 }])
 table9_path = os.path.join(OUT_DIR, "table_exp9_adaptive_settling.csv")
 table9.to_csv(table9_path, index=False)
 print(f"  Saved: {table9_path}")
+
+# Run threshold grid (432 combinations) and save — confirms single session cannot be calibrated
+import itertools as _itr
+
+def _detect_grid(df_g, mdf_thr, std_thr, cq_thr, n, min_t, final_mdf_g):
+    run = 0
+    for i in range(len(df_g)):
+        if df_g['t_min'].iloc[i] < min_t:
+            run = 0; continue
+        rm = df_g['roll_mdf'].iloc[i]; rs = df_g['roll_std'].iloc[i]
+        rc = df_g['roll_cq'].iloc[i]
+        ok = (pd.notna(rm) and rm >= mdf_thr and
+              pd.notna(rs) and rs <= std_thr and
+              pd.notna(rc) and rc >= cq_thr)
+        run = run+1 if ok else 0
+        if run >= n:
+            t_det = df_g['t_min'].iloc[i]
+            bsl   = df_g.loc[df_g.index[i:i+20], 'mdf'].mean()
+            drp   = (bsl - final_mdf_g) / bsl * 100
+            return round(t_det,1), round(bsl,1), round(drp,1)
+    return None, None, None
+
+_final_mdf = df09.loc[df09['t_min'] > df09['t_min'].max()-15, 'mdf'].mean()
+_FIXED_T = 20.0; _FIXED_BSL = 199.2; _FIXED_DROP = 28.1
+_grid_rows = []
+for _mt, _st, _ct, _nc, _min_t in _itr.product(
+    [160, 170, 180, 190], [20, 30, 40], [0.20, 0.25, 0.30], [5, 10, 15], [0, 10, 12, 15]
+):
+    _t, _bsl, _drp = _detect_grid(df09, _mt, _st, _ct, _nc, _min_t, _final_mdf)
+    _verdict = "TRIGGERED" if _t is not None else "NOT_DETECTED"
+    _grid_rows.append({
+        'mdf_thr': _mt, 'std_thr': _st, 'cq_thr': _ct,
+        'n_consec': _nc, 'min_time': _min_t,
+        'endpoint_min': _t, 'baseline_mdf': _bsl, 'mdf_drop_pct': _drp,
+        'delta_vs_fixed_min':  round(_FIXED_T - _t, 1) if _t else None,
+        'delta_vs_fixed_drop': round((_drp - _FIXED_DROP), 1) if _drp else None,
+        'verdict': _verdict,
+    })
+_grid_df = pd.DataFrame(_grid_rows)
+_n_trig = (_grid_df['verdict'] == 'TRIGGERED').sum()
+_grid_path = os.path.join(OUT_DIR, "table_exp9_adaptive_settling_grid.csv")
+_grid_df.to_csv(_grid_path, index=False)
+print(f"  Saved: {_grid_path}  ({_n_trig}/{len(_grid_df)} triggered; "
+      f"none approximate 20-min endpoint — multi-session calibration required)")
 
 
 # ── Experiment 14: Swing Intensity Stratification ─────────────────────────────
@@ -1179,6 +1227,115 @@ table14_df["coef_imu"]       = round(coef_f[2], 5)
 table14_path = os.path.join(OUT_DIR, "table_exp14_swing_intensity.csv")
 table14_df.to_csv(table14_path, index=False)
 print(f"  Saved: {table14_path}")
+
+
+# ── Experiment 16: Bout-Level Fatigue Analysis ────────────────────────────────
+print("Generating Experiment 16: Bout-level fatigue analysis...")
+
+def _assign_bouts(sf, bs):
+    sf = sf.copy(); sf['bout_id'] = -1
+    for _, b in bs.iterrows():
+        m = (sf['t_peak_ms'] >= b['t_start_ms']) & (sf['t_peak_ms'] <= b['t_end_ms'])
+        sf.loc[m, 'bout_id'] = int(b['bout_id'])
+    return sf[sf['bout_id'] >= 0]
+
+def _bout_agg(sf_b):
+    p90 = sf_b['rms'].quantile(0.90)
+    sf_b = sf_b.copy()
+    sf_b['cq'] = (sf_b['rms'] / p90).clip(0, 1.5) if p90 > 0 else 0
+    g = sf_b.groupby('bout_id')
+    return pd.DataFrame({
+        't_min':        g['t_peak_ms'].mean() / 60000,
+        'n_swings':     g['swing_id'].count(),
+        'mdf':          g['mdf'].median(),
+        'rms':          g['rms'].median(),
+        'imu_peak_mag': g['imu_peak_mag'].median(),
+    }).reset_index()
+
+bs05 = pd.read_csv("out0305_w20/bout_summary.csv")
+bs03 = pd.read_csv("out0303_v2/bout_summary.csv")
+
+sf05_b = _assign_bouts(df05, bs05)
+sf03_b = _assign_bouts(df03, bs03)
+bouts05 = _bout_agg(sf05_b)
+bouts03 = _bout_agg(sf03_b)
+
+fig, axes = plt.subplots(2, 1, figsize=(11, 9), sharex=False)
+
+table16_rows = []
+for ax, sf_swing, bouts, label, color, warmup, xlim, gap_min in [
+    (axes[0], df05, bouts05, "log0305  (63 min, 50 bouts)", "steelblue", 20, 64, None),
+    (axes[1], df03, bouts03, "log0303  (88 min, 18 bouts)", "darkorange", 0, 90, RECONNECT_MIN),
+]:
+    # Per-swing background
+    ax.scatter(sf_swing["t_min"], sf_swing["mdf"], s=4, alpha=0.12,
+               color=color, zorder=1, label="Per-swing MDF")
+
+    # Bout-level medians
+    post_b = bouts[bouts["t_min"] > warmup].dropna(subset=["mdf"])
+    ax.scatter(post_b["t_min"], post_b["mdf"], s=post_b["n_swings"] * 3,
+               color=color, alpha=0.85, zorder=4, edgecolors="black", lw=0.8,
+               label=f"Bout median MDF (size ∝ n swings)")
+
+    # Trend line through bout medians
+    if len(post_b) > 2:
+        sl, ic, *_ = linregress(post_b["t_min"], post_b["mdf"])
+        t_line = np.linspace(post_b["t_min"].min(), post_b["t_min"].max(), 100)
+        ax.plot(t_line, sl * t_line + ic, color="black", lw=1.8, linestyle="--",
+                zorder=3, label=f"Bout trend: {sl:+.2f} Hz/min")
+        r_b, p_b = pearsonr(post_b["t_min"], post_b["mdf"])
+        r_s, p_s = pearsonr(
+            sf_swing.loc[sf_swing["t_min"] > warmup, "t_min"],
+            sf_swing.loc[sf_swing["t_min"] > warmup, "mdf"].fillna(
+                sf_swing["mdf"].median())
+        )
+        ax.text(0.98, 0.97,
+                f"Bout-level:   r = {r_b:+.3f}  p = {p_b:.2f}  n = {len(post_b)}\n"
+                f"Per-swing:    r = {r_s:+.3f}  p = {p_s:.3f}  n = {(sf_swing['t_min']>warmup).sum()}",
+                transform=ax.transAxes, fontsize=8.5, ha="right", va="top",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
+        table16_rows.append({
+            "session": label.split()[0], "warmup_min": warmup,
+            "n_bouts_post_warmup": len(post_b),
+            "n_swings_post_warmup": int((sf_swing["t_min"] > warmup).sum()),
+            "bout_r": round(r_b, 3), "bout_p": round(p_b, 3),
+            "swing_r": round(r_s, 3), "swing_p": round(p_s, 4),
+            "bout_slope_hz_min": round(sl, 3),
+        })
+
+    if gap_min is not None:
+        ax.axvline(gap_min, color="purple", lw=1.8, linestyle="--",
+                   label=f"BLE reconnection at {gap_min:.0f} min")
+        ax.axvspan(13.5, gap_min, alpha=0.06, color="purple", zorder=1)
+    else:
+        ax.axvspan(0, warmup, alpha=0.06, color="tomato", zorder=1)
+        ax.axvline(warmup, color="red", lw=1.2, linestyle=":", label=f"{warmup}-min warmup skip")
+        ax.axhline(199.2, color="seagreen", lw=1.3, linestyle="--", alpha=0.7,
+                   label="Post-settling baseline = 199 Hz")
+
+    ax.set_ylabel("MDF (Hz)", fontsize=11)
+    ax.set_title(label, fontsize=10)
+    ax.set_ylim(0, 350)
+    ax.set_xlim(0, xlim)
+    ax.legend(fontsize=7.5, loc="lower left")
+    ax.grid(True, alpha=0.25)
+
+axes[1].set_xlabel("Time in session (min)", fontsize=12)
+fig.suptitle(
+    "Experiment 16  |  Bout-Level Fatigue Analysis\n"
+    "Per-swing scatter (light) vs bout-median MDF (bold, size ∝ n swings)\n"
+    "Bout aggregation reduces visual noise; statistical trend remains weak at n=36",
+    fontsize=11, fontweight="bold"
+)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "fig14_bout_level_fatigue.png"), dpi=150)
+plt.close()
+print("  Saved: fig14_bout_level_fatigue.png")
+
+table16_df = pd.DataFrame(table16_rows)
+table16_path = os.path.join(OUT_DIR, "table_exp16_bout_level.csv")
+table16_df.to_csv(table16_path, index=False)
+print(f"  Saved: {table16_path}")
 
 
 # ── Experiment 8: Early / Mid / Late PSD Comparison ──────────────────────────
