@@ -1338,6 +1338,138 @@ table16_df.to_csv(table16_path, index=False)
 print(f"  Saved: {table16_path}")
 
 
+# ── Experiment 14: RAW / ENV Consistency Diagnostic ──────────────────────────
+print("Generating Experiment 14 (ID 14): RAW/ENV consistency diagnostic...")
+
+from scipy.stats import pearsonr as _pearsonr, spearmanr as _spearmanr
+
+fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+(ax_sc05, ax_sc03), (ax_rt05, ax_rt03) = axes
+
+exp14_rows = []
+
+for ax_sc, ax_rt, name, sf_path, color in [
+    (ax_sc05, ax_rt05, "log0305", "out0305_w20/swing_features.csv", "steelblue"),
+    (ax_sc03, ax_rt03, "log0303", "out0303_v2/swing_features.csv",  "darkorange"),
+]:
+    df = pd.read_csv(sf_path)
+    df["t_min"] = df["t_peak_ms"] / 60000
+    v = df.dropna(subset=["rms", "emg_env_mean", "emg_env_peak"]).copy()
+    v["raw_env_ratio"] = v["rms"] / (v["emg_env_mean"] + 1e-6)
+
+    # Correlation stats
+    r_p, p_p = _pearsonr(v["rms"], v["emg_env_mean"])
+    r_s, _   = _spearmanr(v["rms"], v["emg_env_mean"])
+    n_sat  = int((v["emg_env_peak"] > 3800).sum())
+    n_flat = int((v["rms"] < 2.0).sum())
+    pct_sat  = n_sat  / len(v) * 100
+    pct_flat = n_flat / len(v) * 100
+
+    # ── Scatter: per-swing RMS vs ENV_mean ───────────────────────────────────
+    sat_mask  = v["emg_env_peak"] > 3800
+    flat_mask = v["rms"] < 2.0
+
+    ax_sc.scatter(v.loc[~sat_mask & ~flat_mask, "emg_env_mean"],
+                  v.loc[~sat_mask & ~flat_mask, "rms"],
+                  s=5, alpha=0.25, color=color, zorder=2, label="Normal swings")
+    if sat_mask.any():
+        ax_sc.scatter(v.loc[sat_mask, "emg_env_mean"],
+                      v.loc[sat_mask, "rms"],
+                      s=18, alpha=0.70, color="red", marker="^", zorder=4,
+                      label=f"ENV saturated (n={n_sat}, {pct_sat:.0f}%)")
+    if flat_mask.any():
+        ax_sc.scatter(v.loc[flat_mask, "emg_env_mean"],
+                      v.loc[flat_mask, "rms"],
+                      s=18, alpha=0.70, color="black", marker="x", zorder=4,
+                      label=f"RAW flatline (n={n_flat})")
+
+    ax_sc.text(0.97, 0.97,
+               f"Pearson r = {r_p:+.3f}  p = {p_p:.3f}\n"
+               f"Spearman r = {r_s:+.3f}\n"
+               f"ENV saturation: {n_sat} ({pct_sat:.1f}%)\n"
+               f"RAW flatlines:  {n_flat} ({pct_flat:.1f}%)\n"
+               f"{'⚠️ High saturation' if pct_sat > 5 else '✅ Normal saturation'}",
+               transform=ax_sc.transAxes, fontsize=8, ha="right", va="top",
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.9))
+    ax_sc.set_xlabel("Hardware ENV_mean (ADC counts)", fontsize=9)
+    ax_sc.set_ylabel("Preprocessed RAW RMS (a.u.)", fontsize=9)
+    ax_sc.set_title(f"{name}  —  RAW RMS vs Hardware ENV", fontsize=9)
+    ax_sc.legend(fontsize=7.5)
+    ax_sc.grid(True, alpha=0.25)
+
+    # ── RAW/ENV ratio over time ───────────────────────────────────────────────
+    r_roll = v["raw_env_ratio"].rolling(10, center=True, min_periods=3).median()
+    ax_rt.scatter(v["t_min"], v["raw_env_ratio"], s=4, alpha=0.20,
+                  color=color, zorder=2)
+    ax_rt.plot(v["t_min"], r_roll, color=color, lw=2.0, zorder=3,
+               label="Rolling median (10 swings)")
+
+    # Saturation markers on time axis
+    if sat_mask.any():
+        ax_rt.scatter(v.loc[sat_mask, "t_min"], v.loc[sat_mask, "raw_env_ratio"],
+                      s=20, color="red", marker="^", zorder=5, alpha=0.70,
+                      label="ENV saturated swings")
+
+    # Session annotation
+    RECONNECT_MIN_14 = RECONNECT_S / 60.0 if name == "log0303" else None
+    if RECONNECT_MIN_14:
+        ax_rt.axvline(RECONNECT_MIN_14, color="purple", lw=1.5, linestyle="--")
+        ax_rt.axvspan(13.5, RECONNECT_MIN_14, alpha=0.06, color="purple", zorder=1)
+    else:
+        ax_rt.axvspan(0, 20, alpha=0.06, color="tomato", zorder=1,
+                      label="Settling zone (0–20 min)")
+        ax_rt.axvline(20, color="red", lw=1.2, linestyle=":")
+
+    ax_rt.set_xlabel("Time in session (min)", fontsize=9)
+    ax_rt.set_ylabel("Raw/ENV ratio (RMS / ENV_mean)", fontsize=9)
+    ax_rt.set_title(f"{name}  —  RAW/ENV ratio over time", fontsize=9)
+    ax_rt.legend(fontsize=7.5)
+    ax_rt.grid(True, alpha=0.25)
+
+    # Per-third ratio
+    q1t, q2t = v["t_min"].quantile(1/3), v["t_min"].quantile(2/3)
+    for lbl, mask_t, col_t in [
+        ("Early", v["t_min"] <= q1t, "tomato"),
+        ("Mid",   (v["t_min"] > q1t) & (v["t_min"] <= q2t), "seagreen"),
+        ("Late",  v["t_min"] > q2t, "steelblue"),
+    ]:
+        seg = v.loc[mask_t, "raw_env_ratio"]
+        ax_rt.text(v.loc[mask_t, "t_min"].mean(), seg.median() + 0.002,
+                   f"{lbl}\n{seg.median():.3f}", ha="center", va="bottom",
+                   fontsize=7, color=col_t)
+
+    exp14_rows.append({
+        "session":            name,
+        "n_swings":           len(v),
+        "pearson_r_rms_env":  round(r_p, 3),
+        "spearman_r_rms_env": round(r_s, 3),
+        "pearson_p":          round(p_p, 4),
+        "raw_env_ratio_mean": round(v["raw_env_ratio"].mean(), 4),
+        "raw_env_ratio_std":  round(v["raw_env_ratio"].std(), 4),
+        "n_env_saturated":    n_sat,
+        "pct_env_saturated":  round(pct_sat, 1),
+        "n_raw_flatline":     n_flat,
+        "pct_raw_flatline":   round(pct_flat, 1),
+        "verdict":            ("⚠️ High ENV saturation" if pct_sat > 5
+                               else "✅ Hardware consistent"),
+    })
+
+fig.suptitle(
+    "Experiment 14 (ID 14)  |  RAW / ENV Consistency Diagnostic\n"
+    "Per-swing preprocessed RAW RMS vs hardware ENV amplitude — hardware reliability check",
+    fontsize=11, fontweight="bold"
+)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "fig16_raw_env_consistency.png"), dpi=150)
+plt.close()
+print("  Saved: fig16_raw_env_consistency.png")
+
+exp14_df = pd.DataFrame(exp14_rows)
+exp14_path = os.path.join(OUT_DIR, "table_exp14_raw_env_consistency.csv")
+exp14_df.to_csv(exp14_path, index=False)
+print(f"  Saved: {exp14_path}")
+
+
 # ── Experiment 18: BLE Gap / Session Stitching Quality Audit ─────────────────
 print("Generating Experiment 18: BLE gap / session stitching audit...")
 
