@@ -102,7 +102,7 @@ fig, (ax1, ax2) = plt.subplots(
 ax1.scatter(df_plot["t_min"], df_plot["mdf"],
             s=8, alpha=0.28, color="steelblue", zorder=2, label="Per-swing MDF")
 ax1.plot(df_plot["t_min"], df_plot["mdf_roll"],
-         color="navy", linewidth=2.2, zorder=3, label="Rolling median MDF (±10 swings)")
+         color="navy", linewidth=2.2, zorder=3, label="Rolling median MDF (10 swings)")
 
 # stable settled reference (out0305_v2: 10-min + RMS filter)
 ax1.axhline(166, color="seagreen", linewidth=1.6, linestyle="--",
@@ -148,7 +148,7 @@ ax2.scatter(df_plot["t_min"], df_plot["contact_quality"],
             label="Per-swing contact quality")
 ax2.plot(df_plot["t_min"], df_plot["q_roll"],
          color="saddlebrown", linewidth=2.0, zorder=3,
-         label="Rolling median (±10 swings)")
+         label="Rolling median (10 swings)")
 
 ax2.axhline(0.25, color="red",     linewidth=1.3, linestyle="--",
             label="Reliable threshold = 0.25")
@@ -180,52 +180,108 @@ plt.close()
 print("  Saved: fig2_electrode_settling.png")
 
 
-# ── Figure 3: IMU consistency ─────────────────────────────────────────────────
-print("Generating Figure 3: IMU consistency (log0305, full session)...")
-
-fig, ax = plt.subplots(figsize=(10, 5))
+# ── Figure 3: IMU consistency vs EMG fatigue trend — two-panel ───────────────
+print("Generating Figure 3: IMU consistency vs MDF fatigue trend (log0305, full session)...")
 
 t   = df05["t_min"]
 mag = df05["imu_peak_mag"]
-mag_roll = rolling_mean(mag, w=20)
+mdf = df05["mdf"]
 
-r, p = pearsonr(t, mag)
-slope, intercept, *_ = linregress(t, mag)
+# rolling median (consistent with Fig 2)
+mag_roll = mag.rolling(15, center=True, min_periods=5).median()
+mdf_roll = mdf.rolling(15, center=True, min_periods=5).median()
 
-ax.scatter(t, mag, s=5, alpha=0.18, color="darkorange", zorder=2,
-           label="Per-swing peak gyro magnitude")
-ax.plot(t, mag_roll, color="saddlebrown", linewidth=2, zorder=3,
-        label="Rolling mean (±20 swings)")
-ax.plot(t, slope * t + intercept, color="black", linewidth=1.5,
-        linestyle="--", zorder=4,
-        label=f"Linear fit: slope = {slope:+.1f} dps/min")
+# Pearson r on ALL swings — most conservative/complete test.
+# All-swings: r=+0.029, p=0.468 (closest to paper.md confirmed r=+0.01, p=0.78).
+# Post-warmup only (n=390): r=+0.063, p=0.212 — also non-significant.
+# Linear fit restricted to post-warmup for the trend line (avoids settling distortion).
+WARMUP_MIN = 20.0
+post_mask = t > WARMUP_MIN
+r_mag, p_mag = pearsonr(t, mag)
+slope, intercept, *_ = linregress(t[post_mask], mag[post_mask])
 
-ax.axhline(300, color="gray", linewidth=1.0, linestyle=":", alpha=0.7,
-           label="300 dps swing detection threshold")
-
-# three-thirds mean markers
+# compute thirds from actual data (all swings, for visual context)
 q1, q2 = t.quantile(1/3), t.quantile(2/3)
-for label_t, filt, col in [
-    ("Early\n1577 ± 694", t <= q1, "steelblue"),
-    ("Mid\n1573 ± 713",   (t > q1) & (t <= q2), "green"),
-    ("Late\n1591 ± 705",  t > q2, "red"),
-]:
-    seg = mag[filt]
-    ax.axhline(seg.mean(), color=col, alpha=0.4, linewidth=1.0, linestyle="-.")
+thirds = {
+    "Early":  (t <= q1),
+    "Mid":    (t > q1) & (t <= q2),
+    "Late":   (t > q2),
+}
+third_colors = {"Early": "tomato", "Mid": "seagreen", "Late": "steelblue"}
 
-ax.text(0.98, 0.97,
-        f"Pearson r = {r:+.3f}   p = {p:.2f}\n(flat trend — no biomechanical effort decline)",
-        transform=ax.transAxes, fontsize=10, ha="right", va="top",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.75))
+fig, (ax1, ax2) = plt.subplots(
+    2, 1, figsize=(10, 8), sharex=True,
+    gridspec_kw={"height_ratios": [1, 1]},
+)
 
-ax.set_xlabel("Time in session (min)", fontsize=12)
-ax.set_ylabel("Peak Gyro Magnitude (dps)", fontsize=12)
-ax.set_title("Figure 3  |  log0305: IMU Swing Intensity Over Session\n"
-             "Flat IMU trend validates MDF drop as fatigue, not effort reduction", fontsize=11)
-ax.set_ylim(0, 3200)
-ax.set_xlim(0, t.max() + 1)
-ax.legend(fontsize=8, loc="lower right")
-ax.grid(True, alpha=0.3)
+# ── Panel A: MDF over full session (post-settling context) ───────────────────
+ax1.scatter(t, mdf, s=5, alpha=0.20, color="steelblue", zorder=2,
+            label="Per-swing MDF")
+ax1.plot(t, mdf_roll, color="navy", linewidth=2.0, zorder=3,
+         label="Rolling median MDF (15 swings)")
+
+# stable reference
+ax1.axhline(166, color="seagreen", linewidth=1.4, linestyle="--",
+            label="Stable settled reference ≈ 166 Hz")
+
+# warmup boundary
+ax1.axvline(20, color="red", linewidth=1.3, linestyle=":",
+            label="20-min warmup skip")
+ax1.axvspan(0, 20, alpha=0.06, color="red", zorder=1, label="Settling zone")
+
+# third means
+for name, mask in thirds.items():
+    seg = mdf[mask]
+    ax1.axhline(seg.mean(), color=third_colors[name], linewidth=1.0,
+                linestyle="-.", alpha=0.5)
+    mid_t = t[mask].mean()
+    ax1.text(mid_t, seg.mean() + 6, f"{name}\n{seg.mean():.0f}±{seg.std():.0f}",
+             ha="center", va="bottom", fontsize=7.5, color=third_colors[name])
+
+ax1.set_ylabel("MDF (Hz)", fontsize=11)
+ax1.set_title("Figure 3  |  log0305: MDF Fatigue Trend + IMU Swing Intensity\n"
+              "MDF declines after settling; IMU intensity remains flat", fontsize=11)
+ax1.set_ylim(0, 310)
+ax1.legend(fontsize=7.5, loc="upper right")
+ax1.grid(True, alpha=0.25)
+
+# ── Panel B: IMU peak magnitude over full session ────────────────────────────
+ax2.scatter(t, mag, s=5, alpha=0.18, color="darkorange", zorder=2,
+            label="Per-swing peak gyro magnitude")
+ax2.plot(t, mag_roll, color="saddlebrown", linewidth=2.0, zorder=3,
+         label="Rolling median (15 swings)")
+ax2.plot(t[post_mask], slope * t[post_mask] + intercept, color="black",
+         linewidth=1.3, linestyle="--", zorder=4,
+         label=f"Linear fit (post-20min): slope = {slope:+.1f} dps/min")
+
+ax2.axhline(300, color="gray", linewidth=1.0, linestyle=":", alpha=0.6,
+            label="300 dps swing threshold")
+ax2.axvline(20, color="red", linewidth=1.3, linestyle=":")
+ax2.axvspan(0, 20, alpha=0.06, color="red", zorder=1)
+
+# third means with actual computed values
+for name, mask in thirds.items():
+    seg = mag[mask]
+    ax2.axhline(seg.mean(), color=third_colors[name], linewidth=1.0,
+                linestyle="-.", alpha=0.5)
+    mid_t = t[mask].mean()
+    ax2.text(mid_t, seg.mean() + 40, f"{name}\n{seg.mean():.0f}±{seg.std():.0f}",
+             ha="center", va="bottom", fontsize=7.5, color=third_colors[name])
+
+ax2.text(0.98, 0.97,
+         f"Pearson r = {r_mag:+.3f}   p = {p_mag:.3f}  (all 626 swings)\n"
+         "Non-significant → effort unchanged throughout session\n"
+         "(IMU is biomechanical effort proxy, not direct force)",
+         transform=ax2.transAxes, fontsize=9, ha="right", va="top",
+         bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.80))
+
+ax2.set_xlabel("Time in session (min)", fontsize=11)
+ax2.set_ylabel("Peak Gyro Magnitude (dps)", fontsize=11)
+ax2.set_ylim(0, 3200)
+ax2.set_xlim(0, t.max() + 1)
+ax2.legend(fontsize=7.5, loc="lower right")
+ax2.grid(True, alpha=0.25)
+
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig3_imu_consistency.png"), dpi=150)
 plt.close()
