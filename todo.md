@@ -35,7 +35,7 @@
 | 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gateway result: impact trigger not valid** | **Paper 2** | **Null** — acc_dyn finds swing apex not ball contact; Batch C deprioritized |
 | 12 | 11 | Pre-impact MDF vs full-window MDF | Phase-gated spectral analysis | Paper 2 | **⛔ Dep.** — needs valid impact trigger first |
 | 13 | 12 | Forearm-only impact-risk score | Prototype artifact-risk metric | Paper 2 | **⛔ Dep.** — needs valid impact trigger first |
-| 14 | 14 | RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 | **TBD** — not run |
+| 14 | 14 | ✅ RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 | **Moderate** — zero flatlines confirms pogo-pin fix; but log0303 has 14.2% ENV saturation (⚠️) |
 | 15 | 15 | ✅ Swing intensity stratification | Controls for changing effort | Paper 1 | **Moderate** — trend persists across bins; but r(MDF,IMU)=−0.56 is counterintuitive and needs Discussion |
 | 16 | 16 | ✅ Bout-level fatigue analysis | Sensitivity / noise reduction check | Paper 1 | **Weak** — bout-level p=0.415 not significant; per-swing is stronger |
 | 17 | 17 | Workload accumulation metric | Fatigue vs cumulative load | Paper 2 | **TBD** — not run |
@@ -800,7 +800,7 @@ Useful but less urgent.
 
 ---
 
-## 14. RAW / ENV Consistency Diagnostic
+## ✅ 14. RAW / ENV Consistency Diagnostic
 
 **Goal:** Detect hardware/contact failure modes.
 
@@ -837,9 +837,42 @@ RAW/ENV ratio over time
 saturation/flatline counts
 ```
 
+### Actual result (updated 2026-05-03)
+
+```text
+log0305: 9 ENV saturated (1.4%) ✅  |  0 RAW flatlines ✅  |  verdict: hardware consistent
+log0303: 28 ENV saturated (14.2%) ⚠️  |  0 RAW flatlines ✅
+```
+
+Pearson r(RMS, ENV) = -0.013 for log0305 (expected: RAW RMS and ENV measure different
+quantities — high-freq AC vs DC-like amplitude. Low correlation = correct behaviour.)
+
+Firmware audit: commit 2026-03-04 between sessions changed only IMU FSR (acc 4g→8g,
+gyro 1000→2000 dps). No EMG gain or MyoWare settings changed.
+
+ENV saturation cause: log0303 had higher ENV amplitude (env_peak p90 = 4095 = ADC max)
+despite LOWER IMU swing speed (median 1197 vs 1830 dps in log0305). Likely due to
+different MyoWare gain pot setting or higher forearm activation relative to swing speed.
+
 ### Paper value
 
-Supports hardware-engineering reliability discussion.
+**Technical Validation — justifies log0305 as the "Golden Session" for Paper 1.**
+
+- log0305: <2% saturation, zero flatlines → signal integrity confirmed → fatigue
+  trend is not a processing artifact.
+- log0303: 14.2% ENV saturation → hardware envelope unreliable → if RAW signal was
+  also near saturation in those swings, harmonic distortion could bias MDF upward,
+  which may partly explain the initially high MDF baseline in log0303 Seg1.
+- Zero RAW flatlines in both sessions → pogo-pin solder fix confirmed working throughout.
+
+Recommended paper wording:
+  "Hardware consistency checks confirmed that session log0305 maintained high signal
+  integrity (<2% ENV saturation, zero RAW flatlines). Conversely, log0303 exhibited
+  significant hardware ENV saturation (14.2%), potentially distorting spectral content
+  in those swings, which supports treating log0303 results with additional caution."
+
+Caveat: ENV saturation does not directly affect MDF (RAW channel), but may indicate
+RAW amplitude was also elevated (both from same amplifier chain).
 
 ---
 

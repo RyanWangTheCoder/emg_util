@@ -1,0 +1,3 @@
+session,n_swings,pearson_r_rms_env,spearman_r_rms_env,pearson_p,raw_env_ratio_mean,raw_env_ratio_std,n_env_saturated,pct_env_saturated,n_raw_flatline,pct_raw_flatline,verdict
+log0305,626,-0.013,-0.228,0.7398,0.0149,0.0205,9,1.4,0,0.0,✅ Hardware consistent
+log0303,197,0.422,0.074,0.0,0.0196,0.0303,28,14.2,0,0.0,⚠️ High ENV saturation
