@@ -24,7 +24,7 @@
 | 8 | 7 | Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
 | 9 | 8 | Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
 | 10 | 9 | Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
-| 11 | 10 | **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
+| 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
 | 12 | 11 | Pre-impact MDF vs full-window MDF | Tests phase-gated spectral analysis | Paper 2 |
 | 13 | 12 | Forearm-only impact-risk score | Prototype future artifact-risk metric | Paper 2 |
 | 14 | 14 | RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 |
@@ -1005,9 +1005,12 @@ paper_analysis.py generates Figures 2–7
 Do second.
 
 ```text
-10. PSD around high-jerk events  ← RUN FIRST in this batch (gateway)
-    If result: no PSD difference → skip Batch C
-    If result: elevated high-freq energy near jerk events → proceed to Batch C
+✅ 10. PSD around high-dynamic events (gateway) — NULL RESULT
+    acc_dyn peaks at swing apex (median offset = -4.7 ms from gyro peak),
+    not at ball contact. Near-peak delta_log_hf_lf = -0.27 (negative, not positive).
+    Spearman rho = -0.37 (harder swings → more negative delta).
+    CONCLUSION: acc_dyn does not locate ball contact. Batch C deprioritized.
+    Trigger localization is the bottleneck → motivates E8 Level 1 racket tap test.
 6.  Rest/noise-floor tracker
 7.  Robust MDF outlier filtering
 8.  Early/mid/late PSD comparison
@@ -1027,17 +1030,19 @@ additional tables / optional appendix plots for Paper 1
 
 ## Batch C — Tennis-specific future algorithms
 
-Do third — only if Experiment 10 (Batch B gateway) shows impact-artifact signal.
+⛔ DEPRIORITIZED based on Experiment 10 null result.
+
+The acc_dyn peak does not reliably locate ball contact (it finds the swing apex at
+median offset -4.7 ms from gyro peak). Without a valid impact trigger, pre-impact phase
+MDF and impact-risk scoring algorithms are not grounded in the current data.
+
+Required before revisiting:
+  - Level 1: racket tap test (E8) to confirm mechanical transmission exists
+  - Level 3/4: video or audio labels to locate actual ball contact timing
 
 ```text
-11. Pre-impact MDF vs full-window MDF
-12. Forearm-only impact-risk score prototype
-```
-
-Expected deliverable:
-
-```text
-future Figure 8 / Paper 2 algorithm evidence
+⛔ 11. Pre-impact MDF vs full-window MDF   — needs valid impact trigger first
+⛔ 12. Forearm-only impact-risk score      — needs valid impact trigger first
 ```
 
 ---
