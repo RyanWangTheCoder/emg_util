@@ -1208,13 +1208,33 @@ Level 5: research-only; only if Levels 1-4 confirm the forearm-only approach.
 
 ---
 
-#### Algorithm Implementation Roadmap (2 Months)
+#### Algorithm Implementation Roadmap (2 Months) — Updated Post-Experiment 10
 
-  Week 1-2:
-    [ ] Level 0 internal PSD check (30 lines notebook, existing log0305)
-    [ ] Level 1 racket tap experiment (30 min)
-    [ ] E5v2: implement pre-impact phase MDF in emg_util_yaml_runner.py
-    [ ] Run log0305 w20: compare mdf vs. mdf_pre_impact distributions
+**Experiment 10 result (2026-05-03):** NULL / NEGATIVE — Batch C deprioritized.
+  - acc_dyn peak finds swing apex (median offset = -4.7 ms from gyro peak), not ball contact.
+  - Near-peak delta_log_hf_lf = -0.27 (negative = LESS high-freq near event, opposite of artifact).
+  - Spearman rho = -0.37 (harder swings → more negative delta).
+  - acc_dyn is not a valid impact trigger. Jerk or audio/video labels required.
+  - Gateway figure saved: paper_figures/fig8_high_dynamic_event_psd.png
+
+Revised priorities:
+
+  Week 1-2 (revised):
+    ✅ Level 0 internal PSD check — DONE (Experiment 10, null result)
+    [ ] Level 1 racket tap experiment (30 min, no new hardware) — NOW TOP PRIORITY
+        Directly tests: does mechanical transmission to the electrode exist at all?
+        If no signal in relaxed tap test → acc_dyn will never be a valid trigger.
+    [ ] E2: noise floor tracker implementation (Batch B, Paper 1 strengthening)
+
+  Week 3-4:
+    [ ] Batch B: Experiments 6, 7, 8, 9 (Paper 1 analysis strengthening)
+    [ ] Level 3: video annotation (120 fps) to get actual ball contact timing
+        This is now the ONLY path to fixing the trigger localization problem.
+
+  Week 5-8:
+    [ ] If Level 1 tap test confirms transmission + Level 3 gives valid timing:
+        Revisit E5 (pre-impact phase MDF) with correct trigger
+    [ ] Otherwise: Batch C remains deprioritized; focus on Paper 1 completion
 
   Week 3-4:
     [ ] Level 2 empty vs. contact protocol (45 min session)
