@@ -913,6 +913,274 @@ table_df.to_csv(table_path, index=False)
 print(f"  Saved: {table_path}")
 
 
+# ── Experiment 9: Adaptive Settling Endpoint Detection ───────────────────────
+print("Generating Experiment 9: Adaptive settling endpoint detection...")
+
+# Causal rolling metrics (no lookahead — as they would be in a real-time system)
+df09 = df05.copy()
+df09['roll_mdf'] = df09['mdf'].rolling(10, center=False, min_periods=5).median()
+df09['roll_std'] = df09['mdf'].rolling(15, center=False, min_periods=8).std()
+p90_09 = df09['rms'].quantile(0.90)
+df09['cq']       = (df09['rms'] / p90_09).clip(0, 1.5)
+df09['roll_cq']  = df09['cq'].rolling(10, center=False, min_periods=5).median()
+
+def first_stable_idx(roll_mdf, roll_std, roll_cq,
+                     mdf_thr=160, std_thr=40, cq_thr=0.20, n_consec=5):
+    """Return index of first swing where combined criterion holds for n_consec swings."""
+    run = 0
+    for i in range(len(roll_mdf)):
+        ok = (not pd.isna(roll_mdf.iloc[i]) and roll_mdf.iloc[i] >= mdf_thr and
+              not pd.isna(roll_std.iloc[i]) and roll_std.iloc[i] <= std_thr and
+              not pd.isna(roll_cq.iloc[i])  and roll_cq.iloc[i]  >= cq_thr)
+        run = run + 1 if ok else 0
+        if run >= n_consec:
+            return i
+    return None
+
+# Primary criterion
+adapt_idx = first_stable_idx(df09['roll_mdf'], df09['roll_std'], df09['roll_cq'])
+adapt_t   = float(df09['t_min'].iloc[adapt_idx]) if adapt_idx is not None else float("nan")
+adapt_bsl = float(df09.loc[df09.index[adapt_idx:adapt_idx+20], 'mdf'].mean()) \
+            if adapt_idx is not None else float("nan")
+# Final ~15 min average for estimated drop
+final_mdf = float(df09.loc[df09['t_min'] > df09['t_min'].max() - 15, 'mdf'].mean())
+adapt_drop = (adapt_bsl - final_mdf) / adapt_bsl * 100 if not np.isnan(adapt_bsl) else float("nan")
+
+# Fixed 20-min reference
+fixed_bsl  = 199.2   # confirmed from out0305_w20/baseline.json
+fixed_drop = 28.1    # confirmed from out0305_w20/fatigue_summary.csv
+
+print(f"  Adaptive endpoint: t = {adapt_t:.1f} min  baseline = {adapt_bsl:.1f} Hz  "
+      f"est_drop = {adapt_drop:.1f}%")
+print(f"  Fixed 20-min:      t = 20.0 min  baseline = {fixed_bsl:.1f} Hz  "
+      f"est_drop = {fixed_drop:.1f}%")
+
+# ── Figure ────────────────────────────────────────────────────────────────────
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True,
+                               gridspec_kw={"height_ratios": [2, 1]})
+
+t09  = df09["t_min"]
+mdf9 = df09["mdf"]
+
+# Panel A: MDF time series
+ax1.scatter(t09, mdf9, s=5, alpha=0.20, color="steelblue", zorder=2, label="Per-swing MDF")
+ax1.plot(t09, df09["roll_mdf"], color="navy", lw=2.0, zorder=3,
+         label="Rolling median MDF (10 swings, causal)")
+
+# Fixed skip line
+ax1.axvline(20, color="red", lw=2.0, linestyle="-", zorder=5,
+            label=f"Fixed 20-min skip  →  baseline {fixed_bsl:.0f} Hz")
+
+# Adaptive endpoint
+if not np.isnan(adapt_t):
+    ax1.axvline(adapt_t, color="darkorange", lw=2.0, linestyle="--", zorder=5,
+                label=f"Adaptive endpoint t={adapt_t:.1f} min  →  baseline {adapt_bsl:.0f} Hz")
+    ax1.axhline(adapt_bsl, color="darkorange", lw=1.3, linestyle=":", alpha=0.7)
+
+ax1.axhline(fixed_bsl, color="red", lw=1.3, linestyle=":", alpha=0.7)
+ax1.axhline(166, color="seagreen", lw=1.4, linestyle="--", alpha=0.7,
+            label="Stable settled reference ≈ 166 Hz (out0305_v2)")
+
+# Settling zone
+ax1.axvspan(0, 20, alpha=0.06, color="tomato", zorder=1)
+
+# Gap annotation
+ax1.text(0.02, 0.97,
+         f"Adaptive endpoint:  t = {adapt_t:.1f} min  →  baseline = {adapt_bsl:.0f} Hz  "
+         f"→  est. fatigue drop ≈ {adapt_drop:.1f}%\n"
+         f"Fixed 20-min skip:  t = 20.0 min  →  baseline = {fixed_bsl:.0f} Hz  "
+         f"→  confirmed drop = {fixed_drop:.1f}%\n"
+         f"Still in settling at {adapt_t:.1f} min — adaptive criterion triggers ~10 min too early",
+         transform=ax1.transAxes, fontsize=8.5, va="top",
+         bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
+
+ax1.set_ylabel("MDF (Hz)", fontsize=11)
+ax1.set_ylim(0, 320)
+ax1.set_title("log0305: Adaptive vs. Fixed Settling Endpoint\n"
+              "MDF criterion (≥160 Hz for 10 causal swings) triggers at "
+              f"t = {adapt_t:.1f} min — still within settling transition",
+              fontsize=10)
+ax1.legend(fontsize=8, loc="lower right")
+ax1.grid(True, alpha=0.25)
+
+# Panel B: rolling criteria signals
+ax2.plot(t09, df09["roll_mdf"] / 200.0, color="navy", lw=1.5,
+         label="Roll MDF / 200 (threshold at 0.80 = 160 Hz)")
+ax2.plot(t09, df09["roll_std"]  / 100.0, color="tomato", lw=1.5,
+         label="Roll std / 100 (threshold at 0.40 = 40 Hz)")
+ax2.plot(t09, df09["roll_cq"],           color="seagreen", lw=1.5,
+         label="Contact quality (threshold at 0.20)")
+
+# Threshold lines
+ax2.axhline(160/200, color="navy",     lw=1.0, linestyle=":", alpha=0.6)
+ax2.axhline(40/100,  color="tomato",   lw=1.0, linestyle=":", alpha=0.6)
+ax2.axhline(0.20,    color="seagreen", lw=1.0, linestyle=":", alpha=0.6)
+
+if not np.isnan(adapt_t):
+    ax2.axvline(adapt_t, color="darkorange", lw=1.8, linestyle="--",
+                label=f"Adaptive endpoint")
+ax2.axvline(20, color="red", lw=1.8, linestyle="-", label="Fixed 20-min")
+ax2.axvspan(0, 20, alpha=0.06, color="tomato", zorder=1)
+
+ax2.set_ylabel("Normalised criterion\n(dotted = threshold)", fontsize=9)
+ax2.set_xlabel("Time in session (min)", fontsize=11)
+ax2.set_ylim(0, 1.5)
+ax2.set_xlim(0, t09.max() + 1)
+ax2.legend(fontsize=7.5, loc="upper right")
+ax2.grid(True, alpha=0.25)
+
+fig.suptitle(
+    "Experiment 9  |  Adaptive Settling Endpoint Detection (log0305)\n"
+    "Combined criterion (causal rolling MDF, std, contact quality)\n"
+    "triggers ~10 min earlier than the true settled baseline",
+    fontsize=11, fontweight="bold"
+)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "fig12_adaptive_settling_endpoint.png"), dpi=150)
+plt.close()
+print("  Saved: fig12_adaptive_settling_endpoint.png")
+
+# Save table
+table9 = pd.DataFrame([{
+    "session":          "log0305",
+    "criterion":        "roll_mdf>=160Hz + roll_std<=40Hz + CQ>=0.20, n=5",
+    "adaptive_t_min":   round(adapt_t, 1),
+    "adaptive_bsl_mdf": round(adapt_bsl, 1),
+    "adaptive_drop_pct":round(adapt_drop, 1),
+    "fixed_t_min":      20.0,
+    "fixed_bsl_mdf":    fixed_bsl,
+    "fixed_drop_pct":   fixed_drop,
+    "gap_minutes":      round(20.0 - adapt_t, 1),
+    "note": "Adaptive triggers ~10 min early; baseline still in settling transition",
+}])
+table9_path = os.path.join(OUT_DIR, "table_exp9_adaptive_settling.csv")
+table9.to_csv(table9_path, index=False)
+print(f"  Saved: {table9_path}")
+
+
+# ── Experiment 14: Swing Intensity Stratification ─────────────────────────────
+print("Generating Experiment 14: Swing intensity stratification...")
+
+df14 = df05[df05["t_min"] > 20.0].dropna(subset=["mdf", "imu_peak_mag"]).copy()
+t14   = df14["t_min"].values
+m14   = df14["mdf"].values
+imu14 = df14["imu_peak_mag"].values
+
+# Correlations
+r_mt, p_mt = pearsonr(t14, m14)
+r_mi, p_mi = pearsonr(imu14, m14)
+r_it, p_it = pearsonr(t14, imu14)
+
+# Multiple regression MDF ~ time + IMU (numpy lstsq)
+X_full = np.column_stack([np.ones(len(t14)), t14, imu14])
+coef_f, *_ = np.linalg.lstsq(X_full, m14, rcond=None)
+ss_tot = np.sum((m14 - m14.mean())**2)
+r2_full = 1 - np.sum((m14 - X_full @ coef_f)**2) / ss_tot
+
+X_t = np.column_stack([np.ones(len(t14)), t14])
+coef_t, *_ = np.linalg.lstsq(X_t, m14, rcond=None)
+r2_t = 1 - np.sum((m14 - X_t @ coef_t)**2) / ss_tot
+
+# Intensity bins (thirds by imu_peak_mag)
+imu_33, imu_67 = np.percentile(imu14, [33, 67])
+bin_defs = [
+    ("Low IMU\n(<33rd pct)",   imu14 < imu_33,                        "tomato"),
+    ("Mid IMU\n(33–67th)",     (imu14 >= imu_33) & (imu14 < imu_67), "seagreen"),
+    ("High IMU\n(>67th pct)", imu14 >= imu_67,                        "steelblue"),
+]
+
+fig, (ax_sc, ax_ts) = plt.subplots(1, 2, figsize=(13, 6))
+
+# ── Panel A: Scatter MDF vs IMU ───────────────────────────────────────────────
+ax_sc.scatter(imu14, m14, s=5, alpha=0.22, color="steelblue", zorder=2)
+imu_line = np.linspace(imu14.min(), imu14.max(), 200)
+# OLS line using full regression coefficients (fixing time at its mean)
+t_mean = t14.mean()
+mdf_line = coef_f[0] + coef_f[1] * t_mean + coef_f[2] * imu_line
+ax_sc.plot(imu_line, mdf_line, color="black", lw=2.0, linestyle="--", zorder=3,
+           label=f"OLS partial effect (t fixed at {t_mean:.0f} min)")
+
+ax_sc.text(0.97, 0.97,
+           f"r(MDF, IMU) = {r_mi:+.3f}  p = {p_mi:.1e}\n"
+           f"coef_imu = {coef_f[2]:+.4f} Hz/dps\n"
+           f"R²(time only) = {r2_t:.3f}\n"
+           f"R²(time+IMU)  = {r2_full:.3f}  (ΔIMÚ = {r2_full-r2_t:.3f})",
+           transform=ax_sc.transAxes, fontsize=8.5, ha="right", va="top",
+           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
+
+ax_sc.set_xlabel("IMU Peak Gyro Magnitude (dps)", fontsize=11)
+ax_sc.set_ylabel("Per-swing MDF (Hz)", fontsize=11)
+ax_sc.set_title("Panel A  |  MDF vs. Swing Intensity\n"
+                "Counterintuitive negative correlation: harder swings → lower MDF",
+                fontsize=10)
+ax_sc.legend(fontsize=8.5)
+ax_sc.grid(True, alpha=0.25)
+
+# ── Panel B: MDF over time by intensity bin ───────────────────────────────────
+table14_rows = []
+for bname, mask, col in bin_defs:
+    t_b = t14[mask]; m_b = m14[mask]; imu_b = imu14[mask]
+    ax_ts.scatter(t_b, m_b, s=5, alpha=0.25, color=col, zorder=2)
+    # OLS trend line per bin
+    sl, ic, *_ = linregress(t_b, m_b)
+    drop = sl * (t_b.max() - t_b.min())
+    t_line = np.linspace(t_b.min(), t_b.max(), 100)
+    ax_ts.plot(t_line, sl * t_line + ic, color=col, lw=2.2, zorder=3,
+               label=f"{bname.replace(chr(10),' ')}  "
+                     f"slope={sl:+.2f}  drop={drop:+.0f} Hz  n={mask.sum()}")
+    table14_rows.append({
+        "bin":         bname.replace("\n", " "),
+        "n":           int(mask.sum()),
+        "mean_imu_dps":round(imu_b.mean(), 0),
+        "slope_hz_min":round(sl, 3),
+        "drop_hz":     round(drop, 1),
+        "mean_mdf":    round(m_b.mean(), 1),
+    })
+
+ax_ts.axvline(20, color="red", lw=1.3, linestyle=":", alpha=0.6)
+ax_ts.text(0.97, 0.97,
+           f"Time coefficient\n"
+           f"  time only:    {coef_t[1]:+.3f} Hz/min\n"
+           f"  +IMU control: {coef_f[1]:+.3f} Hz/min\n"
+           f"r(IMU, time) = {r_it:+.3f}  p = {p_it:.2f}\n"
+           f"(IMU flat → trend not due to effort shift)",
+           transform=ax_ts.transAxes, fontsize=8.5, ha="right", va="top",
+           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
+
+ax_ts.set_xlabel("Time in session (min)", fontsize=11)
+ax_ts.set_ylabel("Per-swing MDF (Hz)", fontsize=11)
+ax_ts.set_title("Panel B  |  MDF Trend by Intensity Bin\n"
+                "Fatigue trend (negative slope) persists in all bins",
+                fontsize=10)
+ax_ts.legend(fontsize=8, loc="lower left")
+ax_ts.grid(True, alpha=0.25)
+ax_ts.set_ylim(0, 320)
+
+fig.suptitle(
+    "Experiment 14  |  Swing Intensity Stratification (log0305, post-20 min)\n"
+    "IMU explains 30.6% of per-swing MDF variance (ΔIMÚ R² = 0.306); "
+    "fatigue trend persists after controlling for intensity",
+    fontsize=11, fontweight="bold"
+)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "fig13_swing_intensity_stratification.png"), dpi=150)
+plt.close()
+print("  Saved: fig13_swing_intensity_stratification.png")
+
+# Save table
+table14_df = pd.DataFrame(table14_rows)
+table14_df["r_mdf_imu"]      = round(r_mi, 3)
+table14_df["r2_time_only"]   = round(r2_t, 3)
+table14_df["r2_time_plus_imu"] = round(r2_full, 3)
+table14_df["delta_r2_imu"]   = round(r2_full - r2_t, 3)
+table14_df["coef_time_only"] = round(coef_t[1], 3)
+table14_df["coef_time_with_imu"] = round(coef_f[1], 3)
+table14_df["coef_imu"]       = round(coef_f[2], 5)
+table14_path = os.path.join(OUT_DIR, "table_exp14_swing_intensity.csv")
+table14_df.to_csv(table14_path, index=False)
+print(f"  Saved: {table14_path}")
+
+
 # ── Experiment 8: Early / Mid / Late PSD Comparison ──────────────────────────
 print("Generating Experiment 8: Early/mid/late PSD comparison...")
 

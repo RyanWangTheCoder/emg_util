@@ -1,0 +1,4 @@
+bin,n,mean_imu_dps,slope_hz_min,drop_hz,mean_mdf,r_mdf_imu,r2_time_only,r2_time_plus_imu,delta_r2_imu,coef_time_only,coef_time_with_imu,coef_imu
+Low IMU (<33rd pct),129,560.0,-0.887,-37.9,196.6,-0.561,0.021,0.327,0.306,-0.571,-0.434,-0.02974
+Mid IMU (33–67th),132,1708.0,-0.252,-10.6,144.3,-0.561,0.021,0.327,0.306,-0.571,-0.434,-0.02974
+High IMU (>67th pct),129,2648.0,-0.214,-9.0,132.4,-0.561,0.021,0.327,0.306,-0.571,-0.434,-0.02974

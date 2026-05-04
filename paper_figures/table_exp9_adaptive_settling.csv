@@ -1,0 +1,2 @@
+session,criterion,adaptive_t_min,adaptive_bsl_mdf,adaptive_drop_pct,fixed_t_min,fixed_bsl_mdf,fixed_drop_pct,gap_minutes,note
+log0305,"roll_mdf>=160Hz + roll_std<=40Hz + CQ>=0.20, n=5",8.8,166.0,7.1,20.0,199.2,28.1,11.2,Adaptive triggers ~10 min early; baseline still in settling transition
