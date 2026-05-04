@@ -388,38 +388,71 @@ for ax, df, label, color, xlim, gap_min in [
      "darkorange", 90, RECONNECT_MIN),
 ]:
     t = df["t_min"]
-    q = contact_quality(df)
-    q_roll = rolling_mean(q, w=15)
+    p90 = df["rms"].quantile(0.90)
+    q = (df["rms"] / p90).clip(0, 1.5) if p90 > 0 else df["rms"] * 0
+    q_roll = q.rolling(15, center=True, min_periods=5).median()  # median, not mean
 
-    ax.scatter(t, q, s=5, alpha=0.20, color=color)
-    ax.plot(t, q_roll, color=color, linewidth=2, label="Rolling mean CQ")
+    ax.scatter(t, q, s=5, alpha=0.20, color=color, zorder=2)
+    ax.plot(t, q_roll, color=color, linewidth=2.2, zorder=3,
+            label="Rolling median CQ (15 swings)")
     ax.axhline(0.25, color="red", linewidth=1.2, linestyle="--",
-               label="Threshold 0.25 (reliable EMG)")
+               label="Reliable threshold = 0.25")
     ax.axhline(0.10, color="darkred", linewidth=1.2, linestyle=":",
-               label="Threshold 0.10 (contact loss)")
-    ax.fill_between(t, 0, 0.10, alpha=0.08, color="red")
-    ax.fill_between(t, 0.10, 0.25, alpha=0.05, color="orange")
+               label="Contact-loss threshold = 0.10")
+    ax.fill_between(t, 0, 0.10, alpha=0.08, color="red", zorder=1)
+    ax.fill_between(t, 0.10, 0.25, alpha=0.05, color="orange", zorder=1)
 
     if gap_min is not None:
+        # log0303: annotate segments and gap
         ax.axvline(gap_min, color="purple", linewidth=2.0, linestyle="--",
-                   label=f"BLE reconnection at {gap_min:.0f} min (66-min gap)")
-        ax.axvspan(13.5, gap_min, alpha=0.06, color="purple",
-                   label="BLE gap (no data)")
+                   label=f"BLE reconnection at {gap_min:.0f} min")
+        ax.axvspan(13.5, gap_min, alpha=0.07, color="purple", zorder=1,
+                   label="BLE gap — no data (~66 min)")
+        # segment labels
+        seg1_mean = q[t <= 13.5].mean()
+        seg2_mean = q[t >= gap_min].mean()
+        ax.text(7, 1.40, f"Seg 1\nCQ ≈ {seg1_mean:.2f}",
+                ha="center", fontsize=8, color="saddlebrown",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="wheat", alpha=0.7))
+        ax.text(gap_min + 2, 1.40, f"Seg 2\nCQ ≈ {seg2_mean:.2f}",
+                ha="left", fontsize=8, color="purple",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="lavender", alpha=0.7))
+        if abs(seg2_mean - seg1_mean) > 0.05:
+            ax.annotate(f"Δ CQ = {seg2_mean - seg1_mean:+.2f}\n(different contact\nstate after gap)",
+                        xy=(gap_min + 1, (seg1_mean + seg2_mean) / 2),
+                        xytext=(gap_min + 5, 0.80),
+                        arrowprops=dict(arrowstyle="->", color="purple"),
+                        fontsize=7.5, color="purple")
     else:
-        # settling zone for log0305
-        ax.axvspan(0, 17.5, alpha=0.07, color="tomato",
-                   label="Electrode settling zone (~17 min)")
+        # log0305: settling zone + per-third annotations
+        ax.axvspan(0, 20, alpha=0.07, color="tomato", zorder=1,
+                   label="Electrode settling zone (0–20 min)")
+        ax.axvline(20, color="red", linewidth=1.3, linestyle=":",
+                   label="20-min warmup skip")
+        # per-third means
+        q1t, q2t = t.quantile(1/3), t.quantile(2/3)
+        for name, mask, col in [
+            ("Early", t <= q1t, "tomato"),
+            ("Mid",   (t > q1t) & (t <= q2t), "seagreen"),
+            ("Late",  t > q2t, "steelblue"),
+        ]:
+            seg_q = q[mask]
+            mid_t = t[mask].mean()
+            ax.text(mid_t, seg_q.mean() + 0.07,
+                    f"{name}\n{seg_q.mean():.2f}±{seg_q.std():.2f}",
+                    ha="center", va="bottom", fontsize=7.5, color=col)
 
     ax.set_ylabel("Contact Quality\n(RMS / session p90-RMS)", fontsize=10)
     ax.set_title(label, fontsize=10)
     ax.set_xlim(0, xlim)
     ax.set_ylim(0, 1.6)
-    ax.legend(fontsize=8, loc="upper right")
-    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=7.5, loc="upper right")
+    ax.grid(True, alpha=0.25)
 
 axes[1].set_xlabel("Time in session (min)", fontsize=12)
 fig.suptitle("Figure 5  |  EMG Contact Quality Over Session\n"
-             "contact_quality(t) = RMS(t) / session_p90_rms", fontsize=12)
+             "contact_quality(t) = RMS(t) / session_p90_rms", fontsize=12,
+             fontweight="bold")
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig5_contact_quality.png"), dpi=150)
 plt.close()
@@ -429,49 +462,70 @@ print("  Saved: fig5_contact_quality.png")
 # ── Figure 6: log0303 gap artifact ───────────────────────────────────────────
 print("Generating Figure 6: log0303 gap artifact visualization...")
 
-fig, ax = plt.subplots(figsize=(11, 5))
+fig, ax = plt.subplots(figsize=(11, 5.5))
 
-# full session
+# full session scatter + rolling median
 t03  = df03["t_min"]
 m03  = df03["mdf"]
-ax.scatter(t03, m03, s=7, alpha=0.30, color="darkorange", zorder=2,
-           label="Per-swing MDF (full session)")
-ax.plot(t03, rolling_mean(m03, w=10), color="saddlebrown", linewidth=2, zorder=3,
-        label="Rolling mean MDF")
+m03_roll = m03.rolling(10, center=True, min_periods=3).median()
+ax.scatter(t03, m03, s=7, alpha=0.25, color="darkorange", zorder=2,
+           label="Per-swing MDF (full session, n=197)")
+ax.plot(t03, m03_roll, color="saddlebrown", linewidth=2.0, zorder=3,
+        label="Rolling median MDF (10 swings)")
 
-# segment 1 overlay
+# segment 1 overlay — larger diamonds, rolling median
 t01 = df03_seg1["t_min"]
 m01 = df03_seg1["mdf"]
-ax.scatter(t01, m01, s=16, alpha=0.65, color="navy", marker="D", zorder=4,
-           label="Segment 1 swings (first BLE connection)")
+m01_roll = m01.rolling(10, center=True, min_periods=3).median()
+ax.scatter(t01, m01, s=18, alpha=0.70, color="navy", marker="D", zorder=4,
+           label=f"Segment 1 only (n={len(df03_seg1)}, 13.5 min)")
+ax.plot(t01, m01_roll, color="navy", linewidth=1.8, linestyle="-", zorder=5, alpha=0.7)
 
-# gap annotation
-ax.axvspan(13.5, RECONNECT_MIN, alpha=0.10, color="purple",
-           label=f"BLE gap  (~66 min, no data)")
+# baseline MDF line (from full session analysis = first segment swings)
+baseline_mdf_full = 212.9    # confirmed from out0303_v2/baseline.json
+ax.axhline(baseline_mdf_full, color="seagreen", linewidth=1.4, linestyle="--",
+           label=f"Full-session baseline MDF = {baseline_mdf_full:.0f} Hz")
+
+# gap shading
+ax.axvspan(13.5, RECONNECT_MIN, alpha=0.10, color="purple", zorder=1,
+           label="BLE gap (~66 min, no data)")
 ax.axvline(RECONNECT_MIN, color="purple", linewidth=2.0, linestyle="--")
-ax.text(RECONNECT_MIN - 1, 280,
+
+# segment region labels on x-axis area
+ax.text(7, 15, "Segment 1\n(0–13.5 min)", ha="center", va="bottom",
+        fontsize=8.5, color="navy",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="aliceblue", alpha=0.85))
+ax.text((13.5 + RECONNECT_MIN) / 2, 15, "BLE gap\n(~66 min)", ha="center",
+        va="bottom", fontsize=8.5, color="purple",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="lavender", alpha=0.85))
+ax.text(RECONNECT_MIN + 3.5, 15, "Segment 2\n(80–88 min)", ha="center",
+        va="bottom", fontsize=8.5, color="saddlebrown",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="papayawhip", alpha=0.85))
+
+# reconnection annotation
+ax.text(RECONNECT_MIN + 0.5, 290,
         f"Reconnection\nt = {RECONNECT_MIN:.0f} min",
-        ha="right", va="top", fontsize=8.5, color="purple",
+        ha="left", va="top", fontsize=8.5, color="purple",
         bbox=dict(boxstyle="round,pad=0.2", facecolor="lavender", alpha=0.8))
 
-# drop % annotations
+# drop % summary box
 full_drop = 28.7
 seg1_drop = 4.9
 ax.text(0.02, 0.97,
-        f"Full session MDF drop:  {full_drop:.1f}%  ← gap artifact\n"
-        f"Segment 1 only drop:    {seg1_drop:.1f}%  ← no meaningful fatigue",
+        f"Full session MDF drop:  {full_drop:.1f}%  ← cross-segment artifact\n"
+        f"Segment 1 only drop:    {seg1_drop:.1f}%  ← no meaningful within-segment fatigue",
         transform=ax.transAxes, fontsize=9.5, va="top",
         bbox=dict(boxstyle="round,pad=0.35", facecolor="lightyellow", alpha=0.9))
 
 ax.set_xlabel("Reconstructed absolute time (min)", fontsize=12)
 ax.set_ylabel("Median Frequency — MDF (Hz)", fontsize=12)
-ax.set_title("Figure 6  |  log0303: Gap Artifact — Full Session vs Segment 1\n"
-             "Apparent 28.7% MDF drop is a cross-segment artifact, not physiological fatigue",
+ax.set_title("Figure 6  |  log0303: BLE Gap Artifact\n"
+             "Apparent 28.7% MDF drop is a cross-segment artifact — Segment 1 alone shows only 4.9%",
              fontsize=11)
 ax.set_xlim(-1, 90)
 ax.set_ylim(0, 350)
-ax.legend(fontsize=8.5, loc="upper right")
-ax.grid(True, alpha=0.3)
+ax.legend(fontsize=8, loc="upper right")
+ax.grid(True, alpha=0.25)
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig6_log0303_gap_artifact.png"), dpi=150)
 plt.close()
