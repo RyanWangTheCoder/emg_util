@@ -1,0 +1,3 @@
+session,n_ble_captures,capture_ids,duration_min,emg_rows,imu_rows,abs_us_monotone,n_backward_steps,n_reconnections,reconnection_times_s,raw_dev_us_med_step_us,abs_us_med_step_us,expected_step_us,pct_large_gaps,step_note
+log0305,1,20260305_192734,63.09,9520877,891429,True,0,0,[],500.0,500.0,500.0,0.003,✅ abs_us step consistent
+log0303,2,"20260303_183639, 20260303_191258",87.89,6904186,593779,True,0,1,[4815.8],500.0,55.0,500.0,0.007, [abs_us stitching artifact: 16% correct 500µs steps; remainder are sub-500µs interleaving at connection boundary. Raw dev_us: 500µs — correct.]

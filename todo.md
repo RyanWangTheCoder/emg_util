@@ -11,28 +11,36 @@
 > **Note on numbering:** Experiment IDs (column 1) match the section headers throughout
 > this document. Priority rank (column 0) is the execution order. IDs 13 and 5b were added
 > later; the ID sequence is not the same as the rank sequence for those two items.
+>
+> **Support column:** indicates how strongly the experiment supports Paper 1 claims with existing data.
+> - **Strong** — result stands as-is; directly defends a paper claim
+> - **Moderate** — useful supporting evidence; some caveats or non-monotone behaviour
+> - **Weak** — directionally consistent but insufficient on its own; needs more data or different framing
+> - **Null** — null/negative result; informative but does not support the hypothesis it tested
+> - **⛔ Dep.** — deprioritized (Batch C); needs valid impact trigger before proceeding
+> - **TBD** — not yet run
 
-| Rank | Experiment ID | Experiment | Primary value | Paper target |
-|---:|---:|---|---|---|
-| 1 | 1 | ✅ Warmup-skip sensitivity figure | Central claim: standard skip misses fatigue | Paper 1 |
-| 2 | 2 | ✅ Electrode settling MDF/RMS curve | Central mechanism: settling lasts 17–20 min | Paper 1 |
-| 3 | 3 | ✅ IMU consistency plot | Validates fatigue vs reduced effort | Paper 1 |
-| 4 | 4 | ✅ Contact quality metric plot | Supports proposed EMG quality monitor | Paper 1 |
-| 5 | 5 | ✅ `log0303` gap artifact visualization | Shows BLE gap/cross-segment artifact | Paper 1 |
-| 6 | 5b | ✅ IMU-EMG diagnostic matrix (Figure 7) | 2×2 IMU vs EMG quality scatter | Paper 1 |
-| 7 | 6 | ✅ Rest/noise-floor tracker | Strengthens contact/settling argument | Paper 1 / Paper 2 |
-| 8 | 7 | ✅ Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
-| 9 | 8 | ✅ Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
-| 10 | 9 | ✅ Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
-| 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
-| 12 | 11 | Pre-impact MDF vs full-window MDF | Tests phase-gated spectral analysis | Paper 2 |
-| 13 | 12 | Forearm-only impact-risk score | Prototype future artifact-risk metric | Paper 2 |
-| 14 | 14 |✅ RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 |
-| 15 | 15 | ✅ Swing intensity stratification | Controls for changing effort | Paper 1 |
-| 16 | 16 | ✅ Bout-level fatigue analysis | Reduces per-swing noise | Paper 1 |
-| 17 | 17 | Workload accumulation metric | Fatigue vs cumulative load | Paper 2 |
-| 18 | 18 | BLE gap/session stitching audit | Validates timeline reconstruction | Paper 1 |
-| 19 | 13 | Empty/contact separability limitation | Clarifies what existing data cannot prove | Future data |
+| Rank | ID | Experiment | Primary value | Paper target | Support |
+|---:|---:|---|---|---|---|
+| 1 | 1 | ✅ Warmup-skip sensitivity figure | Central claim: standard skip misses fatigue | Paper 1 | **Strong** |
+| 2 | 2 | ✅ Electrode settling MDF/RMS curve | Central mechanism: settling lasts 17–20 min | Paper 1 | **Strong** |
+| 3 | 3 | ✅ IMU consistency plot | Validates fatigue vs reduced effort | Paper 1 | **Strong** |
+| 4 | 4 | ✅ Contact quality metric plot | Supports proposed EMG quality monitor | Paper 1 | **Moderate** — non-monotone late session; may reflect fatigue not just contact |
+| 5 | 5 | ✅ `log0303` gap artifact visualization | Shows BLE gap/cross-segment artifact | Paper 1 | **Strong** |
+| 6 | 5b | ✅ IMU-EMG diagnostic matrix (Figure 7) | 2×2 IMU vs EMG quality scatter | Paper 1 | **Strong** |
+| 7 | 6 | ✅ Rest/noise-floor tracker | Corroborates contact/settling argument | Paper 1 / Paper 2 | **Moderate** — not restricted to between-swing gaps; may include grip tension |
+| 8 | 7 | ✅ Robust MDF outlier filtering | Robustness check against transient artifacts | Paper 1 / Paper 2 | **Moderate** — OLS robust to outliers; but Theil-Sen much shallower — per-swing slope is noisy |
+| 9 | 8 | ✅ Early/mid/late PSD comparison | Mechanistic explanation of MDF changes | Paper 1 | **Strong** — clear three-phase spectral shift supports settling + fatigue interpretation |
+| 10 | 9 | ✅ Adaptive settling endpoint | Algorithm development diagnostic | Paper 1 / Paper 2 | **Weak** — triggers 10 min too early; 432-param grid fails; needs more sessions |
+| 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gateway result: impact trigger not valid** | **Paper 2** | **Null** — acc_dyn finds swing apex not ball contact; Batch C deprioritized |
+| 12 | 11 | Pre-impact MDF vs full-window MDF | Phase-gated spectral analysis | Paper 2 | **⛔ Dep.** — needs valid impact trigger first |
+| 13 | 12 | Forearm-only impact-risk score | Prototype artifact-risk metric | Paper 2 | **⛔ Dep.** — needs valid impact trigger first |
+| 14 | 14 | RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 | **TBD** — not run |
+| 15 | 15 | ✅ Swing intensity stratification | Controls for changing effort | Paper 1 | **Moderate** — trend persists across bins; but r(MDF,IMU)=−0.56 is counterintuitive and needs Discussion |
+| 16 | 16 | ✅ Bout-level fatigue analysis | Sensitivity / noise reduction check | Paper 1 | **Weak** — bout-level p=0.415 not significant; per-swing is stronger |
+| 17 | 17 | Workload accumulation metric | Fatigue vs cumulative load | Paper 2 | **TBD** — not run |
+| 18 | 18 | ✅ BLE gap/session stitching audit | Validates timeline reconstruction | Paper 1 | **Strong** — abs_us monotone; reconnection correctly preserved; confirms log0303 gap is real |
+| 19 | 13 | Empty/contact separability limitation | Clarifies what existing data cannot prove | Future data | **N/A** — scoping note, not an experiment |
 
 ---
 
@@ -906,22 +914,35 @@ bout swing count
 
 Then fit trends across bouts.
 
-### Expected result
+### Actual result (updated 2026-05-03)
 
 ```text
-bout-level log0305 fatigue trend is cleaner than per-swing trend
-log0303 segment 1 remains weak / flat
+log0305: 36 post-warmup bouts
+  bout-level r = -0.140, p = 0.415  ← NOT significant
+  per-swing  r = -0.146, p = 0.004  ← significant
+  direction consistent (negative) but p-value worse due to fewer data points
+
+log0303: 18 bouts
+  bout-level r = -0.359, p = 0.144  ← NOT significant
+  consistent with log0303 being unsuitable for fatigue claims
 ```
+
+**Conclusion:** Bout aggregation preserves trend direction but reduces statistical
+power (fewer data points). The original expectation that bouts would be "cleaner"
+is not supported — per-swing is statistically stronger.
 
 ### Output
 
 ```text
-bout-level MDF and IMU trends
+bout-level MDF and IMU trends (fig14_bout_level_fatigue.png)
+table_exp16_bout_level.csv
 ```
 
 ### Paper value
 
-More stable figures and less noise.
+Appendix / robustness check only. Do NOT claim bout-level is stronger or cleaner.
+Use as: "Bout aggregation preserves the negative trend direction but does not improve
+statistical inference given the current number of bouts."
 
 ---
 
@@ -966,7 +987,7 @@ Tennis fatigue depends on workload, not just elapsed time.
 
 ---
 
-## 18. BLE Gap / Session Stitching Quality Audit
+## ✅ 18. BLE Gap / Session Stitching Quality Audit
 
 **Goal:** Validate the hybrid `abs_us` timeline reconstruction.
 
@@ -1084,7 +1105,7 @@ Do fourth.
 ```text
 13. RAW/ENV consistency diagnostic
 17. Workload accumulation metric
-18. BLE gap/session stitching audit
+✅ 18. BLE gap/session stitching audit
 ```
 
 Expected deliverable:
