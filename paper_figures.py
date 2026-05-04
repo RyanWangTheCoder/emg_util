@@ -83,55 +83,97 @@ for df in [df05, df05_10, df05_v2, df05_w15, df03, df03_seg1]:
 
 print("  All data loaded.\n")
 
-# ── Figure 2: Electrode settling curve ───────────────────────────────────────
-print("Generating Figure 2: Electrode settling curve (log0305, first 30 min)...")
+# ── Figure 2: Electrode settling curve — two-panel MDF + contact quality ─────
+print("Generating Figure 2: Electrode settling curve (MDF + contact quality, first 30 min)...")
 
-fig, ax = plt.subplots(figsize=(10, 5))
+p90_rms = df05["rms"].quantile(0.90)
+df05["contact_quality"] = df05["rms"] / p90_rms
+df05["mdf_roll"] = df05["mdf"].rolling(10, center=True, min_periods=3).median()
+df05["q_roll"]   = df05["contact_quality"].rolling(10, center=True, min_periods=3).median()
 
-# show only first 30 min per paper.md
-mask = df05["t_min"] <= 30
-t   = df05.loc[mask, "t_min"]
-mdf = df05.loc[mask, "mdf"]
-mdf_roll = rolling_mean(mdf)
-mdf_std  = rolling_std(mdf)
+df_plot = df05[df05["t_min"] <= 30].copy()
 
-ax.scatter(t, mdf, s=8, alpha=0.30, color="steelblue", zorder=2,
-           label="Per-swing MDF")
-ax.plot(t, mdf_roll, color="navy", linewidth=2, zorder=3,
-        label="Rolling mean (±15 swings)")
-ax.fill_between(t, mdf_roll - mdf_std, mdf_roll + mdf_std,
-                alpha=0.15, color="navy", zorder=1)
+fig, (ax1, ax2) = plt.subplots(
+    2, 1, figsize=(10, 7), sharex=True,
+    gridspec_kw={"height_ratios": [2, 1]},
+)
 
-# stable baseline reference (out0305_v2: 10-min + RMS filter)
-stable_mdf = 166.0
-ax.axhline(stable_mdf, color="green", linewidth=1.5, linestyle="--",
-           label=f"Stable post-settling MDF = {stable_mdf:.0f} Hz (out0305_v2)")
+# ── Panel A: MDF vs time ──────────────────────────────────────────────────────
+ax1.scatter(df_plot["t_min"], df_plot["mdf"],
+            s=8, alpha=0.28, color="steelblue", zorder=2, label="Per-swing MDF")
+ax1.plot(df_plot["t_min"], df_plot["mdf_roll"],
+         color="navy", linewidth=2.2, zorder=3, label="Rolling median MDF (±10 swings)")
 
-# warmup skip lines
-for skip_min, color, style, label in [
-    (10,  "orange",  "-.",  "10-min skip (standard)"),
-    (15,  "tomato",  ":",   "15-min skip"),
-    (20,  "red",     "-",   "20-min skip (canonical)"),
+# stable settled reference (out0305_v2: 10-min + RMS filter)
+ax1.axhline(166, color="seagreen", linewidth=1.6, linestyle="--",
+            label="Stable settled reference ≈ 166 Hz")
+
+# 20-min baseline (canonical)
+ax1.axhline(199.2, color="steelblue", linewidth=1.2, linestyle=":",
+            alpha=0.7, label="20-min baseline = 199 Hz")
+
+# warmup-skip lines
+for skip_min, color, style in [
+    (10, "#e07b00", "-."),
+    (15, "tomato",  ":"),
+    (20, "red",     "-"),
 ]:
-    ax.axvline(skip_min, color=color, linewidth=1.4, linestyle=style, label=label)
+    ax1.axvline(skip_min, color=color, linewidth=1.3, linestyle=style)
 
-# settling zone
-ax.axvspan(0, 17.5, alpha=0.07, color="red", label="Settling zone (0–17.5 min)")
+# settling shade and label
+ax1.axvspan(0, 20, alpha=0.07, color="red", zorder=1,
+            label="Settling zone (0–20 min)")
+ax1.text(1, 30, "← 10 min", color="#e07b00", fontsize=7.5, va="bottom")
+ax1.text(10.2, 30, "← 15 min", color="tomato", fontsize=7.5, va="bottom")
+ax1.text(20.2, 30, "← 20 min", color="red", fontsize=7.5, va="bottom")
 
-# known early-third value annotation
-ax.annotate("Early MDF\n107.6 ± 36.3 Hz\n(electrode settling)",
-            xy=(5, 108), xytext=(10, 55),
-            arrowprops=dict(arrowstyle="->", color="red"),
-            fontsize=8.5, color="red")
+# early MDF annotation
+e_mean = df_plot.loc[df_plot["t_min"] <= 21, "mdf"].mean()
+ax1.annotate(f"Early MDF\n{e_mean:.0f} Hz\n(settling)",
+             xy=(7, e_mean), xytext=(12, 60),
+             arrowprops=dict(arrowstyle="->", color="red"),
+             fontsize=8.5, color="red")
 
-ax.set_xlabel("Time in session (min)", fontsize=12)
-ax.set_ylabel("Median Frequency — MDF (Hz)", fontsize=12)
-ax.set_title("Figure 2  |  log0305: EMG MDF — First 30 Minutes\n"
-             "Electrode settling suppresses MDF for ~17–20 min", fontsize=11)
-ax.set_ylim(0, 320)
-ax.set_xlim(0, 30)
-ax.legend(fontsize=8, loc="upper left")
-ax.grid(True, alpha=0.3)
+ax1.set_ylabel("Median Frequency — MDF (Hz)", fontsize=11)
+ax1.set_ylim(0, 310)
+ax1.set_title("Figure 2  |  log0305: Electrode Settling — First 30 Minutes\n"
+              "Early spectral metrics suppressed during electrode settling (~17–20 min)",
+              fontsize=11)
+ax1.legend(fontsize=8, loc="upper left")
+ax1.grid(True, alpha=0.25)
+
+# ── Panel B: Contact quality vs time ─────────────────────────────────────────
+ax2.scatter(df_plot["t_min"], df_plot["contact_quality"],
+            s=6, alpha=0.25, color="darkorange", zorder=2,
+            label="Per-swing contact quality")
+ax2.plot(df_plot["t_min"], df_plot["q_roll"],
+         color="saddlebrown", linewidth=2.0, zorder=3,
+         label="Rolling median (±10 swings)")
+
+ax2.axhline(0.25, color="red",     linewidth=1.3, linestyle="--",
+            label="Reliable threshold = 0.25")
+ax2.axhline(0.10, color="darkred", linewidth=1.2, linestyle=":",
+            label="Contact-loss threshold = 0.10")
+ax2.fill_between(df_plot["t_min"], 0, 0.10,
+                 alpha=0.08, color="red", zorder=1)
+ax2.fill_between(df_plot["t_min"], 0.10, 0.25,
+                 alpha=0.05, color="orange", zorder=1)
+
+ax2.axvspan(0, 20, alpha=0.07, color="red", zorder=1)
+for skip_min, color, style in [
+    (10, "#e07b00", "-."),
+    (15, "tomato",  ":"),
+    (20, "red",     "-"),
+]:
+    ax2.axvline(skip_min, color=color, linewidth=1.3, linestyle=style)
+
+ax2.set_ylabel("Contact Quality\n(RMS / session p90-RMS)", fontsize=10)
+ax2.set_xlabel("Time in session (min)", fontsize=11)
+ax2.set_ylim(0, 1.4)
+ax2.set_xlim(0, 30)
+ax2.legend(fontsize=7.5, loc="upper left")
+ax2.grid(True, alpha=0.25)
+
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig2_electrode_settling.png"), dpi=150)
 plt.close()

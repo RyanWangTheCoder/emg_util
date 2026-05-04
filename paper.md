@@ -303,7 +303,7 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 | # | Figure | Data source | Status |
 |---|--------|-------------|--------|
 | 1 | System overview diagram (sensor + pipeline) | Diagram | ⏳ Manual |
-| 2 | **Electrode settling: MDF vs. time (first 30 min, log0305)** — early low MDF rising toward post-settling reference | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig2_electrode_settling.png` |
+| 2 | **Electrode settling: MDF vs. time + contact quality (first 30 min, log0305)** — two-panel: MDF suppression + RMS-derived contact quality, settling ~17–20 min. *Caption: Figure 2 shows early-session MDF suppression during the same interval in which RMS-derived contact quality is changing. The 10- and 15-min markers fall inside the shaded settling region, while the 20-min marker occurs near the transition to a more stable post-settling baseline. This supports the conclusion that electrode settling lasts approximately 17–20 min in log0305.* | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig2_electrode_settling.png` |
 | 3 | **IMU flat line: `imu_peak_mag` vs. time (log0305)** — r=+0.029, p=0.468 | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig3_imu_consistency.png` |
 | 4 | **Warmup-skip sensitivity bar chart** — −2.6% / +15.2% / −26.2% / +28.1% | fatigue_summary files + confirmed original-pipeline value | ✅ `paper_figures/fig4_warmup_skip_sensitivity.png` |
 | 5 | Contact quality (`RMS/p90_rms`) over session, both sessions | `out0303_v2`, `out0305_w20` | ✅ `paper_figures/fig5_contact_quality.png` |
