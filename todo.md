@@ -343,7 +343,7 @@ These strengthen the current paper and may become Paper 1 additions or Paper 2 b
 
 ---
 
-## 6. Rest / Noise-Floor Tracker Between Swings
+## 6. IMU-Quiet EMG Baseline Tracker
 
 **Goal:** Use IMU-defined rest windows as an in-situ signal-quality proxy.
 
@@ -356,13 +356,20 @@ log0303 secondarily
 
 ### Method
 
-Between consecutive swings:
+Implemented as sliding-window scan over all IMU data (not restricted to between-swing gaps —
+see implementation notes below):
 
 ```text
-find windows where gyro_mag < 50 dps for > 500 ms
-compute EMG RMS in each rest window
-smooth over 5–10 rest windows
+sliding 500 ms IMU windows (100 samples @ 200 Hz, 50% overlap)
+accept window if gyro_mag < 50 dps for ≥90% of samples
+compute DC-removed raw EMG RMS in matching EMG window
+smooth with rolling median over 10 windows
 ```
+
+Note: wording is "IMU-quiet EMG baseline" not "between-swing rest" because the
+implementation scans all IMU data, not exclusively inter-swing gaps. If strictly
+between-swing tracking is needed, implement gap-restricted selection using
+`t_start_ms` / `t_end_ms` from swing_features.csv.
 
 ### Metrics
 

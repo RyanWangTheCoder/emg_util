@@ -1,0 +1,3 @@
+session,n_windows,median_early,iqr_lo_early,iqr_hi_early,median_mid,iqr_lo_mid,iqr_hi_mid,median_late,iqr_lo_late,iqr_hi_late,spearman_rho_time,spearman_p_time,seg1_median,seg2_median,delta_seg2_minus_seg1
+log0305,888,57.48,29.57,93.05,14.56,9.93,82.36,11.87,10.44,139.93,-0.197,0.0,,,
+log0303,185,5.53,5.27,7.99,20.93,5.75,56.87,52.03,42.05,80.24,0.678,0.0,5.6,52.38,46.77

@@ -620,7 +620,9 @@ print("  Saved: fig7_imu_emg_diagnostic_matrix.png")
 # ── Experiment 6: IMU-Quiet EMG Baseline Tracker ─────────────────────────────────
 # Note: fig9 (not a core Paper 1 figure, but strong corroborating evidence)
 # Uses a sliding window over all IMU data to find quiet periods (gyro < 50 dps),
-# then computes EMG RMS in those windows — no voluntary contraction → pure noise floor.
+# then computes DC-removed raw EMG RMS in those windows.
+# These are low-motion baseline periods but may still include grip tension,
+# low-frequency artifacts, or residual muscle activity — not a pure noise floor.
 # Stronger than per-swing contact quality (Fig 5) because it isolates electrode
 # contact from muscle force output.
 print("Generating Experiment 6: Rest noise-floor tracker...")
@@ -790,11 +792,16 @@ print(f"  Saved: {exp6_table_path}")
 
 
 
-def mad_outlier_filter(series, window=7, thr=3.0):
-    """Flag swings where |MDF - rolling_median| > thr * rolling_MAD."""
+def mad_outlier_filter(series, window=7, thr=3.0, mad_floor_hz=5.0):
+    """Flag swings where |MDF - rolling_median| > thr * rolling_MAD.
+
+    mad_floor_hz: minimum MAD floor (Hz) to prevent over-flagging in locally
+    flat or near-zero-variance windows. Recommended: 5 Hz.
+    """
     roll_med = series.rolling(window, center=True, min_periods=3).median()
     roll_mad = (series - roll_med).abs().rolling(
         window, center=True, min_periods=3).median()
+    roll_mad = roll_mad.clip(lower=mad_floor_hz)   # floor prevents over-flagging
     is_outlier = (series - roll_med).abs() > thr * roll_mad
     return is_outlier, roll_med
 

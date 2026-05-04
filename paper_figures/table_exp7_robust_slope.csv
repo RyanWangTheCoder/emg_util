@@ -1,0 +1,3 @@
+dataset,n_total,n_outliers,pct_outliers,ols_slope_all,ols_drop_all_hz,ols_slope_clean,ols_drop_clean_hz,ts_slope_all,ts_drop_all_hz,ts_slope_clean,ts_drop_clean_hz
+"log0305 (post-20 min, canonical)",390,51,13.1,-0.571,-24.4,-0.547,-23.4,-0.117,-5.0,-0.076,-3.2
+"log0303 Segment 1 (0–13.5 min, includes settling)",111,16,14.4,-0.608,-8.2,-0.758,-10.2,2.906,39.2,2.46,33.2
