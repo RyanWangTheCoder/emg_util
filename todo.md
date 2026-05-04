@@ -22,7 +22,7 @@
 | 6 | 5b | ✅ IMU-EMG diagnostic matrix (Figure 7) | 2×2 IMU vs EMG quality scatter | Paper 1 |
 | 7 | 6 | ✅ Rest/noise-floor tracker | Strengthens contact/settling argument | Paper 1 / Paper 2 |
 | 8 | 7 | ✅ Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
-| 9 | 8 | Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
+| 9 | 8 | ✅ Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
 | 10 | 9 | Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
 | 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
 | 12 | 11 | Pre-impact MDF vs full-window MDF | Tests phase-gated spectral analysis | Paper 2 |
@@ -1013,7 +1013,7 @@ Do second.
     Trigger localization is the bottleneck → motivates E8 Level 1 racket tap test.
 ✅ 6.  Rest/noise-floor tracker
 ✅ 7.  Robust MDF outlier filtering
-8.  Early/mid/late PSD comparison
+✅ 8.  Early/mid/late PSD comparison
 9.  Adaptive settling endpoint
 14. Swing intensity stratification
 15. Bout-level fatigue analysis

@@ -906,6 +906,151 @@ table_df.to_csv(table_path, index=False)
 print(f"  Saved: {table_path}")
 
 
+# ── Experiment 8: Early / Mid / Late PSD Comparison ──────────────────────────
+print("Generating Experiment 8: Early/mid/late PSD comparison...")
+
+from scipy.signal import welch as _welch
+
+# Load stitched EMG for log0305
+_sess = loader.discover_sessions("log0305")
+_emg_df, _, _, _ = loader.load_session_stitched(_sess)
+_emg_s = _emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
+_abs_us = _emg_s['abs_us'].to_numpy(dtype=np.int64)
+_raw    = _emg_s['raw'].to_numpy(dtype=float)
+
+FS8 = 2000.0; PAD8 = 300.0; NPERSEG8 = 1024
+
+# Compute normalised PSD per swing
+psd_records = []
+for _, r in df05.iterrows():
+    t0p_us = int((r.t_start_ms - PAD8) * 1000)
+    t1p_us = int((r.t_end_ms   + PAD8) * 1000)
+    j0 = int(np.searchsorted(_abs_us, t0p_us))
+    j1 = int(np.searchsorted(_abs_us, t1p_us))
+    raw_pad = _raw[j0:j1]
+    if len(raw_pad) < 256:
+        continue
+    from fatigue_monitor import preprocess_emg as _preprocess
+    proc = _preprocess(raw_pad, FS8)
+    f8, psd = _welch(proc, fs=FS8, nperseg=min(NPERSEG8, len(proc)),
+                     noverlap=min(512, len(proc)//2), window='hann')
+    total = np.sum(psd[(f8 >= 50) & (f8 <= 450)]) + 1e-20
+    psd_records.append({'t_min': r.t_min, 'psd_norm': psd / total, 'swing_id': int(r.swing_id)})
+
+t_all = np.array([p['t_min'] for p in psd_records])
+q1_8, q2_8 = np.quantile(t_all, 1/3), np.quantile(t_all, 2/3)
+
+group_defs = [
+    ("Early\n(0–21 min)\nSettling",   t_all <= q1_8,                     "tomato",    f"0–{q1_8:.0f} min"),
+    ("Mid\n(21–42 min)\nStable",      (t_all > q1_8) & (t_all <= q2_8), "seagreen",  f"{q1_8:.0f}–{q2_8:.0f} min"),
+    ("Late\n(42–63 min)\nFatigue",    t_all > q2_8,                      "steelblue", f"{q2_8:.0f}–63 min"),
+]
+
+f_ref = psd_records[0]['f8'] if 'f8' in psd_records[0] else f8
+# recompute f_ref from the last computed f8
+group_stacks = {}
+for name, mask, color, _ in group_defs:
+    group_stacks[name] = {
+        'stack': np.vstack([psd_records[i]['psd_norm'] for i in range(len(psd_records)) if mask[i]]),
+        'color': color,
+    }
+
+# Band definitions
+BANDS = [
+    ("Low\n50–150 Hz",  50,  150),
+    ("Mid\n150–250 Hz", 150, 250),
+    ("High\n250–450 Hz",250, 450),
+]
+
+# Figure: two-panel — PSD overlay + band fraction bar chart
+fig, (ax_psd, ax_bar) = plt.subplots(1, 2, figsize=(13, 6),
+                                      gridspec_kw={"width_ratios": [2, 1]})
+
+table8_rows = []
+for name, mask, color, time_range in group_defs:
+    stack = group_stacks[name]['stack']
+    n = stack.shape[0]
+    med_psd = np.median(stack, axis=0)
+    q25_psd = np.percentile(stack, 25, axis=0)
+    q75_psd = np.percentile(stack, 75, axis=0)
+
+    plot_mask = (f8 >= 40) & (f8 <= 480)
+    ax_psd.plot(f8[plot_mask], med_psd[plot_mask], color=color, lw=2.2, zorder=3,
+                label=f"{name.replace(chr(10),' ')} (n={n})")
+    ax_psd.fill_between(f8[plot_mask], q25_psd[plot_mask], q75_psd[plot_mask],
+                        alpha=0.15, color=color, zorder=2)
+
+    # Compute MDF from median PSD
+    mask_50_450 = (f8 >= 50) & (f8 <= 450)
+    cdf = np.cumsum(med_psd[mask_50_450])
+    mdf_idx = np.where(cdf >= 0.5 * cdf[-1])[0]
+    mdf_est = float(f8[mask_50_450][mdf_idx[0]]) if len(mdf_idx) else float("nan")
+
+    row = {"group": name.replace("\n", " "), "n": n, "mdf_hz": round(mdf_est, 1),
+           "time_range": time_range}
+    total_pow = np.sum(med_psd[mask_50_450]) + 1e-20
+    for bname, blo, bhi in BANDS:
+        frac = np.sum(med_psd[(f8 >= blo) & (f8 < bhi)]) / total_pow * 100
+        row[bname.replace("\n", "_").replace(" ", "").lower()] = round(frac, 1)
+    table8_rows.append(row)
+
+# Shade band regions on PSD panel
+for bname, blo, bhi, bcol in [
+    ("50–150 Hz",  50,  150, "tomato"),
+    ("150–250 Hz", 150, 250, "seagreen"),
+    ("250–450 Hz", 250, 450, "steelblue"),
+]:
+    ax_psd.axvspan(blo, bhi, alpha=0.06, color=bcol)
+    ax_psd.text((blo + bhi) / 2, ax_psd.get_ylim()[1] if ax_psd.get_ylim()[1] > 0 else 0.003,
+                bname, ha="center", va="top", fontsize=7.5, color=bcol)
+
+ax_psd.set_xlabel("Frequency (Hz)", fontsize=11)
+ax_psd.set_ylabel("Normalised PSD (power fraction per bin)", fontsize=11)
+ax_psd.set_title("Median normalised PSD by session third\n(IQR shaded)", fontsize=10)
+ax_psd.legend(fontsize=8.5, loc="upper right")
+ax_psd.grid(True, alpha=0.25)
+ax_psd.set_xlim(40, 480)
+
+# Band energy bar chart
+x = np.arange(len(BANDS))
+width = 0.25
+offsets = [-width, 0, width]
+colors8 = ["tomato", "seagreen", "steelblue"]
+for i, (row, (_, mask, col, _)) in enumerate(zip(table8_rows, group_defs)):
+    fracs = [row[b.replace("\n","_").replace(" ","").lower()] for b, _, _ in BANDS]
+    bars = ax_bar.bar(x + offsets[i], fracs, width, color=col, alpha=0.85,
+                      edgecolor="black", lw=0.7,
+                      label=f"{row['group'].split('(')[0].strip()} MDF={row['mdf_hz']:.0f} Hz")
+    for bar, val in zip(bars, fracs):
+        ax_bar.text(bar.get_x() + bar.get_width() / 2, val + 0.5,
+                    f"{val:.0f}%", ha="center", va="bottom", fontsize=7.5, fontweight="bold")
+
+ax_bar.set_xticks(x)
+ax_bar.set_xticklabels([b.replace("\n", "\n") for b, _, _ in BANDS], fontsize=9)
+ax_bar.set_ylabel("Band energy fraction (%)", fontsize=11)
+ax_bar.set_title("Band energy fractions\nby session third", fontsize=10)
+ax_bar.legend(fontsize=8)
+ax_bar.grid(axis="y", alpha=0.25)
+ax_bar.set_ylim(0, 90)
+
+fig.suptitle(
+    "Experiment 8  |  Early / Mid / Late Normalised PSD Comparison (log0305)\n"
+    "Mechanistic explanation: settling → low-freq dominated; "
+    "stable → mid-freq; fatigue → shift back toward low",
+    fontsize=11, fontweight="bold"
+)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT_DIR, "fig11_psd_early_mid_late.png"), dpi=150)
+plt.close()
+print("  Saved: fig11_psd_early_mid_late.png")
+
+# Save table
+table8_df = pd.DataFrame(table8_rows)
+table8_path = os.path.join(OUT_DIR, "table_exp8_psd_early_mid_late.csv")
+table8_df.to_csv(table8_path, index=False)
+print(f"  Saved: {table8_path}")
+
+
 # ── paper_stats.txt ──────────────────────────────────────────────────────────
 print("\nGenerating paper_stats.txt...")
 
