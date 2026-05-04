@@ -1,0 +1,4 @@
+group,n,mdf_hz,time_range,low_50–150hz,mid_150–250hz,high_250–450hz
+Early (0–21 min) Settling,209,99.6,0–18 min,75.6,14.3,10.1
+Mid (21–42 min) Stable,208,197.3,18–38 min,38.1,47.7,14.2
+Late (42–63 min) Fatigue,209,142.6,38–63 min,52.1,29.5,18.4
