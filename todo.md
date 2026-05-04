@@ -23,12 +23,12 @@
 | 7 | 6 | ✅ Rest/noise-floor tracker | Strengthens contact/settling argument | Paper 1 / Paper 2 |
 | 8 | 7 | ✅ Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
 | 9 | 8 | ✅ Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
-| 10 | 9 | Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
+| 10 | 9 | ✅ Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
 | 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
 | 12 | 11 | Pre-impact MDF vs full-window MDF | Tests phase-gated spectral analysis | Paper 2 |
 | 13 | 12 | Forearm-only impact-risk score | Prototype future artifact-risk metric | Paper 2 |
 | 14 | 14 | RAW/ENV consistency diagnostic | Hardware reliability / contact diagnostics | Paper 1 / Paper 2 |
-| 15 | 15 | Swing intensity stratification | Controls for changing effort | Paper 1 |
+| 15 | 15 | ✅ Swing intensity stratification | Controls for changing effort | Paper 1 |
 | 16 | 16 | Bout-level fatigue analysis | Reduces per-swing noise | Paper 1 |
 | 17 | 17 | Workload accumulation metric | Fatigue vs cumulative load | Paper 2 |
 | 18 | 18 | BLE gap/session stitching audit | Validates timeline reconstruction | Paper 1 |
@@ -1021,8 +1021,8 @@ Do second.
 ✅ 6.  Rest/noise-floor tracker
 ✅ 7.  Robust MDF outlier filtering
 ✅ 8.  Early/mid/late PSD comparison
-9.  Adaptive settling endpoint
-14. Swing intensity stratification
+✅ 9.  Adaptive settling endpoint
+✅ 14. Swing intensity stratification
 15. Bout-level fatigue analysis
 ```
 
