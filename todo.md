@@ -20,8 +20,8 @@
 | 4 | 4 | ✅ Contact quality metric plot | Supports proposed EMG quality monitor | Paper 1 |
 | 5 | 5 | ✅ `log0303` gap artifact visualization | Shows BLE gap/cross-segment artifact | Paper 1 |
 | 6 | 5b | ✅ IMU-EMG diagnostic matrix (Figure 7) | 2×2 IMU vs EMG quality scatter | Paper 1 |
-| 7 | 6 | Rest/noise-floor tracker | Strengthens contact/settling argument | Paper 1 / Paper 2 |
-| 8 | 7 | Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
+| 7 | 6 | ✅ Rest/noise-floor tracker | Strengthens contact/settling argument | Paper 1 / Paper 2 |
+| 8 | 7 | ✅ Robust MDF outlier filtering | Handles transient artifacts | Paper 1 / Paper 2 |
 | 9 | 8 | Early/mid/late PSD comparison | Explains MDF mechanism | Paper 1 |
 | 10 | 9 | Adaptive settling endpoint | Turns finding into algorithm | Paper 1 / Paper 2 |
 | 11 | 10 | ✅ **PSD around high-jerk events (gateway)** | **Gate for all impact algorithms** | **Paper 2** |
@@ -1011,8 +1011,8 @@ Do second.
     Spearman rho = -0.37 (harder swings → more negative delta).
     CONCLUSION: acc_dyn does not locate ball contact. Batch C deprioritized.
     Trigger localization is the bottleneck → motivates E8 Level 1 racket tap test.
-6.  Rest/noise-floor tracker
-7.  Robust MDF outlier filtering
+✅ 6.  Rest/noise-floor tracker
+✅ 7.  Robust MDF outlier filtering
 8.  Early/mid/late PSD comparison
 9.  Adaptive settling endpoint
 14. Swing intensity stratification
