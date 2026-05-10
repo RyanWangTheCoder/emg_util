@@ -10,11 +10,24 @@
 
 ## Working Title
 
-*"EMG-IMU Wearable System for Tennis Fatigue Monitoring: Electrode Contact Dynamics and IMU-Based Signal Quality Cross-Validation"*
+*"Field Validity of Wearable sEMG Fatigue Metrics in Tennis: Electrode Settling, Contact Quality, and IMU-Conditioned Interpretation"*
 
 Alternative titles:
-- *"Practical Challenges in Wearable sEMG for Tennis: Electrode Settling, Contact Quality, and the Role of IMU Cross-Validation"*
-- *"A Low-Cost Wearable EMG-IMU System for Tennis: Signal Quality Characterization and Fatigue Analysis"*
+- *"When Is Wearable sEMG Trustworthy? Field Validity of Tennis Fatigue Metrics Using Contact Quality and IMU Context"* ← more memorable
+- *"IMU-Conditioned sEMG Validity for Tennis Fatigue Monitoring: Electrode Settling, Contact Quality, and Field Deployment Artifacts"*
+- *"Practical Validity of Forearm sEMG Fatigue Metrics in Tennis: Settling, Warmup-Skip Sensitivity, and IMU-Guided Interpretation"*
+
+---
+
+## Abstract (Draft — Version 2, recommended)
+
+**Abstract—** Wearable surface electromyography (sEMG) is promising for monitoring muscle fatigue in sports, but in real tennis play the EMG signal can be distorted by electrode settling, changing contact quality, motion artifacts, and wireless session discontinuities. Objective local fatigue monitoring may complement subjective perception by enabling session-to-session workload tracking and future overuse-risk assessment, but only if the underlying sEMG fatigue metrics are valid under field conditions. This work studies the field validity of no-added-gel forearm sEMG fatigue metrics using a low-cost EMG–IMU wearable system. Rather than treating IMU and EMG as conventionally fused features, we introduce an IMU-conditioned EMG validity framework, where the forearm IMU serves as an independent biomechanical context channel for interpreting whether EMG spectral changes are likely due to electrode settling, reduced gross swing kinematics, session artifacts, or fatigue-consistent physiological change. In a 63.1-min continuous tennis session with 626 detected swings, MDF exhibited a three-phase trajectory: early suppression during electrode settling (115.7 ± 33.5 Hz), mid-session recovery to a settled reference (167.6 ± 50.1 Hz), and late-session decline (149.5 ± 45.1 Hz) consistent with local forearm fatigue after the interface stabilized. Warmup-skip sensitivity showed that baseline selection was a first-order determinant of interpretation: a 10-min skip produced −2.6% MDF change, a 15-min skip produced −26.2%, while a 20-min skip revealed a 28.1% MDF decline and 17.3% MNF decline. During the same session, IMU peak gyro magnitude remained stable across all swings (r = +0.029, p = 0.468), suggesting the corrected spectral decline was unlikely to be explained by reduced gross swing motion. A second session exposed a continuity failure mode: a 28.7% apparent MDF drop across the full recording was caused by a 66-min BLE reconnection gap, while the first continuous segment alone showed only 4.9% change. These findings show that field sEMG fatigue monitoring should be treated as a signal-trustworthiness problem rather than a direct application of laboratory EMG fatigue pipelines, requiring settling-aware baseline selection, contact-quality monitoring, IMU-conditioned interpretation, and continuity-aware session analysis.
+
+> **Version notes:** Version 2 recommended for 5-page conference paper (EMBC). Avoids "genuine fatigue" — uses "fatigue-consistent decline" and "consistent with local forearm fatigue" throughout. IMU novelty is present but not the only contribution. Three-phase trajectory is the central empirical result.
+>
+> **Alternative versions:**
+> - Version 1 (Conservative): Same structure, more cautious framing, less explicit novelty claim — use if reviewer risk is high
+> - Version 3 (Stronger): Foregrounds "trustworthiness-first" and "key contribution is not generic EMG–IMU fusion" — use if venue rewards bolder claims
 
 ---
 
@@ -27,7 +40,7 @@ Muscle fatigue monitoring during sports is important for performance optimizatio
 3. **Forearm placement and mechanical artifact constraint** — wrist/forearm placement is practical for tennis, but it exposes the electrode interface and lead wires to rapid wrist rotation, grip changes, cable tugging, snap-connector micro-motion, and racket-impact vibration. These effects can create short-duration motion artifacts distinct from the slower sweat-driven settling process.
 4. **Result:** EMG-based fatigue metrics (e.g., MDF drop) are unreliable during portions of a session where electrode contact is unstable — and the system has no way to know this without an external reference.
 
-**Key insight:** The IMU (already on the sensor for swing detection) provides exactly that external reference. If the IMU says "consistent swing biomechanics" but EMG shows an anomalous signal, the problem is the electrode, not the muscle. A further design constraint is **forearm-only deployment**: no sensors are mounted on the racket, avoiding added weight, battery burden, altered swing feel, and multi-device synchronization. Tennis-specific artifact handling therefore uses the existing forearm EMG+IMU signals; external audio/video are validation tools only.
+**Key insight:** The IMU (already on the sensor for swing detection) provides exactly that external reference — but not merely as another fatigue feature. Rather, the IMU serves as an *independent biomechanical context sensor* to interpret the validity of EMG spectral changes. Because tennis swings generate repeatable forearm kinematic signatures, stable IMU swing intensity provides a reference against which EMG changes can be evaluated: when EMG metrics change while IMU intensity remains stable, the change is unlikely to be explained by gross reduction in swing kinematics, and its cause — electrode settling, contact degradation, or local muscle fatigue — can be inferred from temporal context. This IMU-conditioned interpretation is the core contribution, distinct from conventional IMU+EMG fusion for fatigue classification.
 
 ---
 
@@ -43,7 +56,7 @@ When a dry snap electrode is applied to unabraded forearm skin without gel, the 
 Eccrine sweat glands produce saline (~150 mM NaCl) in response to exercise and heat. Sweat fills the electrode-skin gap, creating a low-impedance ionic bridge. Impedance drops from ~50 kΩ to ~2–5 kΩ. The rate depends on exercise intensity, ambient temperature, and skin condition — slower at session start (warm-up phase), slower indoors, slower on a cool day.
 
 **2. Ag/AgCl half-cell potential equilibration (slower, ~5–15 min)**
-The 3M Red Dot electrodes use Ag/AgCl chemistry. On first contact, the silver chloride surface hasn't equilibrated with the local skin electrolyte — the resulting half-cell potential drifts exponentially toward equilibrium. This produces slow baseline wander (low-frequency voltage drift) even after software detrending, contributing noise in the 0–20 Hz range that bleeds through the 50 Hz high-pass filter.
+The 3M Red Dot electrodes use Ag/AgCl chemistry. On first contact, the silver chloride surface hasn't equilibrated with the local skin electrolyte — the resulting half-cell potential drifts exponentially toward equilibrium. This produces slow baseline wander and time-varying electrode offsets. Although the slow drift is largely below the EMG analysis band, the unstable high-impedance interface can degrade common-mode rejection and increase low-frequency-dominant contamination near the lower part of the 50–450 Hz band, pulling MDF toward lower values.
 
 ### Why settling depresses MDF specifically
 
@@ -63,23 +76,37 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 - The 15-min skip being *worse* than 10-min (baseline 112 Hz vs. 137 Hz) reflects the RMS-based baseline selector catching swings mid-transition, where contact quality is still improving rapidly. This is not a contradiction — it shows the settling is not linear and a fixed time skip is a crude proxy for a proper quality-based criterion.
 
 ### One-sentence version for the abstract
-*"In field deployments, forearm electrode impedance decreases over 17–20 minutes as eccrine sweat hydrates the electrode-skin interface and the Ag/AgCl half-cell potential equilibrates, suppressing EMG spectral metrics during the transition and masking genuine fatigue in analyses using standard short warmup skips."*
+*"In field deployments, forearm electrode impedance decreases over 17–20 minutes as eccrine sweat hydrates the electrode-skin interface and the Ag/AgCl half-cell potential equilibrates, suppressing EMG spectral metrics during the transition and masking fatigue-consistent spectral decline in analyses using standard short warmup skips."*
 
 ---
 
 ## Core Contributions
 
-1. **Electrode settling characterization** — quantify how long forearm EMG takes to stabilize in a real tennis session. Data confirms settling extends to **at least 17–20 minutes**, not the commonly assumed 5 min. During settling, MDF is depressed **~42% below** the stable baseline, creating a false fatigue appearance. Standard 10-min and 15-min warmup skips are both insufficient (baseline still contaminated at 15 min: 112 Hz vs. stable 166 Hz).
+**Abstract-level novelty statement:** *This work does not propose another EMG–IMU fatigue classifier. Instead, it studies the validity of sEMG fatigue metrics in a realistic no-gel tennis deployment, quantifying prolonged electrode settling, warmup-skip sensitivity, contact-quality effects, and session-gap artifacts, while using the onboard IMU as a zero-cost context channel for interpreting when EMG spectral changes are trustworthy.*
 
-2. **IMU-conditioned EMG quality monitoring** — propose an artifact-aware interpretation framework in which IMU features provide independent motion context for EMG reliability. A practical slow-contact metric is:
-   ```
-   contact_quality(t) = RMS_window(t) / session_p90_rms
-   ```
-   Slow EMG instability with stable IMU swing intensity indicates electrode settling/contact issues; gradual MDF decline with stable IMU intensity supports physiological fatigue; short EMG transients coincident with large IMU shock/vibration peaks are candidate mechanical artifacts rather than fatigue. Validated in log0305: `imu_peak_mag` flat (Pearson r = +0.029, p = 0.468 across all 626 swings) throughout session while early EMG MDF was substantially depressed during electrode settling.
+**Umbrella framing — Trustworthiness-first wearable sEMG fatigue analysis:** Rather than treating MDF/MNF as automatically valid fatigue features, this work introduces a trustworthiness-first analysis pipeline that evaluates whether spectral EMG changes are interpretable under field deployment conditions. The individual contributions (C1–C6 below) all serve this shared goal.
 
-3. **Hidden fatigue revealed by proper settling correction** — log0305 showed **−2.6% MDF change** with standard 10-min skip (no fatigue found). With 20-min skip to clear the settling period, baseline stabilises at 199 Hz and a **28.1% MDF drop** (and 17.3% MNF drop) is revealed — genuine neuromuscular fatigue that was completely masked by electrode settling in the original analysis.
+**C1. Field characterization of electrode settling**
+We quantify prolonged no-gel forearm sEMG settling during tennis, showing that early MDF can remain contaminated for approximately 17–20 minutes (~42% below stable baseline). This failure mode is distinct from motion artifact and is under-documented in field sports deployments. Data: early-third MDF 115.7 ± 33.5 Hz vs. mid-session 167.6 ± 50.1 Hz. Both 10-min and 15-min warmup skips remain contaminated (baselines 137 Hz and 112 Hz vs. stable 166 Hz).
 
-4. **Session gap artifact** — log0303's apparent 28.7% MDF drop is confounded by a 66-minute BLE reconnection gap. Analysing the first segment alone (13.5 min, 111 swings) yields only a **4.9% MDF drop**, confirming no meaningful within-segment fatigue and that the full-session figure is a cross-segment artifact.
+**C2. Warmup-skip sensitivity as a recommended methodological audit**
+We demonstrate that fixed warmup exclusion is not a harmless preprocessing choice, and propose warmup-skip sensitivity analysis as a necessary robustness audit for field sEMG fatigue studies. The same log0305 session changes from −2.6% MDF change (10-min skip, fatigue-consistent decline missed) to +28.1% MDF drop (20-min skip, decline revealed). A 15-min skip produces −26.2% (inverted, still in settling). Baseline selection is a first-order determinant of fatigue interpretation in no-gel field deployments.
+
+**C3. Contact-quality-aware EMG interpretation**
+We propose a simple RMS-normalized contact-quality indicator:
+```
+contact_quality(t) = RMS_window(t) / session_p90_rms
+```
+and use temporal context (contact quality rising, MDF recovering) to identify the settling-to-stable transition, separating early electrode contact evolution from later fatigue-consistent spectral decline. Framed as a proposed practical indicator — qualitative, not clinical-grade impedance validation.
+
+**C4. IMU-conditioned EMG validity framework (IMU as one enabling tool)**
+We use the forearm IMU not as a generic fusion feature, but as an independent kinematic context channel to judge whether EMG changes are likely due to reduced gross swing motion, electrode/contact effects, mechanical artifacts, or fatigue-consistent spectral shift. Supported qualitatively in log0305: IMU swing-intensity proxy flat (r = +0.029, p = 0.468 across all 626 swings) while early EMG MDF was substantially depressed, confirming electrode settling — not reduced swing kinematics — as the cause. Because the IMU is already required for swing detection, this validity layer adds no sensing hardware or cost.
+
+**C5. Session-gap artifact detection in wearable fatigue analysis**
+We show that a 66-min BLE reconnection gap in log0303 creates an apparent 28.7% full-session MDF drop, while the first continuous segment alone shows only 4.9%. Treating disconnected BLE recordings as continuous physiological sessions is a real-world wearable failure mode. The hybrid abs_us timestamp reconstruction pipeline correctly preserves the gap, enabling detection.
+
+**C6. Three-phase spectral interpretation of no-gel field sEMG**
+No-gel field sEMG can exhibit a three-phase spectral trajectory: (1) early contact-induced MDF suppression (settling, MDF ~116 Hz); (2) mid-session signal recovery to a stable post-settling reference (~168 Hz); (3) late fatigue-consistent decline (~150 Hz). This three-phase pattern explains why both electrode settling and fatigue can depress MDF, but with different temporal contexts — and why temporal-context-aware interpretation is necessary. The early/mid/late PSD comparison (normalized band fractions: early low-band 75.6%, mid 38.1%, late 52.1%) provides the mechanistic spectral evidence for this trajectory.
 
 ---
 
@@ -145,11 +172,11 @@ The low-frequency noise shifts the PSD toward the bottom of the pass band, pulli
 | 10 min | `out0305` | 137.1 Hz | 140.7 Hz | **−2.6%** | Baseline in settling → false negative |
 | 10 min | `out0305_v2` | **166.0 Hz** | 140.8 Hz | **+15.2%** | RMS filter found post-settling swings → moderate fatigue |
 | 15 min | `out0305_w15` | 112.3 Hz | 141.8 Hz | **−26.2%** | Still in settling at 15 min → inverted baseline |
-| 20 min | `out0305_w20` | **199.2 Hz** | 143.2 Hz | **+28.1%** | Post-settling baseline → genuine fatigue revealed |
+| 20 min | `out0305_w20` | **199.2 Hz** | 143.2 Hz | **+28.1%** | Post-settling baseline → fatigue-consistent spectral decline revealed |
 
-**The settling period extends past 15 minutes.** Even at 15-min skip the baseline is only 112 Hz (below the stable 166 Hz), confirming the settling tail reaches at least 17–20 min. With 20-min skip, a **28.1% MDF drop** and **17.3% MNF drop** emerge — genuine neuromuscular fatigue that was entirely masked in the original 10-min analysis.
+**The settling period extends past 15 minutes.** Even at 15-min skip the baseline is only 112 Hz (below the stable 166 Hz), confirming the settling tail reaches at least 17–20 min. With 20-min skip, a **28.1% MDF drop** and **17.3% MNF drop** emerge — fatigue-consistent MDF/MNF decline that was entirely masked in the original 10-min analysis.
 
-**IMU cross-validation:** `imu_peak_mag` flat (r = +0.029, p = 0.468 across all 626 swings) throughout the session. The player did not reduce swing force or speed. The MDF drop therefore reflects physiological spectral shift (muscle fibre conduction velocity slowing), not reduced effort — the strongest possible interpretation of fatigue.
+**IMU cross-validation:** `imu_peak_mag` flat (r = +0.029, p = 0.468 across all 626 swings) throughout the session, indicating no measurable reduction in the IMU-derived swing-intensity proxy. The corrected MDF decline is therefore unlikely to be explained by reduced gross swing kinematics. Instead, the MDF/MNF decrease is consistent with a fatigue-related spectral shift in the forearm flexors — while acknowledging that direct physiological confirmation would require MVC, RPE, grip-force, or ball-speed measurements.
 
 ---
 
@@ -173,13 +200,13 @@ Warmup-skip sensitivity confirms this — the baseline remains contaminated unti
 | 15 min | 112 Hz | **Still** in settling |
 | 20 min | 199 Hz | Post-settling ✓ |
 
-### Finding 2: 28.1% Fatigue Signal Hidden by Electrode Settling (log0305)
+### Finding 2: 28.1% Post-Settling MDF Decline Hidden by Electrode Settling (log0305)
 
 With standard 10-min skip: MDF drop = −2.6% → fatigue not found.  
 With 20-min skip (post-settling baseline): MDF drop = **+28.1%**, MNF drop = **+17.3%**, fatigue onset at **1224 s (~20 min)**.  
-IMU `imu_peak_mag` is flat throughout (r = +0.029, p = 0.468 across all 626 swings) → fatigue is physiological, not effort reduction.
+IMU `imu_peak_mag` is flat throughout (r = +0.029, p = 0.468 across all 626 swings) → reduced gross swing kinematics is an unlikely explanation; MDF decline is fatigue-consistent.
 
-This is the central finding: **a standard analysis pipeline completely missed genuine fatigue because the warmup skip was 3× too short.**
+This is the central finding: **a standard analysis pipeline completely missed the post-settling fatigue-consistent spectral decline because the warmup skip was 3× too short.**
 
 ### Finding 3: IMU Flat Line Is the Cross-Validator
 
@@ -189,7 +216,7 @@ log0305 `imu_peak_mag`:
 - Late mean: 1665 ± 891 dps
 - Pearson r = **+0.029**, p = **0.468** across all 626 swings (non-significant, completely flat)
 
-The player maintained identical swing biomechanics for 63 minutes. Combined with the 28.1% MDF drop, this rules out reduced effort as the cause — the MDF shift is physiological fatigue.
+The player showed no measurable reduction in IMU swing-intensity proxy across 63 minutes (r = +0.029, p = 0.468). Combined with the 28.1% MDF drop, this makes reduced gross swing kinematics an unlikely explanation for the spectral shift. The MDF/MNF decrease is consistent with local forearm fatigue, though direct confirmation would require force or MVC/RPE measurements.
 
 ### Finding 4: log0303 Full-Session Drop Is a Gap Artifact
 
@@ -210,8 +237,11 @@ The player maintained identical swing biomechanics for 63 minutes. Combined with
 - Motivation: fatigue monitoring in sports, limitations of lab-based approaches
 - Challenge: practical wearable sEMG is harder than laboratory sEMG (sweating, movement, electrode placement constraints)
 - **Electrode settling sentence:** *"In laboratory EMG studies, electrode-skin impedance is minimised by skin abrasion and conductive gel applied before recording. In field deployments on a tennis court, neither preparation step is practical; instead, the interface relies on sweat to hydrate the electrode contact, a process that can take substantially longer than the 5-minute warmup skip commonly assumed in the literature."*
-- Gap: electrode settling duration in real sports sessions is under-documented; IMU cross-validation of EMG quality is unexplored for tennis
-- Contributions: (list 4 from Core Contributions section)
+- **Why not just rely on subjective fatigue? (motivation paragraph for Introduction body):** *"Tennis players can often perceive general tiredness or discomfort, but subjective perception is not a quantitative, muscle-specific measure of local fatigue. This distinction matters for overuse-risk monitoring: upper-extremity tennis injuries are frequently chronic and repetitive in nature, and lateral elbow tendinopathy is associated with repeated loading of forearm muscles and tendons [cite: AAOS]. A player may maintain swing speed through compensation even as local forearm muscle physiology changes — as shown in log0305, where IMU swing-intensity proxy remained flat across all 626 swings while corrected MDF/MNF declined. The long-term goal of wearable EMG monitoring is therefore not to tell a player something as simple as 'you feel tired,' but to provide objective, time-resolved, muscle-specific evidence of local fatigue and recovery across drills, sessions, and training weeks. Reliable fatigue characterization is a prerequisite for future overuse-risk estimation; however, this requires first establishing when field sEMG fatigue metrics are trustworthy under realistic no-gel, high-motion conditions — which is the focus of this paper."*
+- Gap: the validity of sEMG fatigue metrics in no-gel field tennis deployment is under-characterised — not just motion artifact, but slow electrode settling, warmup-skip sensitivity, contact degradation, and session-gap artifacts are poorly quantified in the sports EMG literature
+- **Central novelty statement (abstract-level):** *"This work does not propose another EMG–IMU fatigue classifier. Instead, it studies when wearable sEMG fatigue metrics are trustworthy in a realistic no-gel tennis deployment, quantifying prolonged electrode settling, warmup-skip sensitivity, contact-quality effects, and session-gap artifacts, while using the onboard IMU as a zero-cost context channel for interpreting EMG spectral changes."*
+- **Trustworthiness framing paragraph (for Introduction body):** *"The focus of this work is not simply EMG–IMU fusion, but the validity of EMG fatigue metrics under field deployment conditions. In no-gel tennis recordings, EMG spectral changes may arise from electrode settling, contact degradation, movement artifact, reduced swing kinematics, or local muscle fatigue. We therefore treat fatigue monitoring as a trustworthiness problem: before interpreting MDF/MNF changes physiologically, the system must determine whether the EMG signal is sufficiently stable and whether the observed spectral trend is consistent with the independent motion context. This motivates a combined analysis of warmup-skip sensitivity, contact-quality trends, session-continuity checks, and IMU-conditioned EMG interpretation."*
+- Contributions: list C1–C5 from Core Contributions section; IMU is contribution C4, not the headline
 
 ### 2. Related Work (~350 words)
 
@@ -240,7 +270,18 @@ Taborri et al. [Appl. Bionics Biomech. 2020] reviewed sport biomechanics applica
 **Gap:** No prior work uses IMU as an *independent quality validator* for EMG: checking whether swing biomechanics are consistent while EMG metrics are anomalous, to distinguish electrode settling artifact from genuine physiological fatigue or to identify tennis-specific mechanical artifacts.
 
 #### 2.5 Summary of Novelty
-This work is, to our knowledge, the first to: (1) quantify forearm electrode settling duration in field tennis (≥17–20 min vs. the 5–10 min assumed in the literature); (2) demonstrate that a standard analysis pipeline misses genuine fatigue entirely when the warmup skip is 3× too short; (3) use the IMU — already present for swing detection — as a zero-cost context sensor for EMG validity, distinguishing slow contact settling, stable-effort fatigue trends, and candidate fast mechanical artifacts; and (4) characterise the cross-segment gap artifact that appears when BLE reconnection gaps are treated as continuous sessions.
+This paper studies *when wearable sEMG fatigue metrics are trustworthy* in a no-gel field tennis deployment — a different question from conventional EMG+IMU feature fusion for classification. Five contributions:
+
+**(C1)** We quantify prolonged electrode settling in field tennis (≥17–20 min, ~42% MDF suppression), documenting a failure mode that is distinct from motion artifact and under-reported in sports EMG.
+
+**(C2)** We demonstrate warmup-skip sensitivity: the same session changes from −2.6% (10-min skip, fatigue missed) to +28.1% MDF drop (20-min skip) — showing that fixed warmup exclusion is not a harmless preprocessing choice.
+
+**(C3)** We propose an RMS-normalised contact-quality metric and use temporal context to separate electrode settling from fatigue-consistent spectral decline, offering a practical framework for quality-aware EMG interpretation in field deployment.
+
+**(C4)** We use the forearm IMU — already present for swing detection — as an independent kinematic context channel for EMG validity assessment, not as a co-equal feature source for fatigue classification. This IMU-conditioned interpretation adds no hardware cost.
+
+**(C5)** We identify and quantify a session-gap artifact in wearable fatigue analysis: a 66-min BLE reconnection gap creates an apparent 28.7% MDF drop in log0303, while the first continuous segment shows only 4.9%.
+
 
 ### 3. System Design (~500 words)
 
@@ -264,37 +305,67 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 - Session protocol: recreational tennis, single player, two sessions
 - Data description: log0303 (87.9 min, 197 swings) and log0305 (63.1 min, 626 swings)
 - Analysis approach: per-swing features, session thirds, Pearson trend analysis
+- **Electrode preparation (justification for dry electrodes):** Gel and skin preparation are standard in laboratory EMG [R5] but were not used in this study. This study intentionally evaluates a no-added-gel, field-deployable configuration because routine tennis training requires fast setup, minimal preparation, and minimal interference with player comfort. While gel electrodes remain appropriate for laboratory reference measurements, they are less practical for repeated on-court use. This choice motivates the characterisation of dry-electrode settling behaviour under field conditions.
 - **Electrode settling — physical basis (short paragraph for Methods):**
   > When a dry snap electrode is applied to unabraded forearm skin, the electrode-skin interface presents high impedance (10–100 kΩ) due to the resistive stratum corneum. Two parallel processes reduce this impedance over time: (1) sweat accumulation — eccrine glands produce saline (~150 mM NaCl) that hydrates the electrode-skin gap, creating a low-impedance ionic bridge; and (2) electrochemical equilibration — the Ag/AgCl electrode half-cell potential drifts until it reaches equilibrium with the local electrolyte, contributing low-frequency baseline wander during the transition. Both processes are slower in field conditions (no skin abrasion, no pre-applied gel) and depend on ambient temperature and exercise intensity. During the settling period, the attenuated EMG signal has poor SNR; the residual noise is low-frequency dominant within the 50–450 Hz bandpass, which depresses the estimated MDF below its true value. Once the interface is fully hydrated, MDF stabilises at the true resting value.
-- Electrode settling detection: track per-swing MDF vs. time; settling endpoint defined as first time rolling-mean MDF sustains ≥150 Hz for 5 consecutive swings
+- Electrode settling detection: settling region identified retrospectively using warmup-skip sensitivity and early/mid/late MDF recovery. Simple causal adaptive endpoint detection was explored (Experiment 9) but not used as the primary criterion — it triggered too early (~8.8 min) on the single available continuous session. The 20-min fixed skip is used as the primary warmup exclusion; its sensitivity is documented (Table of warmup-skip results).
 - Warmup-skip sensitivity test: re-run analysis at 10, 15, 20 min to quantify baseline contamination
-- IMU quality cross-validation: compare `imu_peak_mag` Pearson r vs time; if flat (|r| < 0.1) while early MDF is depressed → settling artifact, not fatigue
-- Contact quality metric: `contact_quality(t) = RMS(t) / session_p90_rms`; thresholds: >0.25 reliable, <0.10 contact loss
+- **IMU-conditioned EMG interpretation framework (Table X in paper):** We define the following diagnostic matrix to distinguish EMG spectral changes caused by electrode settling, fatigue-consistent physiological shift, reduced swing kinematics, mechanical artifact, or session discontinuity.
+
+  *Table X. IMU-conditioned interpretation of EMG spectral changes.*
+
+  | IMU / session context | EMG observation | Likely interpretation | Action |
+  |---|---|---|---|
+  | Stable swing intensity | Early-session low MDF/MNF that later recovers | Electrode settling / contact hydration | Exclude from baseline; delay fatigue analysis |
+  | Stable swing intensity | Gradual post-settling MDF/MNF decline | Fatigue-consistent spectral shift | Treat as candidate local fatigue |
+  | Declining swing intensity | MDF/MNF decline | Reduced effort or changed biomechanics may contribute | Do not attribute to fatigue alone |
+  | Large transient IMU shock/vibration | Isolated EMG spectral outlier | Candidate mechanical artifact | Flag or down-weight swing |
+  | BLE/session discontinuity | EMG baseline shift across segments | Cross-segment/session artifact | Analyse segments separately |
+
+  The diagnostic value comes from modality mismatch: when IMU swing intensity remains stable but EMG spectral metrics change, the EMG change is unlikely to be caused by reduced gross swing motion and must be interpreted through temporal context — early recovery suggests settling; late post-settling decline is fatigue-consistent.
+
+- **IMU quality cross-validation (quantitative test):** compare `imu_peak_mag` Pearson r vs time. For this pilot, a near-zero Pearson trend was treated as evidence of stable gross swing kinematics; this threshold is used descriptively, not as a validated universal cutoff. In log0305: r = +0.029, p = 0.468 — consistent with stable kinematics throughout.
+- Contact quality metric: `contact_quality(t) = RMS(t) / session_p90_rms` — used as a relative qualitative indicator only; because it is not validated against direct impedance, we interpret its trend rather than applying absolute thresholds (proposed exploratory thresholds >0.25 reliable, <0.10 contact loss are in Appendix D)
 - Artifact-aware per-swing interpretation: gradual MDF/MNF changes over many swings with stable IMU intensity are attributed to fatigue; isolated EMG outliers coincident with large IMU acceleration peaks are treated as candidate mechanical artifacts (Appendix E).
 
 ### 5. Results (~500 words)
-- 5.1 Electrode settling: log0305 first-third MDF = 115.7 Hz vs. mid-session 167.6 Hz; late-session MDF = 149.5 Hz; table of thirds; settling takes ≥17–20 min
-- 5.2 Warmup-skip sensitivity: table (10-min: −2.6%, 15-min: −26.2%, 20-min: +28.1%) — show that standard pipeline missed fatigue entirely
-- 5.3 IMU cross-validation: `imu_peak_mag` flat (r=+0.029, p=0.468 across all 626 swings) confirms EMG changes are not explained by reduced swing intensity; combined with 28.1% MDF drop → genuine physiological fatigue
+- **5.1 Three-phase MDF trajectory — the central visual explanation of field sEMG validity:** log0305 showed a three-phase MDF pattern rather than a monotonic decline:
+
+  | Phase | Time range | MDF | Interpretation |
+  |---|---|---|---|
+  | I — Electrode settling | 0–21 min | 115.7 ± 33.5 Hz | Contact-induced MDF suppression; poor SNR |
+  | II — Settled reference | 21–42 min | 167.6 ± 50.1 Hz | Post-settling stable baseline; valid signal |
+  | III — Fatigue-consistent decline | 42–63 min | 149.5 ± 45.1 Hz | MDF drops from settled reference; reduced gross swing kinematics is unlikely (IMU flat) |
+
+  *Key interpretation: the early and late low-MDF regions should not be interpreted the same way. Early suppression reflects contact settling — MDF subsequently recovered to the mid-session reference while IMU swing intensity remained stable, which is more consistent with electrode contact improvement than physiological fatigue. Late decline occurs after the settled reference and is therefore more fatigue-consistent.*
+
+  This three-phase pattern directly explains the non-monotone warmup-skip sensitivity: a 10- or 15-min skip still samples the settling transition (producing artificially low baseline at 137 Hz or 112 Hz); a 20-min skip shifts baseline selection to Phase II, revealing the Phase III decline (+28.1% MDF drop).
+- 5.2 Warmup-skip sensitivity: table (10-min: −2.6%, 15-min: −26.2%, 20-min: +28.1%). Note on 166 Hz vs 199 Hz: 166 Hz = stable mid-session reference from Phase II thirds analysis; 199.2 Hz = baseline from 20-min fixed warmup-skip pipeline. Both confirm 10/15-min skips are contaminated; see Methods for explanation. The post-settling MDF decline was entirely masked by standard short warmup skips.
+- 5.3 **IMU-conditioned validity separates settling from fatigue-consistent decline:** `imu_peak_mag` flat (r=+0.029, p=0.468 across all 626 swings); early low MDF with stable IMU → settling (Table X, row 1); late MDF decline with stable IMU → fatigue-consistent shift (Table X, row 2); reduced gross swing kinematics is an unlikely explanation. Figure 7 shows the diagnostic scatter: Early/Mid/Late swings cluster at different MDF levels despite overlapping IMU intensity. IMU peak magnitude is a kinematic proxy, not a direct force measurement; direct confirmation requires MVC, RPE, or ball-speed measurements.
 - 5.4 Contact quality metric over session (log0305): rises from settling to stable
 - 5.5 log0303 gap artifact: full-session 28.7% drop vs. seg1-only 4.9% drop
 
 ### 6. Discussion (~400 words)
-- **Electrode settling interpretation:**
-  > The observed settling duration of ≥17–20 min is consistent with the time required for eccrine sweat glands to reach steady-state output under moderate exercise on an indoor court, combined with the exponential decay of the Ag/AgCl half-cell potential drift. The non-monotone behaviour of the warmup-skip sensitivity (15-min baseline = 112 Hz, lower than the 10-min baseline = 137 Hz) reflects the interaction between RMS-based baseline selection and the settling curve: the RMS filter at 15-min happened to select swings from the steepest part of the transition, where contact quality is still improving. This underscores that a fixed warmup-skip time is a crude heuristic — a contact-quality-aware adaptive skip would be more robust.
-- **Practical recommendation:** Extend warmup skip to ≥20 min for forearm snap-electrode deployments in field tennis. The pipeline parameter `warmup_skip_min` should default to 20 for this sensor/placement combination.
-- **IMU cross-validation:** The IMU is already on the device for swing detection — using it as a quality monitor adds zero hardware cost. The decision rule (IMU consistent + MDF depressed → settling; IMU consistent + MDF dropping → fatigue) turns a qualitative observation into a testable, automatable criterion.
-- Why log0305 showed genuine fatigue once corrected: 626 swings at ~10/min for 63 min represents significant cumulative forearm flexor load, consistent with 28.1% MDF drop even without perceptible biomechanical degradation.
+- **Three-phase trajectory interpretation — the central insight:**
+  > The MDF trajectory in log0305 was not monotonic. It showed three phases: early MDF suppression during electrode settling (Phase I, ~116 Hz), mid-session recovery to a stable settled reference (Phase II, ~168 Hz), and late-session MDF decline consistent with local fatigue (Phase III, ~150 Hz). **The critical observation: early and late low-MDF regions should not be interpreted the same way.** The early low-MDF period was not interpreted as fatigue because MDF subsequently recovered to the mid-session reference while IMU swing intensity remained stable — this recovery pattern is more consistent with electrode contact improvement than with physiological fatigue. The three-phase pattern directly explains the non-monotone warmup-skip sensitivity: 10/15-min skips still sample the settling transition; 20-min skip reaches Phase II, revealing the Phase III decline.
+- **Electrode settling physical interpretation:**
+  > The observed settling duration of ≥17–20 min is consistent with the time required for eccrine sweat glands to reach steady-state output under moderate exercise on an indoor court, combined with the exponential decay of the Ag/AgCl half-cell potential drift. The non-monotone warmup-skip sensitivity (15-min baseline = 112 Hz, lower than the 10-min baseline = 137 Hz) reflects the RMS filter catching swings in the steepest part of the settling transition. This underscores that a fixed warmup-skip time is a crude heuristic — a contact-quality-aware adaptive skip would be more robust (but failed on a single session, Experiment 9; cross-session calibration required).
+- **Practical recommendation:** Extend warmup skip to ≥20 min for forearm snap-electrode deployments in field tennis. Report warmup-skip sensitivity as a standard robustness audit. The pipeline parameter `warmup_skip_min` should default to 20 for this sensor/placement combination.
+- **Why IMU matters — the methodological contribution (~100 words):**
+  > The IMU contribution in this work is not conventional feature fusion. Instead, the IMU serves as an independent context sensor for EMG validity assessment. In dynamic sports, EMG spectral metrics can change because of physiological fatigue, electrode settling, contact degradation, motion artifact, or reduced movement intensity — mechanisms that are difficult to distinguish from EMG alone. By tracking forearm swing intensity, the IMU provides a kinematic reference: if EMG MDF changes while IMU intensity remains stable, the change is unlikely to be explained by gross reduction in swing motion. In log0305, this logic separated early electrode settling (stable IMU, low recovering MDF — Phase I) from later post-settling MDF decline (stable IMU, gradual MDF drop — Phase III), while in log0303 the reconstructed session gap prevented a misleading cross-segment fatigue interpretation. Because the IMU is already required for swing detection, this validity layer adds no hardware cost.
+- **IMU cross-validation (result):** The decision rule (stable IMU + early depressed MDF → settling; stable IMU + late MDF decline → fatigue-consistent) turns a qualitative observation into a testable, automatable criterion.
+- Why log0305 showed fatigue-consistent spectral decline once settling corrected: 626 swings at ~10/min for 63 min represents significant cumulative forearm flexor load, consistent with 28.1% MDF drop under stable gross swing kinematics.
 - **Motion artifact landscape in tennis sEMG (~100 words):**
   > Wrist/forearm EMG in tennis faces a richer artifact environment than laboratory or rehabilitation settings. The main sources include slow electrode settling, skin stretch, cable or snap-connector tugging, triboelectric/electromagnetic pickup in moving leads, powerline interference, rest-period baseline noise, and ball-impact vibration. The current pipeline mitigates several of these: the 50 Hz high-pass filter reduces low-frequency skin-stretch artifacts; placing the MyoWare amplifier close to the electrodes keeps the high-impedance unamplified path short, reducing but not eliminating cable-sway artifact [R18, R19]; 60/120 Hz notch filters remove powerline noise; and IMU swing gating excludes rest-period windows. The least-resolved artifact source is ball-impact impulsive vibration, which can contaminate MDF/MNF because it falls within or near the EMG analysis band. A forearm IMU jerk or acceleration event near the expected contact phase provides a candidate impact-risk trigger, but not confirmed ball-contact timing. Future validation should use low-burden audio or video labels — for example, IMU-gated acoustic onset detection from a phone microphone — rather than adding deployed racket-mounted hardware that changes swing feel and introduces battery and synchronization burden. REF electrode placement over the lateral epicondyle (bony prominence, opposite side of forearm from flexors) follows vendor guidance [R20] and minimises crosstalk from the target flexors into the reference signal, a factor SENIAM guidelines do not address for this muscle group.
-- Limitations: single player, two sessions, no RPE or MVC ground truth, settling duration likely varies with player sweat rate, skin condition, ambient temperature
-- Future work: multi-player study, adaptive warmup skip based on contact quality metric, IMU-guided motion artifact algorithms (see Appendix E), RPE integration, real-time settling detection in Android app
+- Limitations: single player, two sessions (pilot case study), no RPE / MVC / grip-force / ball-speed ground truth; settling duration varies with sweat rate, ambient conditions, skin preparation; per-swing statistics are not independent (swings cluster within bouts and sessions — main conclusion relies on effect sizes and warmup-skip sensitivity rather than p-values alone); the 20-min warmup skip is empirically selected for this session, not a universal threshold; contact quality metric not validated against direct impedance
+- Future work: multi-player study, adaptive warmup skip based on contact quality metric, IMU-guided motion artifact algorithms (see Appendix E), RPE integration, real-time settling detection in Android app. Longer-term, validated per-session fatigue metrics can feed into multi-session workload monitoring by combining EMG spectral trends with RPE/pain reports, grip strength or MVC, and training volume — the prerequisite step toward overuse-risk estimation. This paper addresses that prerequisite: trustworthy field EMG measurement.
 
 ### 7. Conclusion (~150 words)
 - Wearable sEMG for tennis has practical challenges beyond motion artifact
-- Electrode settling extends ≥17–20 min — standard 5–10 min skip misses genuine fatigue entirely (−2.6% with 10-min skip vs. +28.1% with 20-min skip on the same data)
-- IMU provides a free, always-on quality cross-validator already present for swing detection
-- Two-session case study: log0305 revealed genuine fatigue once settling corrected; log0303 gap artifact warns against treating disconnected recordings as continuous fatigue data
+- **Key observation:** The key finding is not simply that MDF decreased, but that MDF first recovered from an early contact-induced suppression before declining later — a three-phase trajectory (Phase I settling → Phase II settled reference → Phase III fatigue-consistent decline) that separates electrode settling from fatigue-consistent spectral change
+- Electrode settling extends ≥17–20 min — standard 5–10 min skip misses the fatigue-consistent spectral decline entirely (−2.6% with 10-min skip vs. +28.1% with 20-min skip on the same data); the warmup-skip sensitivity analysis is a simple required robustness audit for no-gel field sEMG studies
+- IMU provides a zero-cost independent context channel for EMG validity: stable IMU + early low MDF → settling; stable IMU + late MDF decline → fatigue-consistent
+- Two-session case study: log0305 demonstrated the three-phase trajectory; log0303 gap artifact warns against treating disconnected BLE recordings as continuous fatigue data
 
 ---
 
@@ -303,12 +374,12 @@ This work is, to our knowledge, the first to: (1) quantify forearm electrode set
 | # | Figure | Data source | Status |
 |---|--------|-------------|--------|
 | 1 | System overview diagram (sensor + pipeline) | Diagram | ⏳ Manual |
-| 2 | **Electrode settling: MDF vs. time + contact quality (first 30 min, log0305)** — two-panel: MDF suppression + RMS-derived contact quality, settling ~17–20 min. *Caption: Figure 2 shows early-session MDF suppression during the same interval in which RMS-derived contact quality is changing. The 10- and 15-min markers fall inside the shaded settling region, while the 20-min marker occurs near the transition to a more stable post-settling baseline. This supports the conclusion that electrode settling lasts approximately 17–20 min in log0305.* | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig2_electrode_settling.png` |
+| 2 | **Three-phase MDF trajectory (log0305, full session) — central visual explanation.** Two-panel: (A) MDF vs. time with three shaded phases (Phase I settling 0–21 min, Phase II settled reference 21–42 min, Phase III fatigue-consistent 42–63 min) + rolling median + warmup lines + 166 Hz reference; (B) phase summary bar chart with mean ± std. *Caption: Figure 2. Three-phase MDF trajectory in log0305. Phase I (early, 0–21 min): MDF 115.7 ± 33.5 Hz, contact-induced suppression during electrode settling. Phase II (mid, 21–42 min): MDF 167.6 ± 50.1 Hz, post-settling stable reference. Phase III (late, 42–63 min): MDF 149.5 ± 45.1 Hz, fatigue-consistent decline. The early and late low-MDF regions have different causes: early suppression reflects poor electrode contact; late decline occurs after the settled reference period and is therefore more fatigue-consistent. The 10- and 15-min warmup markers fall inside the settling-contaminated region; the 20-min marker occurs near the Phase I → II transition, explaining why the 20-min skip reveals the Phase III decline while shorter skips do not.* | `out0305_w20/swing_features.csv` | ⏳ Update `fig2_electrode_settling.png` to full-session three-phase layout |
 | 3 | **IMU consistency vs MDF fatigue trend (log0305)** — two-panel: post-settling MDF drop (Panel A) + flat IMU across all 626 swings (Panel B), rolling median, per-third means, Pearson r. *Caption: Figure 3. The top panel shows the post-settling MDF trajectory, while the bottom panel shows peak gyro magnitude for the same swings. IMU swing intensity remained flat across the session (Pearson r = +0.029, p = 0.468, all 626 swings), with nearly identical early, middle, and late means, while MDF declined after the corrected 20-min baseline. Because the independent IMU effort proxy did not decline, the corrected MDF drop is not explained by reduced swing effort. Note: IMU peak gyro is a biomechanical effort proxy, not a direct muscle force measurement.* | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig3_imu_consistency.png` |
 | 4 | **Warmup-skip sensitivity bar chart** — −2.6% / +15.2% / −26.2% / +28.1% | fatigue_summary files + confirmed original-pipeline value | ✅ `paper_figures/fig4_warmup_skip_sensitivity.png` |
 | 5 | **Contact quality over session — both sessions.** Two-panel: log0305 (top) + log0303 (bottom). Rolling median, per-third labels, settling zone (0–20 min), segment annotations for log0303. *Caption: Figure 5. Contact quality (RMS / session p90-RMS) over session. Top panel (log0305): early third 0.36 ± 0.28 rises to mid-session peak 0.49 ± 0.47, with late session 0.25 ± 0.32 — consistent with electrode settling early, peak activation mid-session, and fatigue-related amplitude decline late. The trend is not monotone, reflecting that contact quality conflates electrode impedance (settling) and muscle force output (fatigue). The settling zone (0–20 min) overlaps the period of lowest early CQ. Bottom panel (log0303): Segment 1 CQ = 0.26, Segment 2 CQ = 0.59 (Δ = +0.32) — the electrode contact state changed substantially during the 66-min BLE gap, directly supporting the cross-segment artifact interpretation.* | `out0303_v2/swing_features.csv`, `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig5_contact_quality.png` |
 | 6 | **log0303 gap artifact: MDF over full session with annotated BLE gap.** Segment 1 (navy diamonds + rolling median), full session (orange + rolling median), baseline MDF line, segment region labels, drop % summary box. *Caption: Figure 6. log0303 contains two BLE connections separated by a 66-min gap. The full-session analysis compares Segment 1 swings (0–13.5 min) against Segment 2 swings (80–88 min) across this gap, yielding an apparent 28.7% MDF drop. Segment 1 analysed in isolation shows only 4.9% — below any meaningful fatigue threshold. The apparent full-session drop is a cross-segment artifact: the electrode contact state and player condition both changed during the gap, making the comparison physiologically meaningless.* | `out0303_v2/swing_features.csv`, `out0303_seg1/swing_features.csv` | ✅ `paper_figures/fig6_log0303_gap_artifact.png` |
-| 7 | **IMU-EMG diagnostic matrix — imu_peak_mag vs MDF, coloured by session third.** Median crosshairs per third with annotations, 166 Hz stable reference, corrected quadrant labels, key narrative box. *Caption: Figure 7. Scatter of IMU swing intensity (x-axis, effort proxy) vs MDF (y-axis) for all 626 swings in log0305, coloured by session third. Early (tomato) and Late (blue) swings both cluster at lower MDF than Mid (gold), despite similar IMU intensity across all three thirds. This confirms that neither the early MDF suppression (electrode settling) nor the late MDF decline (fatigue) is caused by reduced swing effort — the IMU is flat while MDF varies.* | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig7_imu_emg_diagnostic_matrix.png` |
+| 7 | **IMU-EMG diagnostic matrix — central novelty figure.** imu_peak_mag vs MDF scatter coloured by session third, median crosshairs, 166 Hz reference line, diagnostic quadrant annotations. *Caption: Figure 7. IMU-conditioned EMG diagnostic matrix for log0305. Each point represents one detected tennis swing; IMU peak gyro magnitude is used as a gross swing-intensity proxy (kinematic, not force) and EMG median frequency as the spectral fatigue/contact metric. Points are coloured by session third. Early-session swings show depressed MDF despite similar IMU intensity, consistent with electrode settling rather than reduced motion (Table X, row 1). Mid-session swings form the post-settling reference region. Late-session swings show lower MDF while IMU intensity remains similar, supporting a fatigue-consistent spectral shift rather than a gross reduction in swing kinematics (Table X, row 2). IMU peak magnitude remained flat across all 626 swings (r = +0.029, p = 0.468). IMU peak magnitude is a kinematic proxy, not a direct muscle force measurement; direct physiological confirmation would require MVC, RPE, grip force, or ball-speed measurements.* | `out0305_w20/swing_features.csv` | ✅ `paper_figures/fig7_imu_emg_diagnostic_matrix.png` |
 | 8 | **Experiment 10: High-dynamic IMU event PSD gateway analysis** — NULL/NEGATIVE result. acc_dyn peak finds swing apex (median offset −4.7 ms from gyro peak), not ball contact. Near-peak delta_log_hf_lf = −0.265 (negative). Batch C deprioritized. Generated separately by `exp10_high_dynamic_psd.py`. | `log0305/` raw logs, `out0305_w20` | ✅ `paper_figures/fig8_high_dynamic_event_psd.png` |
 | E6 | **Experiment 6: IMU-quiet EMG baseline tracker — both sessions.** DC-removed raw EMG RMS during sliding windows where gyro < 50 dps (500 ms), two-panel: log0305 + log0303. *Wording: DC-removed raw EMG RMS; not equivalent to preprocessed 50–450 Hz RMS; may include grip tension and low-frequency artifacts. Key values — log0305: Early 114.7±185.1, Mid 51.1±44.3 (2.24× ratio). log0303: Seg1 13.2 vs Seg2 67.1 (Δ=+53.9). Caption: DC-removed raw EMG RMS during IMU-quiet windows (gyro < 50 dps) shows 2.24× higher amplitude in the early session of log0305, consistent with electrode settling. In log0303, baseline amplitude is markedly different between segments separated by the 66-min BLE gap. Note: these windows are not restricted to between-swing gaps; any IMU-quiet period in the full session qualifies.* | `log0305/`, `log0303/` raw logs | ✅ `paper_figures/fig9_rest_noise_floor.png` |
 | E7 | **Robust fatigue slope — outlier detection + OLS vs Theil-Sen (Exp 7).** Two-panel: log0305 post-warmup + log0303 Seg1. MAD filter (3×MAD threshold, 7-swing window). *Key values — log0305: 18.2% outliers; OLS slope barely changes (−0.571→−0.558 Hz/min); Theil-Sen much shallower (−0.117 Hz/min), indicating a few extreme drops inflate OLS. log0303 Seg1: Theil-Sen slope = +2.9 Hz/min (positive — MDF rising during settling). Caption: MAD-based outlier filtering flags 18–22% of swings as transient artifacts. For log0305, OLS slope is robust to outlier removal, but the Theil-Sen estimate is substantially shallower than OLS, indicating that a small number of extreme low-MDF swings inflate the ordinary least-squares slope. For log0303 Segment 1, the Theil-Sen slope is positive (+2.9 Hz/min), revealing that MDF was rising during this settling period — consistent with electrode contact improving — while OLS gives a weakly negative slope dominated by outliers.* | `out0305_w20`, `out0303_seg1` | ✅ `paper_figures/fig10_outlier_robust_slope.png` |
@@ -404,9 +475,39 @@ These limitations should be stated explicitly in the paper.
 
 **This is Paper 1 of two** — focuses on the scientific findings (electrode settling + IMU quality validation). The system engineering work is the *platform* that enabled these findings; a full system design paper is planned separately (see `paper2.md`).
 
-**Primary:** IEEE Engineering in Medicine and Biology Conference (EMBC) — student poster/paper track  
-**Alternative:** IEEE HealthTech, Body Sensor Networks (BSN), or regional IEEE EMBS chapter  
-**Format:** 5-page conference paper (target); trim to 4 if needed  
+**Primary: CNIB 2026** — XLIX Congreso Nacional de Ingeniería Biomédica  
+Dates: October 15–17, 2026 | Centro Cultural y de Convenciones de Oaxaca  
+Submission deadline: **May 23, 2026** (~2 weeks from now)  
+EasyChair: https://easychair.org/cfp/cnib2026  
+Best track(s): **Biomedical Signal Processing** (primary) + **Biomechanics and Wearable Systems**  
+Format: 4–5 page conference paper  
+Framing: **pilot / methodological paper** — field-validity study, not definitive fatigue physiology
+
+**Why CNIB over EMBC for this version:**
+- CNIB appreciates applied, deployable systems with practical engineering lessons
+- N=1 pilot more acceptable as a methodological demonstration at this venue
+- Topic fit: Procesamiento de Señales Biomédicas + wearable systems is exact match
+- EMBC would require multi-subject validation and direct impedance measurement for acceptance
+- Use EMBC as target for Paper 2 (systems paper) or after multi-player data collected
+
+**Alternative (if CNIB does not work out):** IEEE HealthTech, BSN, or regional IEEE EMBS chapter
+
+---
+
+## Submission Checklist (2-week plan, deadline May 23)
+
+### Must-do before submission
+- [ ] Regenerate **Figure 2** as full-session three-phase layout (update `paper_figures.py` Fig 2 block)
+- [ ] Convert `paper.md` planning doc into a clean 4–5 page paper (start with Abstract + Intro)
+- [ ] Obtain and apply CNIB author template / page format from easychair.org/cfp/cnib2026
+- [ ] Select CNIB topic track(s) on EasyChair
+- [ ] Trim appendix-heavy experiments to supplementary / brief Discussion mention
+- [ ] Final pass: verify no "genuine fatigue" remains; check all numbers match paper_stats.txt
+- [ ] Check references (R1–R28): verify PMIDs, DOIs before submission
+
+### Optional (only if fast, do not delay submission)
+- [ ] One impedance/pre-wet session (Level 1 from Appendix E8) — strengthens settling claim
+- [ ] Submit also to EMBC student track as backup
 
 ---
 
@@ -488,7 +589,7 @@ Every empirical claim rests on a single individual on a single day. Settling dur
 Electrode settling is inferred from MDF behaviour, not measured directly. The core confound: muscle physiological warm-up also raises MDF in the first 15-20 min (muscle temperature increases conduction velocity). Without an impedance meter or a pre-wetted electrode control condition, these two effects cannot be fully separated.
 
 **A3. No MVC or RPE ground truth**
-The 28.1% MDF drop is called "genuine fatigue" supported by flat IMU (r = +0.029, p = 0.468 across all 626 swings). Without a maximal voluntary contraction test or rating of perceived exertion, fatigue magnitude cannot be independently confirmed.
+The 28.1% MDF drop is described as "fatigue-consistent spectral decline" supported by flat IMU (r = +0.029, p = 0.468 across all 626 swings). Without a maximal voluntary contraction test or rating of perceived exertion, fatigue magnitude cannot be independently confirmed.
 
 **A4. Non-monotone warmup-skip sensitivity**
 15-min skip gives a LOWER baseline (112 Hz) than 10-min skip (137 Hz). Explained by the RMS filter catching swings in the steepest part of the settling transition, but reviewers will notice. Needs a clear explanation in Results or Discussion.
@@ -550,7 +651,7 @@ Response: The RMS-based baseline selector picks highest-RMS swings after the ski
 Response: Justified from the session-wide gyro distribution (p88, at swing population onset). Tennis forehand peaks (400-800 dps) are well above 300 dps for adult recreational players. Per-player calibration may be needed for juniors or players with weaker strokes (acknowledged in Future Work).
 
 **C5. "MDF drop could reflect reduced effort -- IMU measures wrist rotation, not muscle force."**
-Response: Flat imu_peak_mag (r = +0.029, p = 0.468 across all 626 swings) means the player maintained consistent peak gyro rotation speed throughout. Reduced wrist rotation speed would be expected with effort reduction. We acknowledge it is not a direct muscle force measurement.
+Response: The IMU-derived swing-intensity proxy (peak gyro magnitude) showed no measurable reduction across all 626 swings (r = +0.029, p = 0.468). A gross reduction in swing kinematics is therefore an unlikely explanation for the MDF decline — if the player had substantially reduced swing speed, peak forearm angular velocity would be expected to decrease. We explicitly acknowledge that IMU does not measure muscle force directly, and that athletes can maintain swing kinematics while experiencing local muscle fatigue via increased neural drive, motor unit recruitment, or technique compensation. The correct framing is: "reduced gross swing kinematics is an unlikely explanation," not "fatigue is proven." Direct confirmation would require MVC, RPE, grip force, or ball-speed measurement.
 
 **C6. "The contact quality metric is not validated."**
 Response: Introduced as a proposed indicator, interpreted qualitatively. Quantitative validation against impedance is future work. Presented as a practical tool, not a validated clinical metric.
@@ -560,6 +661,28 @@ Response: The failure is documented as a known issue with the SparkFun Wireless 
 
 **C8. "Why not use a commercial system (Delsys, Noraxon)?"**
 Response: Commercial research-grade systems cost $5,000-$30,000. The MyoWare 2.0 + ESP32 system costs ~$99 total, making it accessible for field deployment by coaching staff, youth sports programs, and student researchers. Low cost is a core contribution.
+
+**C9. "Per-swing statistics inflate sample size — swings are not independent."**
+Response: We use per-swing statistics primarily to describe within-session trends and sensor consistency, not to make population-level inference. Swings are clustered within bouts and within one session, which reduces effective degrees of freedom. We acknowledge this limitation and note that the main fatigue conclusion relies on effect-size contrasts (28.1% MDF drop) and warmup-skip sensitivity analysis rather than p-values alone. Bout-level aggregation was tested as a robustness check; it preserved the negative trend direction but reduced statistical power due to fewer data points (36 post-warmup bouts, p=0.415). The warmup-skip sensitivity finding (same session, three different conclusions depending on skip length) is independent of this concern.
+
+**C10. "Was the 20-min warmup skip selected post hoc?"**
+Response: Yes — the 20-min value is empirically selected in this pilot case study based on warmup-skip sensitivity analysis and mid-session MDF recovery. It is not proposed as a universal threshold. The contribution is that 10–15 min can be insufficient and that warmup-skip sensitivity analysis should be reported as a standard robustness check. The adaptive settling endpoint (Experiment 9) was explored but triggered too early on a single session; cross-session calibration is required. Future work will calibrate adaptive criteria across subjects with more sessions.
+
+**C11. "Tennis players can feel fatigue. Why do we need EMG sensors?"**
+Response: Players can perceive global tiredness and discomfort, but subjective perception is not the same as localized forearm muscle fatigue. In tennis, players may maintain swing speed through compensation (increased neural drive, motor unit recruitment, involvement of proximal muscles) even as local forearm flexor physiology changes — which is exactly what log0305 shows: IMU swing-intensity proxy remained flat across all 626 swings (r = +0.029, p = 0.468) while corrected MDF/MNF declined. EMG provides localized, time-resolved, muscle-specific information that subjective feeling alone cannot provide, especially for early-session contact effects, session-to-session trends, and future overuse-risk monitoring. The purpose of this system is not to replace player perception; it is to provide objective evidence of local muscle-state changes that may precede subjective fatigue or performance breakdown, as a prerequisite for future overuse-risk estimation. This paper solves the prerequisite step: determining when wearable EMG fatigue metrics are trustworthy in real tennis field conditions.
+
+**Reviewer-defence hierarchy:**
+
+| Reviewer question | Your answer |
+|---|---|
+| "Can't players feel fatigue?" | Yes, but subjective fatigue is global and coarse; EMG provides localized, quantitative muscle-state information |
+| "Why not just use IMU?" | IMU captures motion, not local muscle physiology; log0305 shows IMU stayed flat while MDF changed |
+| "Why not just ask RPE?" | RPE is useful but does not localize forearm flexor fatigue or distinguish compensation from spectral change |
+| "Does this predict injury?" | Not yet; reliable fatigue measurement is the first step toward future overuse-risk monitoring |
+| "What is new here?" | We show that field sEMG fatigue metrics can be invalid unless settling, contact quality, IMU context, and session continuity are handled |
+| "N=1 — too weak" | Framed as pilot; main contribution is methodological (warmup-skip sensitivity changes conclusion from −2.6% to +28.1%) not population inference |
+| "20-min skip post hoc?" | Yes, empirically selected; contribution is showing sensitivity, not a universal threshold |
+| "Per-swing stats inflate n?" | Per-swing used descriptively; main result relies on effect sizes and warmup-skip sensitivity, not p-values alone |
 
 ---
 
@@ -1278,3 +1401,131 @@ Revised priorities:
 
 All Level 0-4 validation experiments require only existing hardware + phone.
 Racket-mounted sensor is not in the 2-month plan.
+
+---
+
+### F. CNIB2026 Submission — 2-Week Plan (Deadline: May 23, 2026)
+
+**Venue:** XLIX Congreso Nacional de Ingeniería Biomédica (CNIB 2026)  
+**Dates:** October 15–17, 2026 | Oaxaca, Mexico  
+**Deadline:** May 23, 2026  
+**Tracks:** Biomedical Signal Processing (primary) + Biomechanics and Wearable Systems  
+**Format:** 4–5 page conference paper  
+**Framing:** Pilot / methodological field-validity study — not definitive fatigue physiology
+
+---
+
+#### Week 1 — Paper draft + Figure 2 (now → May 16)
+
+**Day 1–2: Figure 2 regeneration (must-do first)**
+- [ ] Update `paper_figures.py` Fig 2 block: change from first-30-min settling curve to
+      full-session (63 min) three-phase layout
+  - Panel A: MDF vs. time with three shaded phases
+    - Phase I (0–21 min): settling, light red shade
+    - Phase II (21–42 min): settled reference, light green shade
+    - Phase III (42–63 min): fatigue-consistent, light blue shade
+    - Rolling median (causal, window=15), warmup lines at 10/15/20 min, 166 Hz reference
+  - Panel B: bar chart — mean ± std per phase (three bars)
+    - Phase I: 115.7 ± 33.5 Hz
+    - Phase II: 167.6 ± 50.1 Hz
+    - Phase III: 149.5 ± 45.1 Hz
+  - Optional Panel C: IMU peak mag over session showing flat trend (r=+0.029, p=0.468)
+- [ ] Regenerate all figures (run `paper_figures.py`)
+- [ ] Confirm fig2 caption matches Three-Phase narrative in paper.md Figures table
+
+**Day 3–5: Write Introduction + System+Methods**
+- Introduction (~300 words):
+  - Problem: field sEMG validity, not standard lab conditions
+  - No-gel deployment constraint and why it matters
+  - Trustworthiness-first framing paragraph (already in paper.md)
+  - Contributions C1–C5 as a bulleted list
+- System Design (~400 words):
+  - Hardware (3.1): $99 system, RAW wiring fix, ADC DMA, IMU FSR
+  - Software (3.2): btCentral → CSV → abs_us stitching → yaml_runner
+  - Swing detection (3.3): 300 dps, 2000 ms debounce
+  - Note: forearm-only, no racket hardware
+- Methods (~350 words):
+  - No-gel justification (1 sentence + R5 cite)
+  - Electrode settling physical basis (short paragraph)
+  - IMU-conditioned interpretation framework (Table X)
+  - Warmup-skip sensitivity test (10/15/20 min)
+  - Session-continuity auditing
+
+**Day 5–7: Write Results + assemble figures**
+- 5.1 Three-phase MDF trajectory (Figure 2 + table of thirds)
+- 5.2 Warmup-skip sensitivity (Figure 4 bar chart + 166 Hz vs 199 Hz note)
+- 5.3 IMU-conditioned validity (Figure 7 scatter)
+- 5.4 Contact quality (Figure 5, brief)
+- 5.5 Session-gap artifact (Figure 6, log0303)
+
+---
+
+#### Week 2 — Discussion, polish, submission (May 16–23)
+
+**Day 8–10: Write Discussion + Conclusion**
+- Discussion (~350 words):
+  - Three-phase trajectory interpretation (central insight paragraph)
+  - Practical recommendation: ≥20 min warmup skip; warmup-skip sensitivity as required audit
+  - Why IMU matters (~80 words, from paper.md Discussion)
+  - Limitations: concise bullet list (N=1, no MVC/RPE, settling duration varies,
+    per-swing non-independence, 20-min skip post-hoc, contact quality not impedance-validated)
+- Conclusion (~120 words):
+  - Key observation sentence (three-phase trajectory)
+  - Warmup-skip sensitivity audit recommendation
+  - IMU as zero-cost context channel
+  - Two-session demonstration + gap artifact warning
+
+**Day 11–12: References, format, trim**
+- [ ] Apply CNIB author template (download from easychair.org/cfp/cnib2026)
+- [ ] Verify all references R1–R28: PMIDs confirmed, DOIs correct
+- [ ] Trim to 4–5 pages: push E-series experiments to supplementary or remove from main paper
+- [ ] Replace any remaining "genuine fatigue" with "fatigue-consistent"
+- [ ] Confirm all numbers match paper_stats.txt and fatigue_summary CSVs
+
+**Day 13: Final figures check**
+- [ ] Fig 2: three-phase layout, confirmed
+- [ ] Fig 4: warmup-skip bar chart (all 4 conditions), confirmed
+- [ ] Fig 7: IMU-EMG diagnostic matrix, confirmed (central novelty figure)
+- [ ] Fig 6: log0303 gap artifact, confirmed
+- [ ] Fig 5 or 3: contact quality or IMU consistency (if space allows; Fig 3 may merge with Fig 7)
+
+**Day 14 (May 23): Submit**
+- [ ] Submit on EasyChair with tracks: Biomedical Signal Processing + Biomechanics and Wearable Systems
+- [ ] Upload PDF, confirm author information, abstract (Version 2 from paper.md), keywords
+
+---
+
+#### Figure priority for 5 pages (4–5 figures max)
+
+| # | Figure | Why include |
+|---|---|---|
+| 1 | System overview | Establishes hardware/software context |
+| 2 | Three-phase MDF trajectory | Central empirical result — must include |
+| 3 | Warmup-skip sensitivity bar chart | Cleanest methodological contribution |
+| 4 | IMU-EMG diagnostic matrix | Visual proof of IMU-conditioned validity |
+| 5 | log0303 gap artifact | Session-continuity failure mode |
+
+If only 4 figures fit, drop Fig 1 (system overview) and add 1 sentence describing $99 system in Methods.  
+Fig 3 (IMU consistency time series) may be partly redundant with Fig 4 (diagnostic matrix) — prefer Fig 4.
+
+---
+
+#### What NOT to include in the main paper (push to appendix / supplement)
+
+- E-series algorithm experiments (E1–E9) — mention briefly in Discussion as future work
+- Experiment 10 null result — one sentence in Discussion
+- Detailed impedance measurement guide (Appendix D)
+- Bout-level analysis, adaptive settling endpoint, workload metric
+- Paper 2 (system design) material
+
+---
+
+#### Risk register
+
+| Risk | Mitigation |
+|---|---|
+| Figure 2 regeneration takes longer than expected | Use existing fig2 as placeholder; update after submission if extension possible |
+| CNIB template incompatible with current structure | Download template Day 1; adjust section headings early |
+| Reference verification uncovers wrong PMIDs | Run PubMed check on all R1–R28 before Day 12 |
+| 5 pages insufficient for full content | Merge Fig 3+7, shorten System Design, move Related Work to 2 paragraphs in Intro |
+| Deadline moves or submission system issues | Submit 24h before May 23 deadline |
