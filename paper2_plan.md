@@ -182,3 +182,43 @@ Paper 2 cites Paper 1 for the scientific findings. Paper 1 cites the system (bri
 7. [ ] Write pipeline section (draw from `emg_util/HIGH_LEVEL_DESIGN.md` and `SYSTEM_HIGH_LEVEL_DESIGN.md`)
 8. [ ] Prepare hardware BOM table with actual part numbers and costs
 9. [ ] Open-source the firmware and Python pipeline (GitHub repo) before submission
+
+---
+
+## Appendix E Algorithms (Moved from paper_plan.md 2026-05-10)
+
+> All E-series algorithms below are PAPER 2 / FUTURE WORK. None are validated Paper 1 contributions.
+
+### E1. Forearm-Only Impact-Risk Gating
+v1 DONE 2026-05-03 (sample masking, mean shift 0.12 Hz — insufficient).
+v2 BLOCKED: Experiment 10 null result — acc_dyn finds swing apex not ball contact.
+Requires Level 1 racket tap test before revisiting.
+
+### E2. Noise Floor Tracker
+Implemented as Experiment 6 (paper_figures.py, fig9_rest_noise_floor.png). Sliding-window IMU-quiet scan. Useful corroborating evidence; Paper 1 appendix.
+
+### E5. Pre-Impact Phase MDF
+BLOCKED pending valid impact trigger (see Experiment 10 null result).
+
+### E7. IMU-Gated Acoustic Impact Labeling
+Validation tool. Blocked by Experiment 10. Revisit after Level 1 racket tap.
+
+### E8 Validation Protocol Status
+Level 0 (Exp 10): ✅ DONE — null result, acc_dyn not a valid trigger
+Levels 1-5: ☐ Not done
+
+### Impedance Measurement
+Near-term: handheld LCR meter at t=0,5,10,15,20,30 min during one session.
+Paper 2: AD5933 chip on ESP32 I2C bus for automatic impedance logging.
+
+---
+
+## Paper 1 Scope Boundary (what NOT to include in CNIB submission)
+
+- Firmware architecture internals (dual-core, mutex details) — Paper 2
+- Android/Chaquopy implementation — Paper 2
+- Detailed BLE protocol (TLV format, CRC) — one sentence in Paper 1 max
+- Pogo-pin ghost signal — one sentence for signal validity in Paper 1 max
+- E-series impact-gating algorithms — one future-work sentence in Paper 1 max
+- Audio/acoustic validation (E7) — Paper 2 or future
+- Adaptive settling endpoint (Exp 9 null result) — one future-work sentence in Paper 1

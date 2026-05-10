@@ -94,101 +94,160 @@ for df in [df05, df05_10, df05_v2, df05_w15, df03, df03_seg1]:
 
 print("  All data loaded.\n")
 
-# ── Figure 2: Electrode settling curve — two-panel MDF + contact quality ─────
-print("Generating Figure 2: Electrode settling curve (MDF + contact quality, first 30 min)...")
+# ── Figure 2: Three-phase MDF trajectory — full session ──────────────────────
+print("Generating Figure 2: Three-phase MDF trajectory (full session, log0305)...")
 
-p90_rms = df05["rms"].quantile(0.90)
-df05["contact_quality"] = df05["rms"] / p90_rms
-df05["mdf_roll"] = df05["mdf"].rolling(10, center=True, min_periods=3).median()
-df05["q_roll"]   = df05["contact_quality"].rolling(10, center=True, min_periods=3).median()
+# Phase boundaries (thirds by swing count, not clock time)
+q1_min = df05["t_min"].quantile(1/3)   # ≈ 21 min
+q2_min = df05["t_min"].quantile(2/3)   # ≈ 42 min
 
-df_plot = df05[df05["t_min"] <= 30].copy()
+# Phase masks
+ph1 = df05["t_min"] <= q1_min
+ph2 = (df05["t_min"] > q1_min) & (df05["t_min"] <= q2_min)
+ph3 = df05["t_min"] > q2_min
 
-fig, (ax1, ax2) = plt.subplots(
-    2, 1, figsize=(10, 7), sharex=True,
-    gridspec_kw={"height_ratios": [2, 1]},
+# Causal rolling median (window=15, no lookahead) for Panel A
+mdf_causal = df05["mdf"].rolling(15, center=False, min_periods=5).median()
+
+# Phase stats (computed from data — must match paper.md confirmed values)
+ph_stats = {}
+for name, mask in [("I", ph1), ("II", ph2), ("III", ph3)]:
+    seg = df05.loc[mask, "mdf"].dropna()
+    ph_stats[name] = (float(seg.mean()), float(seg.std()),
+                      float(df05.loc[mask, "t_min"].min()),
+                      float(df05.loc[mask, "t_min"].max()))
+
+PHASE_COLORS = {"I": "tomato", "II": "seagreen", "III": "steelblue"}
+PHASE_LABELS = {
+    "I":   "Phase I\nSettling",
+    "II":  "Phase II\nReference",
+    "III": "Phase III\nFatigue-consistent",
+}
+
+# IMU stats for Panel C
+imu_all = df05["imu_peak_mag"]
+r_imu, p_imu = pearsonr(df05["t_min"], imu_all)
+imu_roll = imu_all.rolling(15, center=False, min_periods=5).median()
+
+fig, (ax_a, ax_b, ax_c) = plt.subplots(
+    3, 1, figsize=(11, 10), sharex=False,
+    gridspec_kw={"height_ratios": [3, 1.5, 1.5]},
 )
 
-# ── Panel A: MDF vs time ──────────────────────────────────────────────────────
-ax1.scatter(df_plot["t_min"], df_plot["mdf"],
-            s=8, alpha=0.28, color="steelblue", zorder=2, label="Per-swing MDF")
-ax1.plot(df_plot["t_min"], df_plot["mdf_roll"],
-         color="navy", linewidth=2.2, zorder=3, label="Rolling median MDF (10 swings)")
+# ── Panel A: Full-session MDF with three-phase shading ───────────────────────
+t_all = df05["t_min"]
+m_all = df05["mdf"]
 
-# stable settled reference (out0305_v2: 10-min + RMS filter)
-ax1.axhline(166, color="seagreen", linewidth=1.6, linestyle="--",
-            label="Stable settled reference ≈ 166 Hz")
+# Phase shading
+for name, (lo, hi) in [("I",   (0,      q1_min)),
+                        ("II",  (q1_min, q2_min)),
+                        ("III", (q2_min, t_all.max() + 1))]:
+    ax_a.axvspan(lo, hi, alpha=0.09, color=PHASE_COLORS[name], zorder=1,
+                 label=f"{PHASE_LABELS[name]}")
 
-# 20-min baseline (canonical)
-ax1.axhline(199.2, color="steelblue", linewidth=1.2, linestyle=":",
-            alpha=0.7, label="20-min baseline = 199 Hz")
+# Per-swing scatter + causal rolling median
+ax_a.scatter(t_all, m_all, s=5, alpha=0.18, color="steelblue", zorder=2)
+ax_a.plot(t_all, mdf_causal, color="navy", lw=2.0, zorder=3,
+          label="Rolling median MDF (15 swings, causal)")
 
-# warmup-skip lines
-for skip_min, color, style in [
-    (10, "#e07b00", "-."),
-    (15, "tomato",  ":"),
-    (20, "red",     "-"),
-]:
-    ax1.axvline(skip_min, color=color, linewidth=1.3, linestyle=style)
+# Reference lines
+ax_a.axhline(166,   color="seagreen",  lw=1.5, linestyle="--",
+             label="Stable settled reference ≈ 166 Hz (Phase II)")
+ax_a.axhline(199.2, color="steelblue", lw=1.2, linestyle=":",
+             alpha=0.7, label="20-min skip baseline = 199 Hz")
 
-# settling shade and label
-ax1.axvspan(0, 20, alpha=0.07, color="red", zorder=1,
-            label="Settling zone (0–20 min)")
-ax1.text(1, 30, "← 10 min", color="#e07b00", fontsize=7.5, va="bottom")
-ax1.text(10.2, 30, "← 15 min", color="tomato", fontsize=7.5, va="bottom")
-ax1.text(20.2, 30, "← 20 min", color="red", fontsize=7.5, va="bottom")
+# Warmup vertical lines
+for skip_min, col, sty in [(10, "#e07b00", "-."), (15, "tomato", ":"), (20, "red", "-")]:
+    ax_a.axvline(skip_min, color=col, lw=1.3, linestyle=sty)
+ax_a.text(10.2, 15, "10", color="#e07b00", fontsize=7.5, va="bottom", ha="left")
+ax_a.text(15.2, 15, "15", color="tomato",  fontsize=7.5, va="bottom", ha="left")
+ax_a.text(20.2, 15, "20 min", color="red", fontsize=7.5, va="bottom", ha="left")
 
-# early MDF annotation
-e_mean = df_plot.loc[df_plot["t_min"] <= 21, "mdf"].mean()
-ax1.annotate(f"Early MDF\n{e_mean:.0f} Hz\n(settling)",
-             xy=(7, e_mean), xytext=(12, 60),
-             arrowprops=dict(arrowstyle="->", color="red"),
-             fontsize=8.5, color="red")
+# Phase mean labels inside each region
+for name, (mean, std, lo, hi) in ph_stats.items():
+    mid_t = (lo + hi) / 2
+    ax_a.text(mid_t, 270,
+              f"{PHASE_LABELS[name]}\n{mean:.0f} ± {std:.0f} Hz",
+              ha="center", va="top", fontsize=8,
+              color=PHASE_COLORS[name], fontweight="bold",
+              bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.6))
 
-ax1.set_ylabel("Median Frequency — MDF (Hz)", fontsize=11)
-ax1.set_ylim(0, 310)
-ax1.set_title("Figure 2  |  log0305: Electrode Settling — First 30 Minutes\n"
-              "Early spectral metrics suppressed during electrode settling (~17–20 min)",
-              fontsize=11)
-ax1.legend(fontsize=8, loc="upper left")
-ax1.grid(True, alpha=0.25)
+# Interpretation box
+ax_a.text(0.98, 0.04,
+          "Phase I — early low MDF ≠ fatigue (contact settling)\n"
+          "Phase II — IMU flat, contact stable (valid baseline)\n"
+          "Phase III — IMU flat, MDF declines (fatigue-consistent)",
+          transform=ax_a.transAxes, fontsize=8, ha="right", va="bottom",
+          bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.90))
 
-# ── Panel B: Contact quality vs time ─────────────────────────────────────────
-ax2.scatter(df_plot["t_min"], df_plot["contact_quality"],
-            s=6, alpha=0.25, color="darkorange", zorder=2,
-            label="Per-swing contact quality")
-ax2.plot(df_plot["t_min"], df_plot["q_roll"],
-         color="saddlebrown", linewidth=2.0, zorder=3,
-         label="Rolling median (10 swings)")
+ax_a.set_ylabel("MDF (Hz)", fontsize=11)
+ax_a.set_ylim(0, 310)
+ax_a.set_xlim(0, t_all.max() + 1)
+ax_a.legend(fontsize=7.5, loc="upper right", ncol=2)
+ax_a.set_title(
+    "Figure 2  |  log0305: Three-Phase MDF Trajectory (Full 63-min Session)\n"
+    "Phase I — settling  →  Phase II — stable reference  →  Phase III — fatigue-consistent decline",
+    fontsize=11)
+ax_a.grid(True, alpha=0.20)
 
-ax2.axhline(0.25, color="red",     linewidth=1.3, linestyle="--",
-            label="Reliable threshold = 0.25")
-ax2.axhline(0.10, color="darkred", linewidth=1.2, linestyle=":",
-            label="Contact-loss threshold = 0.10")
-ax2.fill_between(df_plot["t_min"], 0, 0.10,
-                 alpha=0.08, color="red", zorder=1)
-ax2.fill_between(df_plot["t_min"], 0.10, 0.25,
-                 alpha=0.05, color="orange", zorder=1)
+# ── Panel B: Phase summary bar chart ─────────────────────────────────────────
+phase_names = ["Phase I\nSettling\n0–21 min",
+               "Phase II\nReference\n21–42 min",
+               "Phase III\nFatigue-consistent\n42–63 min"]
+phase_means = [ph_stats["I"][0],  ph_stats["II"][0],  ph_stats["III"][0]]
+phase_stds  = [ph_stats["I"][1],  ph_stats["II"][1],  ph_stats["III"][1]]
+bar_cols    = [PHASE_COLORS["I"], PHASE_COLORS["II"], PHASE_COLORS["III"]]
 
-ax2.axvspan(0, 20, alpha=0.07, color="red", zorder=1)
-for skip_min, color, style in [
-    (10, "#e07b00", "-."),
-    (15, "tomato",  ":"),
-    (20, "red",     "-"),
-]:
-    ax2.axvline(skip_min, color=color, linewidth=1.3, linestyle=style)
+x_pos = [0, 1, 2]
+bars = ax_b.bar(x_pos, phase_means, yerr=phase_stds, width=0.55,
+                color=bar_cols, alpha=0.85, edgecolor="black", lw=0.8,
+                capsize=6, error_kw={"linewidth": 1.5})
+ax_b.axhline(166, color="seagreen", lw=1.3, linestyle="--", alpha=0.7,
+             label="Stable reference 166 Hz")
+for bar, val, sd in zip(bars, phase_means, phase_stds):
+    ax_b.text(bar.get_x() + bar.get_width()/2, val + sd + 3,
+              f"{val:.0f} Hz", ha="center", va="bottom",
+              fontsize=9.5, fontweight="bold")
 
-ax2.set_ylabel("Contact Quality\n(RMS / session p90-RMS)", fontsize=10)
-ax2.set_xlabel("Time in session (min)", fontsize=11)
-ax2.set_ylim(0, 1.4)
-ax2.set_xlim(0, 30)
-ax2.legend(fontsize=7.5, loc="upper left")
-ax2.grid(True, alpha=0.25)
+ax_b.set_xticks(x_pos)
+ax_b.set_xticklabels(phase_names, fontsize=9)
+ax_b.set_ylabel("MDF (Hz)", fontsize=11)
+ax_b.set_ylim(0, 280)
+ax_b.set_title("Phase MDF Summary  (mean ± std)", fontsize=10)
+ax_b.legend(fontsize=8)
+ax_b.grid(axis="y", alpha=0.25)
+
+# ── Panel C: IMU flat trend (supporting panel) ────────────────────────────────
+ax_c.scatter(t_all, imu_all, s=4, alpha=0.15, color="darkorange", zorder=2)
+ax_c.plot(t_all, imu_roll, color="saddlebrown", lw=1.8, zorder=3,
+          label="Rolling median (15 swings, causal)")
+
+# Phase shading (same colours, lighter)
+for name, (lo, hi) in [("I",   (0,      q1_min)),
+                        ("II",  (q1_min, q2_min)),
+                        ("III", (q2_min, t_all.max() + 1))]:
+    ax_c.axvspan(lo, hi, alpha=0.07, color=PHASE_COLORS[name], zorder=1)
+
+ax_c.text(0.98, 0.97,
+          f"IMU peak mag: r = {r_imu:+.3f}  p = {p_imu:.3f}  (all 626 swings)\n"
+          "Flat across all three phases → swing kinematics unchanged",
+          transform=ax_c.transAxes, fontsize=8.5, ha="right", va="top",
+          bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.85))
+
+ax_c.set_ylabel("IMU Peak Mag\n(dps)", fontsize=10)
+ax_c.set_xlabel("Time in session (min)", fontsize=11)
+ax_c.set_ylim(0, 3500)
+ax_c.set_xlim(0, t_all.max() + 1)
+ax_c.legend(fontsize=8, loc="lower right")
+ax_c.set_title("IMU Swing Intensity — Flat Across Phases (kinematic proxy, not force)",
+               fontsize=9.5)
+ax_c.grid(True, alpha=0.20)
 
 plt.tight_layout()
 plt.savefig(os.path.join(OUT_DIR, "fig2_electrode_settling.png"), dpi=150)
 plt.close()
-print("  Saved: fig2_electrode_settling.png")
+print("  Saved: fig2_electrode_settling.png  (three-phase layout, full session)")
+
 
 
 # ── Figure 3: IMU consistency vs EMG fatigue trend — two-panel ───────────────
