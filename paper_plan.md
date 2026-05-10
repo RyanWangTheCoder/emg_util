@@ -4,7 +4,7 @@
 **Target:** CNIB 2026 — 4–5 page pilot/methodological conference paper; EMBC as future backup after multi-player data  
 **Deadline:** May 23, 2026 (CNIB 2026)  
 **Data:** Two captured sessions (log0303, log0305), single player  
-**Last Updated:** 2026-05-03
+**Last Updated:** 2026-05-10
 
 ---
 
@@ -105,7 +105,7 @@ We use the forearm IMU not as a generic fusion feature, but as an independent ki
 **C5. Session-gap artifact detection in wearable fatigue analysis**
 We show that a 66-min BLE reconnection gap in log0303 creates an apparent 28.7% full-session MDF drop, while the first continuous segment alone shows only 4.9%. Treating disconnected BLE recordings as continuous physiological sessions is a real-world wearable failure mode. The hybrid abs_us timestamp reconstruction pipeline correctly preserves the gap, enabling detection.
 
-**C6. Three-phase spectral interpretation of no-gel field sEMG**
+**Central empirical pattern supporting C1–C3 (not a standalone contribution): Three-phase spectral trajectory**
 No-gel field sEMG can exhibit a three-phase spectral trajectory: (1) early contact-induced MDF suppression (settling, MDF ~116 Hz); (2) mid-session signal recovery to a stable post-settling reference (~168 Hz); (3) late fatigue-consistent decline (~150 Hz). This three-phase pattern explains why both electrode settling and fatigue can depress MDF, but with different temporal contexts — and why temporal-context-aware interpretation is necessary. The early/mid/late PSD comparison (normalized band fractions: early low-band 75.6%, mid 38.1%, late 52.1%) provides the mechanistic spectral evidence for this trajectory.
 
 ---
