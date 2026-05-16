@@ -1,50 +1,63 @@
-# Paper 2: System Design Paper
+# Paper 2: Extended Journal Version of ICPICS System Paper
 
-**Status:** Planning — write after Paper 1 is submitted  
-**Target:** IEEE Body Sensor Networks (BSN) or MDPI Sensors  
-**Format:** 6-page conference paper or 8-page journal short paper  
-**Depends on:** Paper 1 accepted/submitted (use Paper 1 data as field validation section)  
-**Last Updated:** 2026-05-02
+**Status:** Planning — write after [ICPICS submission](icpics_paper_plan.md) is submitted
+**Target:** **MDPI Sensors** (primary) or **IEEE JBHI** (alternative) — journal venues only
+**Format:** 10–14 pages journal article (extended from 6-page ICPICS conference paper)
+**Depends on:** ICPICS conference paper ([icpics_paper_plan.md](icpics_paper_plan.md)) submitted; Paper 1 (CNIB) submitted
+**Last Updated:** 2026-05-16
+
+> **Read this first if you're new to the plan stack:**
+> This is the **journal extension** of the ICPICS conference paper. Per IEEE policy, a journal extension must add ~30–50% new material and cite the conference paper. The added material lives in this plan; the engineering core (firmware, BLE protocol, host pipeline) is shared with the ICPICS paper.
+>
+> **Why not BSN:** BSN is a conference. ICPICS → BSN would be conference→conference and would trip self-plagiarism rules. ICPICS → MDPI Sensors / IEEE JBHI is the standard conference→journal extension path.
 
 ---
 
 ## Working Title
 
-*"A Low-Cost BLE Wearable System for Real-Time EMG-IMU Acquisition: Firmware Design, Robust Capture Pipeline, and Tennis Field Validation"*
+*"A Field-Deployed BLE Wearable for Real-Time EMG-IMU Acquisition: Firmware, Self-Describing Protocol, Hybrid Timeline Reconstruction, and Cross-Platform Analysis"*
+
+(Extended from the ICPICS conference title; emphasises the four added contributions: hybrid `abs_us` validation, Chaquopy parity, deeper field-failure characterisation, and multi-session validation timeline.)
 
 Alternative titles:
-- *"End-to-End Design of a $99 EMG-IMU Wearable for Sports Field Deployment: Firmware, Protocol, and Dual-Platform Analysis"*
-- *"From Sensor to Insight: A Field-Deployable ESP32 BLE System for Tennis EMG-IMU Monitoring"*
+- *"End-to-End Engineering of a Field-Deployable EMG-IMU Wearable: From Firmware to On-Device Mobile Analysis"*
+- *"From Sensor to Insight on a Mid-Range Android: A Field-Validated $99 BLE Wearable for Tennis Biosignal Capture"*
 
 ---
 
-## Why This Is a Separate Paper
+## Why a journal extension (vs. just the conference paper)
 
-Paper 1 focuses on what we *found* (electrode settling, IMU quality validation). Paper 2 focuses on what we *built* and the engineering decisions that made robust field data collection possible. The system work constitutes a genuine contribution for the practitioner/builder audience:
+The ICPICS conference paper presents the engineering core: firmware, BLE protocol, host pipeline, basic field validation, and the pogo-pin diagnosis. It's a **modest-but-honest** systems paper. A journal extension is justified when there is enough additional analysis depth and new measurement data to clear the IEEE 30–50% new-material bar:
 
-1. Most published wearable EMG systems are laboratory prototypes or commercial products -- few document the specific engineering decisions, failure modes, and robustness fixes required for unattended field deployment.
-2. The hybrid `abs_us` timeline stitching solves a problem every BLE logger eventually hits (BLE dropout vs. device reset produce different timestamp discontinuities) with a clean, general solution.
-3. The pogo-pin failure mode and ADC crosstalk ghost signal are not documented anywhere -- practitioners building similar systems will encounter this exact failure and need this diagnosis.
-4. The dual-platform design (same algorithm on PC and Android via Chaquopy) is an uncommon pattern that demonstrates practical portability of scipy/numpy signal processing to mobile.
-5. The firmware architecture (DMA-driven ADC, FreeRTOS dual-core, host watchdog) achieves zero sample loss in production across 150+ minutes of field sessions -- a reliability claim worth documenting.
+1. **Hybrid `abs_us` ground-truth validation.** ICPICS describes the algorithm in one paragraph. The journal version validates it: reconstruction error vs. `host_rx_ms` ground truth across all BLE reconnection events recorded in the field session (count to be confirmed from runtime health logs; at minimum 1 between-run reconnect is visible in the CSV file structure), accuracy bounds, comparison against device-clock-only and host-clock-only baselines.
+2. **Chaquopy dual-platform benchmark.** ICPICS drops Android entirely. The journal version is the first published characterisation of scipy/numpy biosignal MDF computation on mid-range Android — per-swing latency distribution, PC↔Android numerical parity, cold-start cost.
+3. **Deeper field-failure characterisation.** ICPICS gives the pogo-pin ghost signal a paragraph; the journal version expands to a section: pre/post correlation distributions, ADC-mux charge-sharing model, before/after standard-deviation behaviour, generalisation to other multiplexed-ADC wearables.
+4. **Multi-session field-validation timeline.** ICPICS reports aggregate metrics; the journal version adds a frame-level reliability timeline (Figure 7: frame count, CRC errors, reconnections over the 150+ min session).
+5. **Expanded Related Work and Discussion.** Doubled depth, protocol comparison table, positioning vs. Cerone 2019 / Lynn 2018 / Yang 2024 / Taborri 2020.
+
+The pogo-pin failure mode and ADC crosstalk ghost signal (r = 0.998) appear in neither prior wearable EMG papers nor general embedded literature — the journal is where it gets full treatment.
 
 ---
 
 ## Core Contributions
 
-1. **Firmware architecture:** Dual-core ESP32 design with hardware DMA ADC at 40 kHz (10x oversampling to 2 kHz), per-sample timestamp back-calculation achieving +-25 us accuracy, and host-gated sampling watchdog (pause at 12s, reboot at 30s) for power efficiency and BLE recovery.
+The journal version inherits the ICPICS contributions and adds three. Contributions 1–5 below are shared with [icpics_paper_plan.md](icpics_paper_plan.md) (condensed in the journal version, citing ICPICS); contributions 6–8 are NEW to the journal extension and constitute the ~30–50% new material.
 
-2. **BLE protocol:** Compact binary TLV framing with CRC16, self-describing IMU FSR codes embedded per-frame (enabling FSR changes without host-side reconfiguration), and 32-bit device clock extension to 64-bit monotonic timestamp.
+### Shared with ICPICS (condensed in journal version)
 
-3. **Robust capture pipeline:** Async BLE central with FrameParser re-sync on MAGIC bytes, rotating CSV logs with metadata, exponential-backoff reconnection, and optional UDP mirror for real-time visualisation -- zero data loss across 6 BLE reconnections in field sessions.
+1. **DMA-driven 2 kHz EMG acquisition** with 10× hardware oversampling and per-sample timestamp back-calculation, empirically validated to ±25 µs across 2.3 M samples.
+2. **Self-describing BLE protocol** — IMU FSR codes embedded in every frame, validated across three firmware FSR revisions with zero host code changes.
+3. **Dual-core FreeRTOS architecture** with explicit task-priority assignment, achieving zero-drop concurrent EMG (2 kHz) + IMU (200 Hz) streaming.
+4. **Two-layer field-recovery mechanism**: device-side host watchdog + host-side `abs_us` reconnection handling.
+5. **Field-failure documentation**: pogo-pin ADC charge-sharing ghost signal — ICPICS gives the diagnosis; journal expands to characterisation depth (see contribution 8).
 
-4. **Hybrid `abs_us` timeline stitching:** Two-case BLE reconnection handler: BLE-dropout-only (device clock continues, host_rx_ms gap used for inter-connection interval) vs. ESP32-reset (device clock restarts, same host_rx_ms gap approach). Unifies both cases without detecting which occurred. Enables the cross-session gap artifact analysis in Paper 1.
+### NEW in journal extension (~30–50% added material)
 
-5. **Dual-platform analysis pipeline:** Same FatigueMonitor and signal processing algorithm running on PC (pandas, scipy) and Android (Chaquopy, pandas-free). Fatigue results match across platforms. Demonstrates that scipy/numpy-based MDF computation is viable on mid-range Android devices (~25-70 ms per swing).
+6. **Hybrid `abs_us` timeline reconstruction with ground-truth validation.** Two-case BLE reconnection algorithm (BLE-dropout vs. ESP32-reset) unified by one rule. **Validated against `host_rx_ms` ground truth** across the BLE reconnection events recorded in 150+ min of field data (count: at least 1 between-run reconnect from CSV structure; within-run re-subscriptions to be enumerated from runtime health logs); reconstruction error bounds derived; comparison against device-clock-only and host-clock-only alternatives. Generalisable to any BLE logger with `dev_us` + `host_rx_ms` columns.
+7. **Cross-platform analysis pipeline with Chaquopy benchmark.** Same scipy/numpy `FatigueMonitor` running on PC (pandas) and Android (Chaquopy, pandas-free). **NEW measurements:** per-swing latency distribution across 626 swings (log0305) on mid-range Android (target hardware: \[device model TBD\]), MDF result agreement PC↔Android (Pearson r, mean abs error), cold-start cost. Demonstrates viability of community signal-processing libraries on mobile without rewriting in Java/Kotlin.
+8. **Pogo-pin ghost signal characterisation.** Beyond the ICPICS one-paragraph diagnosis: quantified ghost amplitude vs. ENV amplitude across the pre-bypass session, ADC-mux charge-sharing model and order-of-magnitude derivation, before/after RAW-channel standard-deviation distributions, post-filter flatline behaviour, generalisation criteria for other multiplexed-ADC wearables.
 
-6. **Field validation:** System deployed across 2 tennis sessions totalling 150+ minutes, 823 swings, 6 BLE reconnections. Zero sample drops, <0.01% CRC error rate. Electrode settling artifact and genuine fatigue detected (Paper 1 results), confirming pipeline fidelity.
-
-**Unique practical contribution:** The RAW signal pogo-pin failure diagnosis -- ADC multiplexer charge sharing produces a ghost signal (r = 0.998 with ENV) that survives visual inspection but is eliminated by preprocessing, leaving a flatline. Documented with root cause, diagnostic test, and permanent fix.
+> **Field validation** (ICPICS Section VII) is treated as **evaluation**, not a separate contribution, in both papers. The journal version adds Figure 7 (multi-session timeline) but does not promote it to a contribution-level claim.
 
 ---
 
@@ -59,129 +72,161 @@ Paper 1 focuses on what we *found* (electrode settling, IMU quality validation).
 
 ## Paper Structure (Proposed)
 
-**Total target: ~3000 words body text** (6 pages with figures and references)
+**Total target: ~6500 words body text** (10–14 pages MDPI Sensors / IEEE JBHI journal format with figures and references; ~2× the ICPICS conference paper).
 
-### 1. Introduction (~300 words)
-- Motivation: wearable EMG-IMU for sports field deployment
-- Challenge: lab-grade systems are expensive ($5k-$30k); hobbyist systems lack robustness (BLE dropout, timestamp errors, motion artifacts); neither is documented for unattended 60-90 min field sessions
-- Gap: engineering decisions for robust field BLE wearables are under-documented; most papers publish results, not the system failures and fixes that made results possible
-- Contributions: list 6 from Core Contributions above
+> **Section labels:**
+> [SHARED] = condensed from ICPICS, citing the conference paper; kept short.
+> [EXPANDED] = appears in ICPICS but substantially deeper here (more analysis, more measurements).
+> [NEW] = new in journal extension; constitutes the ~30–50% added material per IEEE policy.
 
-### 2. Related Work (~250 words)
+### 1. Introduction (~400 words) [EXPANDED]
+- Same motivation as ICPICS, but contribution list expanded to include the 3 new contributions (#6 `abs_us` validation, #7 Chaquopy benchmark, #8 ghost signal characterisation)
+- Add explicit sentence: "An earlier version of the firmware and BLE protocol design appeared in [ICPICS reference]; this journal version extends that work with ground-truth validation of the timeline reconstruction algorithm, a cross-platform analysis benchmark on Android, and quantitative characterisation of the pogo-pin ADC charge-sharing failure."
+
+### 2. Related Work (~500 words) [EXPANDED]
 - Commercial wearable EMG: Delsys Trigno, Noraxon -- gold standard but $5k-$30k; inaccessible for field/youth sport
 - Low-cost wearable EMG systems: Cerone et al. 2019 (modular HD-sEMG), Lynn et al. 2018 (Athos validation), Yang et al. 2024 (e-textiles) -- focus on electrode design, not capture pipeline robustness
 - IMU-EMG fusion platforms: Taborri et al. 2020 (overview), MultiSenseBadminton 2024 -- focus on data collection, not protocol/firmware engineering
 - BLE wearable systems: most papers describe data collected, not the firmware/protocol that collected it; reconnection robustness, timestamp accuracy, and multi-session stitching are rarely documented
-- **Gap:** No published work documents the full stack from firmware DMA design through BLE protocol to analysis pipeline with field-validated reliability metrics.
+- **Cross-platform mobile biosignal pipelines:** Java/Kotlin reimplementations are typical; Chaquopy-based scipy/numpy on Android is uncommon — survey of prior work and what's missing
+- **Multi-clock timestamp reconstruction:** prior approaches (device-clock-only, host-clock-only, NTP-style sync); position `abs_us` against these
+- **Gap:** Few published works document the full stack from firmware DMA design through BLE protocol to *validated cross-platform* analysis pipeline with ground-truth timeline accuracy bounds.
 
-### 3. Hardware Design (~300 words)
-- Component selection rationale: MyoWare 2.0 (dual output ENV+RAW), ICM-20948 (6-axis, configurable FSR), ESP32 WROOM-32E (dual-core, BLE, ADC DMA)
-- Total system cost: ~$99 (itemised BOM table)
-- Critical hardware failure and fix: RAW pogo-pin failure, ADC crosstalk ghost signal diagnosis, GPIO 32 direct solder bypass
-- EMG pin mapping: PIN_ENV = GPIO 39 (ADC1 ch3), PIN_RAW = GPIO 32 (ADC1 ch4) -- NOT the "A4" silk label (GPIO 21, I2C SDA, no ADC)
-- IMU FSR history: 250 dps saturated every hard swing; raised to 1000 then 2000 dps; acc 2g -> 8g. FSR codes self-documenting in every TLV frame.
+### 3. Hardware Design (~300 words) [SHARED — condensed, citing ICPICS]
+- Component selection rationale, BOM, pin mapping
+- Critical hardware failure and fix mentioned briefly here; full characterisation moved to § 9 (NEW section)
 
-### 4. Firmware Architecture (~400 words)
-- Dual-core split: Core 0 (BLE TX, host watchdog, LED), Core 1 (emgDrainTask prio 2, imuTask prio 2, spo2Task prio 0)
-- ADC DMA design: 40 kHz continuous (2 channels interleaved), 10x decimation to 2 kHz, per-sample timestamp back-calculation (frameEndUs - age_us), +-25 us accuracy
-- Synchronisation: spinlocks for ring buffers (<10 instructions), FreeRTOS mutex for I2C bus, atomics for cross-core flags
-- Host watchdog state machine: PING every 1s -> pause sampling at 12s -> reboot at 30s; saves ~40 mA when host absent
-- Power budget: ~148 mA active, ~5 mA standby; ~3-4 hours battery life at 500 mAh
+### 4. Firmware Architecture (~400 words) [SHARED — condensed, citing ICPICS]
+- Dual-core split, ADC DMA, synchronisation, watchdog, power budget — same as ICPICS
 
-### 5. BLE Protocol (~300 words)
-- Frame structure: magic 0xA5 0x5A, 14-byte header (ver, flags, frame_seq u32, frame_t_us u32, payload_len u16), TLV payload, CRC16-CCITT
-- TLV types: EMG_BATCH (0x01), IMU_BATCH (0x02), VITALS (0x03)
-- IMU batch design: acc_fsr_code + gyro_fsr_code in every frame (self-describing, supports dynamic FSR changes without protocol bump)
-- Timestamp design: t0_offset from frame timestamp, per-sample reconstruction; 32-bit clock wraps at 71.6 min, host extends to 64-bit via wrap detection
-- Why binary TLV over JSON/CSV: 4-8x bandwidth reduction (12 bytes vs. ~60 bytes per IMU sample); CRC16 detects corruption; extensible without breaking old decoders
-- Protocol version history: v1 (no FSR metadata) -> v2 (FSR codes + battery); host handles both
+### 5. BLE Protocol (~300 words) [SHARED — condensed, citing ICPICS]
+- Frame structure, TLV types, self-describing FSR, timestamp design
 
-### 6. Host Capture Pipeline (~300 words)
-- Architecture: async BLE (Bleak) -> asyncio queue (20k chunks) -> FrameParser -> consumer task -> CSV writer task
-- FrameParser: MAGIC re-sync, CRC16 validation, TLV decode; drops malformed frames without stalling
-- Rotating CSV files: emg_log_<session_id>_<open_id>_<idx>.csv, 30-min segments; metadata in .meta.json; atomic write (tmp file + rename)
-- Watchdog/reconnect: stall detection at 5s (no notify), resubscribe attempt, then reconnect with exponential backoff (0.5s -> 20s max); no data loss on reconnect
-- UDP mirror: optional, non-blocking, best-effort; never delays CSV writes; decimated to 500/50/50 Hz for RAW/ENV/IMU
+### 6. Host Capture Pipeline (~300 words) [SHARED — condensed, citing ICPICS]
+- BLE central, FrameParser, rotating CSV, watchdog/reconnect, UDP mirror
 
-### 7. Software Analysis Pipeline (~350 words)
-- Signal processing: detrend -> bandpass(50-450 Hz) -> notch(60, 120 Hz) -> Welch PSD (nperseg=1024) -> MDF/MNF
-- Why 50 Hz low cutoff (not 20 Hz): rejects motion artifact in 20-50 Hz band; MyoWare hardware already bandpasses at 20-500 Hz; 20-50 Hz contains little useful fatigue information for surface EMG
-- Swing detection: fixed 300 dps threshold (replaces z-score; justified from p88 of session distribution), 2000 ms debounce
-- Baseline protection: 3-layer (5-min warmup skip + RMS quality filter at 0.25 x p90 + 75th percentile for baseline MDF)
-- Hybrid abs_us stitching: within-connection uses dev_us (accurate physical time); between-connections uses host_rx_ms gap (handles both BLE-dropout and ESP32-reset cases). Enables cross-session analysis and gap detection.
-- Dual-platform: FatigueMonitor in fatigue_monitor.py (pandas-free, scipy-optional) runs identically on PC and Android via Chaquopy; ~25-70 ms per swing on mid-range Android
+### 7. Hybrid `abs_us` Timeline Reconstruction (~700 words) [NEW]
+- Algorithm description in detail (mentioned briefly in ICPICS § VI; here it's a full section)
+- Two-case unification: BLE-dropout vs. ESP32-reset, and why one rule handles both
+- **Validation against `host_rx_ms` ground truth:** for each BLE reconnection event recorded in the field session (1 between-run reconnect verified from CSVs; within-run re-subscriptions to be counted from runtime health logs), compute reconstruction error vs. host-clock reference; report distribution, max, p95, p99
+- **Comparison against alternatives:** device-clock-only (fails on ESP32 reset), host-clock-only (sub-millisecond resolution + system-clock NTP jitter), `abs_us` hybrid (best of both)
+- Generalisation: any BLE logger with `dev_us` + `host_rx_ms` columns can apply the same approach
+- Limitations: ESP32 reboot detected indirectly (sequence reset); no explicit reset signal in current protocol — future protocol revision recommendation
 
-### 8. Field Validation (~300 words)
+### 8. Cross-Platform Analysis Pipeline (~700 words) [NEW]
+- Three-tier architecture: real-time Tier 1 (`fatigue_monitor.py` + Android `realtime_bridge.py` / PC `sensordata_plotter.py`), post-capture Tier 2, offline Tier 3
+- Same `FatigueMonitor` core (canonical, pandas-free) running on PC and Android via Chaquopy
+- Brief mention of preprocessing: detrend → bandpass(50–450 Hz) → notch → Welch — but defer details to Paper 1 / cite
+- Swing detection: 300 dps threshold + 2000 ms debounce
+- **Chaquopy benchmark (NEW measurements required):**
+  - Per-swing latency distribution across 626 swings (log0305) on target Android hardware
+  - Decomposition: JNI overhead + filtfilt + Welch PSD
+  - PC↔Android numerical parity: Pearson r and mean abs error of MDF values
+  - Cold-start cost (first import + warmup)
+- Discussion: when does Chaquopy work? Acceptable latency budget for post-trigger fatigue display; not for per-sample real-time
+
+### 9. Pogo-Pin Ghost Signal Characterisation (~600 words) [NEW]
+- ICPICS gives this one paragraph; here it's a full section with the figure and quantitative analysis
+- Pre-bypass observation: r = 0.998 ENV↔RAW correlation, ~37–44% amplitude ratio
+- ADC-mux charge-sharing model: S/H capacitor C_sh, parasitic floating-pin capacitance C_par, ratio analysis
+- Before/after RAW-channel standard deviation: pre-bypass < 5 ADC counts; post-bypass > 100 ADC counts during contraction
+- Post-filter behaviour: ghost signal flatlines after 50 Hz high-pass — silent but complete data loss in offline analysis
+- Generalisation: criteria for other multiplexed-ADC wearables to check for the same failure mode (any floating ADC channel adjacent to an actively driven channel)
+- Detection heuristic: r(ENV, RAW) > 0.95 with σ(RAW) < 5 counts is diagnostic
+
+### 10. Field Validation (~500 words) [EXPANDED]
 - Two sessions: log0303 (87.9 min, 197 swings, 2 BLE connections), log0305 (63.1 min, 626 swings, 1 connection)
-- Reliability metrics: zero sample drops (verified by sequence number continuity), CRC error rate <0.01%, 6 BLE reconnections handled without data loss
-- Timestamp accuracy: abs_us stitching correctly reconstructs 66-min reconnection gap in log0303 (verified against host_rx_ms reference)
-- IMU FSR self-description: gyro FSR upgrade (250->1000->2000 dps across sessions) handled automatically by host parser without code changes
-- Scientific output: see Paper 1 for full findings; system pipeline produced validated electrode settling and fatigue results, confirming end-to-end data fidelity
+- Reliability metrics: zero detected sample drops during active streaming, CRC error rate <0.01%, BLE reconnection events handled without file corruption (1 between-run reconnect from CSV evidence; full count from runtime health logs)
+- IMU FSR self-description: 250→1000→2000 dps progression handled by host parser without code changes
+- **NEW: multi-session reliability timeline (Figure 7)**: frame count, CRC errors, reconnection events plotted over the 150+ min session
+- **NEW: end-to-end timeline reconstruction validation:** the 66-min reconnection gap in log0303 is the natural ground-truth check for `abs_us` (combines § 7 method with § 10 data)
+- Scientific output cross-reference: Paper 1 results confirm pipeline fidelity end-to-end
 
-### 9. Discussion (~250 words)
-- The pogo-pin failure and ghost signal are likely encountered by many builders of similar systems; documenting it saves future practitioners hours of debugging
-- The abs_us stitching approach is general -- any BLE logger with dev_us + host_rx_ms columns can apply the same two-case reconstruction
-- Dual-platform design trade-off: Python on Android via Chaquopy is ~2-6s cold-start but <70 ms per swing thereafter; acceptable for post-trigger fatigue analysis (not per-sample)
-- Limitations: single sport; BLE throughput near capacity (2 kHz EMG + 200 Hz IMU); adding more sensors requires rate reduction; GPS/outdoor use untested
+### 11. Discussion (~500 words) [EXPANDED]
+- Generalisability: pogo-pin ghost signal applies to any multiplexed-ADC + spring-contact wearable
+- `abs_us` portability: applies to any BLE logger with paired device and host clocks
+- Chaquopy trade-off analysis: when scipy/numpy on Android is the right call vs. when Java/Kotlin reimplementation pays off
+- Limitations: single sport; BLE 4.2 throughput near capacity; single-device test for Chaquopy benchmark; no formal worst-case latency bound proof
+- Future work: AD5933 impedance monitoring, dynamic sample-rate negotiation, multi-device sync, adding GPS
 
-### 10. Conclusion (~150 words)
-- We present a complete, open-source, $99 EMG-IMU wearable system validated across 150 min of field tennis
-- Key contributions: DMA-driven firmware, self-describing BLE protocol, hybrid timeline stitching, dual-platform fatigue pipeline
-- The pogo-pin ghost signal diagnosis and abs_us stitching are practical contributions that generalise beyond tennis or EMG
-- System is open and reproducible; all code and hardware schematics available at [repo]
+### 12. Conclusion (~200 words)
+- Recap 5 ICPICS contributions + 3 journal extensions
+- Open-source release pointers (firmware repo, Python pipeline repo, hardware schematics)
 
 ---
 
 ## Figures Needed
 
-| # | Figure | Content |
-|---|--------|---------|
-| 1 | System block diagram | Sensor -> firmware -> BLE -> btCentral -> CSV -> analysis -> results |
-| 2 | Firmware dual-core architecture | Core 0/1 split, task priorities, ring buffers, synchronisation |
-| 3 | Binary frame structure | TLV layout with field sizes (visual) |
-| 4 | Ghost signal diagnosis | RAW vs ENV plot showing ghost (r=0.998) and flatline after preprocessing |
-| 5 | abs_us stitching diagram | Two BLE connections with gap, showing dev_us vs host_rx_ms vs abs_us reconstruction |
-| 6 | Android Chaquopy latency breakdown | Per-swing timing: JNI + filtfilt + Welch = 25-70 ms |
-| 7 | Field validation: session timeline | Frame count, CRC errors, reconnection events over session duration |
+| # | Figure | Status | Content |
+|---|--------|--------|---------|
+| 1 | System block diagram | [SHARED] from ICPICS | Sensor → firmware → BLE → btCentral → CSV → analysis → results |
+| 2 | Inter-sample interval distribution | [SHARED] from ICPICS | Per-sample timing accuracy (±25 µs over 2.3 M samples) |
+| 3 | Binary frame structure | [SHARED] from ICPICS | TLV layout with field sizes |
+| 4 | Pogo-pin ghost signal diagnosis | [SHARED] from ICPICS, expanded | RAW vs ENV pre-bypass (r=0.998), post-filter flatline; in journal: add quantitative ghost amplitude vs ENV amplitude scatter |
+| 5 | `abs_us` stitching diagram + validation | [NEW] | Two BLE connections with gap, showing dev_us / host_rx_ms / abs_us reconstruction; **ground-truth error distribution overlay** for all BLE reconnection events recorded in the field session |
+| 6 | Chaquopy per-swing latency distribution | [NEW] | Histogram across 626 swings; decomposition (JNI + filtfilt + Welch); annotated mean/p95/p99 |
+| 7 | Field validation: session timeline | [NEW] | Frame count, CRC errors, reconnection events over 150+ min — multi-track timeline |
 
 ---
 
 ## Tables Needed
 
-| # | Table | Content |
-|---|-------|---------|
-| 1 | Hardware BOM | Component, part number, cost (~$99 total) |
-| 2 | Protocol comparison | Binary TLV vs JSON vs CSV: bytes/sample, parse overhead, extensibility |
-| 3 | IMU FSR history | Session, FSR setting, saturation events, scale factor |
-| 4 | Field validation metrics | Sessions, duration, swings, BLE reconnections, CRC errors, sample drops |
+| # | Table | Status | Content |
+|---|-------|--------|---------|
+| 1 | Hardware BOM | [SHARED] from ICPICS | Component, part number, cost (~$99 total) |
+| 2 | Inter-sample interval statistics | [SHARED] from ICPICS | p50/p95/p99/within-±25 µs |
+| 3 | IMU FSR history | [SHARED] from ICPICS | Session, FSR setting, saturation events, scale factor |
+| 4 | Field validation metrics summary | [SHARED] from ICPICS | Sessions, duration, swings, BLE reconnections, CRC errors, sample drops |
+| 5 | Protocol comparison | [NEW] | Binary TLV vs JSON vs CSV: bytes/sample, parse overhead, extensibility |
+| 6 | `abs_us` reconstruction error | [NEW] | Per-reconnection: dev_us-only error, host-only error, abs_us error vs host_rx_ms ground truth |
+| 7 | Chaquopy benchmark | [NEW] | Per-swing latency stats (mean, p50, p95, p99); cold-start cost; PC↔Android MDF parity (Pearson r, MAE) |
 
 ---
 
-## Relationship to Paper 1
+## Relationship to ICPICS conference paper and Paper 1
 
-| Aspect | Paper 1 | Paper 2 |
-|--------|---------|---------|
-| Primary contribution | Electrode settling characterisation + IMU quality validation | System design + engineering + field robustness |
-| Data used | log0303, log0305 | Same sessions (as field validation) |
-| Reader | Biomedical / sports science | Embedded systems / wearable engineering |
-| Venue | EMBC (student/biomedical track) | BSN / MDPI Sensors (systems track) |
-| Status | Write first | Write after Paper 1 submitted |
+| Aspect | Paper 1 (CNIB) | ICPICS conference paper | This journal extension |
+|--------|----------------|--------------------------|--------------------------|
+| Primary contribution | Electrode settling characterisation + IMU quality validation | Engineering core: firmware + BLE + PC pipeline + pogo-pin diagnosis | ICPICS contributions + `abs_us` validation + Chaquopy benchmark + ghost-signal characterisation depth |
+| Data used | log0303, log0305 | Same sessions (basic field validation) | Same sessions (with new ground-truth analysis on all BLE reconnection events) |
+| Reader | Biomedical / sports science | Embedded systems / wearable engineering practitioners | Same as ICPICS, plus mobile-biosignal-pipeline and timeline-reconstruction researchers |
+| Venue | EMBC (student/biomedical track) | ICPICS (systems track) | **MDPI Sensors (primary)** or **IEEE JBHI** |
+| Status | Write first | Write second | Write third (after ICPICS submission) |
+| New material vs. ICPICS | n/a | n/a | ~30–50% (per IEEE policy) — primarily §§ 7, 8, 9 (`abs_us` validation, Chaquopy benchmark, ghost-signal characterisation) |
 
-Paper 2 cites Paper 1 for the scientific findings. Paper 1 cites the system (brief description, ~500 words) but does not claim system design as a contribution.
+This journal version cites the ICPICS paper for the engineering core; ICPICS sections (3–6) are condensed here, citing ICPICS rather than duplicating the content. Paper 1 remains a separate biomedical paper; the journal version cites Paper 1 for the scientific findings.
 
 ---
 
 ## Next Steps
 
-1. [ ] Submit Paper 1 first
-2. [ ] Write Paper 2 draft after Paper 1 submission (estimated: 3 months from now)
-3. [ ] Generate Figure 4 (ghost signal diagnosis) -- raw data available in log0303 early captures
-4. [ ] Generate Figure 5 (abs_us stitching diagram) -- illustrate the two-case reconstruction
-5. [ ] Write firmware architecture section (draw from `myoware_imu_v2/HIGH_LEVEL_DESIGN.md`)
-6. [ ] Write protocol section (draw from `py_scripts/PROTOCOL.md`)
-7. [ ] Write pipeline section (draw from `emg_util/HIGH_LEVEL_DESIGN.md` and `SYSTEM_HIGH_LEVEL_DESIGN.md`)
-8. [ ] Prepare hardware BOM table with actual part numbers and costs
-9. [ ] Open-source the firmware and Python pipeline (GitHub repo) before submission
+> Ordered to reflect ICPICS-first strategy. Items marked [NEEDS NEW EXPERIMENTS] are blocking for the journal version but not for ICPICS.
+
+1. [ ] Submit Paper 1 (CNIB) — independent track
+2. [ ] Submit ICPICS conference paper — see [icpics_paper_plan.md](icpics_paper_plan.md) action list
+3. [ ] [NEEDS NEW EXPERIMENTS] **Chaquopy benchmark on Android** (target hardware: \[device model TBD\]):
+   - Run `analysis_bridge.process_session_compat()` over log0305 (626 swings) on device
+   - Capture per-swing latency distribution; decompose JNI / filtfilt / Welch contributions
+   - Compute MDF agreement vs. PC (Pearson r, MAE)
+   - Capture cold-start cost (first import + first swing)
+   - Output: data + Figure 6 + Table 7
+4. [ ] [NEEDS NEW EXPERIMENTS] **`abs_us` ground-truth validation:**
+   - For each BLE reconnection event in the field session (1 between-run from CSVs; within-run re-subscriptions from runtime health logs): compute reconstruction error vs `host_rx_ms` ground truth
+   - Quantify error distribution, max, p95, p99
+   - Compare against device-clock-only and host-clock-only baselines
+   - Output: data + Figure 5 + Table 6
+5. [ ] [NEEDS NEW EXPERIMENTS] **Pogo-pin ghost signal characterisation depth:**
+   - Quantitative ghost amplitude vs ENV amplitude scatter from log0303 pre-bypass data
+   - Before/after RAW-channel std distribution
+   - ADC-mux charge-sharing model (analytical, not empirical)
+   - Output: figure overlay on Figure 4 + § 9 prose
+6. [ ] **Multi-session timeline plot (Figure 7):** frame count, CRC errors, reconnection events over 150+ min
+7. [ ] Write `abs_us` section (§ 7) drawing from `capture_loader.load_session_stitched()` source
+8. [ ] Write Chaquopy section (§ 8) drawing from `btLeApp/.../python/analysis_bridge.py` source
+9. [ ] Write ghost-signal characterisation section (§ 9) drawing from `myoware_imu_v2/HARDWARE.md` and `arduino/py_scripts/PROTOCOL.md`
+10. [ ] Expand Related Work section (§ 2) with cross-platform mobile biosignal and multi-clock-timestamp positioning
+11. [ ] Expand Discussion section (§ 11) with generalisation criteria and limitations
+12. [ ] Open-source the firmware and Python pipeline (GitHub repo) before submission
 
 ---
 

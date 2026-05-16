@@ -7,6 +7,8 @@
     { "name": "Athelet app", "path": "../btLeApp/app" }
   ],
   
+  "dev.containers.enabled": false,
+
   "settings": {
     "python.defaultInterpreterPath": "/local/mnt/workspace/wangx/miniconda3/envs/fft-env/bin/python",
     "python.terminal.activateEnvironment": true,
