@@ -1,48 +1,45 @@
 ---
-title: "A Low-Cost ESP32 Wearable for Real-Time EMG–IMU Acquisition with DMA Sampling and Self-Describing BLE"
-author:
-  - name: "Ryan Wang"
-    affiliation: "Westview High School, San Diego, CA, USA"
-date: "2026"
-abstract: |
-  We present the design and implementation of a low-cost ($99 USD) ESP32-based
-  wearable system that achieves concurrent EMG (2000 Hz) and IMU (200 Hz) streaming
-  over Bluetooth Low Energy (BLE) with zero detected sample drops during active
-  streaming. The system employs a
-  dual-core FreeRTOS architecture in which a dedicated sensor core runs hardware ADC
-  Direct Memory Access (DMA) at 40 kHz with 10x oversampling decimation, yielding
-  empirically verified per-sample timestamp accuracy of +/-25 us (99.03% of 2.3 million
-  samples). A self-describing binary TLV protocol with CRC16 integrity checking embeds
-  IMU full-scale range (FSR) codes in every frame, enabling firmware parameter changes
-  without host decoder changes. A device-side host-ping watchdog with pause and auto-reboot
-  states enables robust unattended field deployment, exercised during a
-  between-run BLE reconnect event without file corruption or recording-pipeline
-  failure. The system includes a PC Python receiver
-  (btCentral.py) that captures BLE frames to rotating CSV logs and supports a hybrid
-  device/host timeline reconstruction (`abs_us`) designed to handle both BLE-dropout and
-  ESP32-reset reconnection cases. We document a field-discovered pogo-pin ADC routing
-  failure that produced a ghost signal (r = 0.998 with the envelope channel) and its
-  hardware bypass fix.
-  The complete system provides a field-tested low-cost platform for sports biosignal
-  acquisition and wearable-sensing prototyping.
-keywords: [wearable, EMG, IMU, BLE, ESP32, DMA, real-time, biosignal]
+output:
+  pdf_document:
+    pandoc_args: ["--pdf-engine=xelatex"]
+keywords: "wearable, EMG, IMU, BLE, ESP32, DMA, real-time, biosignal"
+header-includes:
+  - \usepackage{hyperxmp}
 ---
+
+# A Low-Cost ESP32 Wearable for Real-Time EMG–IMU Acquisition with DMA Sampling and Self-Describing BLE
+
+**Ryan Wang** — Westview High School, San Diego, CA, USA
+
+*2026*
+
+## Abstract
+
+Monitoring muscle activity and body motion together reveals how neuromuscular effort evolves during athletic movement — in tennis, for example, fatigue manifests as greater muscle activation required to produce the same swing. Surface electromyography (EMG) records the electrical activity of contracting muscles, capturing effort and fatigue before they are visible in motion; an inertial measurement unit (IMU) records the acceleration and rotation of the moving limb. Research-grade systems that capture both reliably cost \$5,000–\$30,000, while commodity-microcontroller alternatives are affordable but rarely survive the timing, wireless, and physical-contact failures of real field deployment.
+
+We present a \$99 ESP32-based wearable that streams concurrent EMG and IMU data over Bluetooth Low Energy (BLE) with microsecond-scale timing accuracy and field-tested reliability. A dual-core architecture dedicates one CPU core entirely to sensor acquisition while the other handles wireless transmission, preventing BLE processing from interrupting sample collection. Analog-to-digital (ADC) sampling with direct memory access (DMA) at 20 kHz per channel, decimated 10× in software, yields a 2 kHz EMG output stream with per-sample timestamp accuracy of ±25 µs, empirically verified across 2.3 million samples. A self-describing binary frame format embeds sensor-range metadata in every packet so firmware gain changes do not break host parsers, and a two-layer device/host watchdog with hybrid timeline reconstruction recovers from BLE dropouts and full device resets without data corruption. Across 150+ minutes of tennis field recording, the system showed zero detected sample drops. We also document a field-discovered hardware failure — a pogo-pin contact producing a "ghost" signal that mimics real EMG until filtering reveals it as flat — together with a quantitative diagnostic and solder-bypass fix. Although demonstrated in tennis, the platform is application-agnostic and supports a broad range of wearable biosignal use cases.
 
 ## I. Introduction
 
-Concurrent high-rate acquisition of electromyography (EMG) and inertial measurement unit (IMU) signals from a body-worn device enables applications ranging from sports fatigue monitoring [1] to gesture recognition [2] and rehabilitation assessment [3]. Commercial research-grade systems (e.g., Delsys Trigno, Noraxon) achieve this reliably but cost $5,000–$30,000, limiting field deployment in youth sports, coaching, and low-resource research settings.
+As fatigue sets in during athletic activity, neuromuscular control gradually degrades — the muscle has to work harder to produce the same motion, and the resulting changes in technique can lead to injury. Detecting this objectively, *before* it shows up in performance, is a long-standing goal of sports biomechanics. The two sensor modalities that together can answer this question are *surface electromyography* (EMG) and *inertial measurement* (IMU). Surface EMG places small electrodes on the skin over a target muscle and records the tiny electrical potentials that accompany contraction; the amplitude and frequency content of this signal reveal how hard the muscle is working and how that effort changes over time. An IMU — the same family of sensor found in smartphones, combining a 3-axis accelerometer with a 3-axis gyroscope — records the motion of the limb it is attached to: when a swing happens, how fast, in what orientation.
 
-Low-cost alternatives based on commodity microcontrollers face three practical challenges. First, achieving 2000 Hz EMG sampling without sample loss requires careful ADC architecture — naive timer-based sampling at this rate consumes excessive CPU and competes with Bluetooth stack processing. Second, reliable BLE streaming at the combined data rate of EMG + IMU demands efficient packetization and transmission. Third, multi-sensor systems require precise timestamp alignment across sensors with different sampling rates (2000 Hz vs. 200 Hz) to support downstream analysis.
+Either sensor alone is incomplete: motion alone cannot distinguish a controlled swing from a fatigued one of the same speed, and muscle activity alone cannot tell which motion produced it. Recorded together and time-aligned, these signals address a central fatigue-monitoring question: *is the muscle working harder to produce the same motion?*
+
+This work is motivated by tennis, where fatigue across a long practice session is known to alter upper-limb muscle activity and degrade stroke performance [1], and where coaches currently rely on subjective observation rather than instrumented measurement. The hardware and capture pipeline themselves, however, are application-agnostic: any wearable scenario that requires time-aligned muscle-and-motion data — rehabilitation assessment, gesture recognition, occupational ergonomics [2], or e-sports performance monitoring — can reuse the same platform without modification.
+
+Commercial research-grade systems (e.g., Delsys Trigno, Noraxon) capture EMG and IMU reliably with sub-millisecond synchronization, but at \$5,000–\$30,000 per unit they are out of reach for youth sport, school athletic programs, and most field research outside well-funded laboratories. The principal barrier is engineering effort — sensing modalities and microcontroller hardware are inexpensive — and a low-cost alternative becomes feasible once the timing, wireless, and physical-contact failure modes are addressed systematically.
+
+Low-cost alternatives based on commodity microcontrollers face three practical challenges. First, achieving 2000 Hz EMG sampling without sample loss requires careful analog-to-digital converter (ADC) architecture — naive timer-based sampling at this rate consumes excessive CPU and competes with Bluetooth stack processing. Second, reliable BLE streaming at the combined data rate of EMG + IMU demands efficient packetization and transmission. Third, multi-sensor systems require precise timestamp alignment across sensors with different sampling rates (2000 Hz vs. 200 Hz) to support downstream analysis.
 
 Prior work on low-cost wearable EMG systems [4,5,6] typically achieves adequate sampling rates in controlled laboratory settings but rarely documents the failure modes encountered in field deployment — pogo-pin routing failures, ADC crosstalk, BLE reconnection handling, and timestamp drift. These practical challenges are as important as the nominal specifications for reproducible research.
 
-This paper presents a complete low-cost wearable EMG–IMU acquisition system addressing these challenges. The main contributions are:
+This paper presents the design and field validation of a complete low-cost wearable EMG–IMU acquisition system that addresses these challenges. Our contributions span firmware, protocol, and capture-pipeline engineering:
 
-1. **DMA-driven 2 kHz EMG acquisition** with 10× hardware oversampling and per-sample timestamp back-calculation achieving ±25 µs accuracy, empirically validated over 2.3 million samples.
-2. **Self-describing BLE protocol** where IMU full-scale-range codes embedded in every frame enable firmware parameter updates without host decoder changes — demonstrated unchanged across three firmware FSR revisions.
-3. **Dual-core FreeRTOS architecture** with explicit task-priority assignment achieving zero detected sample drops during concurrent EMG (2 kHz) + IMU (200 Hz) BLE streaming, evaluated across 150+ minutes of field recordings.
-4. **Two-layer field-recovery design** combining a device-side host watchdog (pause at 18 s, reboot at 30 s) with a host-side hybrid timeline reconstruction (`abs_us`) for BLE-dropout and ESP32-reset cases; field testing demonstrated clean recovery from an inter-run reconnect without file corruption or parser failure.
-5. **Field-failure documentation**: a pogo-pin ADC ghost signal consistent with charge sharing or floating-input coupling (r = 0.998 with the envelope channel) that survives visual inspection but is silently destroyed by routine high-pass filtering, with quantified diagnosis and a reproducible solder-bypass fix.
+1. **Reliable high-rate EMG sampling.** ADC samples stream directly to memory without CPU involvement; 20 kHz per-channel acquisition decimated 10× in software, combined with per-sample timestamp reconstruction, yields ±25 µs accuracy at the 2 kHz output rate, empirically validated over 2.3 million samples.
+2. **Protocol robustness across firmware changes.** A self-describing BLE frame format embeds IMU full-scale-range codes in every frame, enabling firmware parameter updates without host decoder changes — demonstrated unchanged across three firmware FSR revisions.
+3. **Concurrent sensing without wireless interference.** A dual-core FreeRTOS architecture with explicit task-priority assignment achieves zero detected sample drops during concurrent EMG (2 kHz) + IMU (200 Hz) BLE streaming, evaluated across 150+ minutes of field recordings.
+4. **Recovery from field interruptions.** A two-layer device/host watchdog (device-side pause at 18 s, reboot at 30 s) combined with host-side hybrid timeline reconstruction (`abs_us`) handles BLE-dropout and ESP32-reset cases; field testing demonstrated clean recovery from an inter-run reconnect without file corruption or parser failure.
+5. **Physical-contact failure diagnosis.** A pogo-pin ADC ghost signal consistent with charge sharing or floating-input coupling (r = 0.998 with the envelope channel) that survives visual inspection but is silently destroyed by routine high-pass filtering, with quantified diagnosis and a reproducible solder-bypass fix.
 
 ## II. Related Work
 
