@@ -1,19 +1,21 @@
 ---
-title: "IRB & IEEE Publication Requirements — Reference Context for sEMG/IMU Tennis Study"
+title: "IRB & IEEE Publication Requirements — Reference Context for sEMG/IMU Athletic Practice Study"
 purpose: "Authoritative context document used while drafting the IRB packet and manuscript ethics statements."
-study: "Passive Forearm sEMG/IMU Monitoring During Normal Tennis Practice"
+study: "Passive Forearm sEMG/IMU Monitoring During Tennis Practice and Running"
 ethics_body: "Oregon State University Human Research Protection Program (HRPP) / IRB"
 publication_target: "IEEE biomedical venues (EMBC, JBHI, JTEHM, TBME, Sensors)"
 governing_regulations:
   - "U.S. Common Rule, 45 CFR 46 (revised 2018)"
   - "45 CFR 46 Subpart D — Additional Protections for Children"
   - "Declaration of Helsinki (biomedical-venue norm)"
-last_verified: "2026-05-23 (audit pass 1: §46.408(b) one-parent allowance for §46.404 corrected; OSU template names, RCR≠HSP, Level 2 cloud-storage caveat added; Part 7 protocol-drafting checklist added. Audit pass 2: expedited category language softened (OSU determines); §7.5 renamed and softened; no-medical-feedback language added; withdrawal limits added; N=2 indirect-identifiability warning added; participant–authorship separation strengthened; OSU policy-manual URL standardized; COI page re-verification note added. Refinement: Xiaodong Wang substituted for Larry Wang. Part 4 restructured into TBDs table + grouped pre-submission action items + post-approval items.)"
+last_verified: "2026-05-23 (passes 1–5 logged previously, plus file rename to IRB_Packet_OSU_sEMG_IMU_Athletic_Practice.md. Audit pass 6 (v0.4 → v0.5): packet §4 'technical manuscript' → 'future IEEE-targeted manuscript(s)'; packet §4 'two distinct private sites' → 'two distinct off-site settings'; packet §16 'unsafe weather or court conditions' → 'unsafe weather, court, facility, treadmill, or equipment conditions'; requirements §7.1 'tennis opportunities' → 'sports/athletic opportunities'; requirements §7.5 'Tennis coaching or practice decisions' → 'Athletic coaching, training, or practice decisions'. Audit pass 7 polish (still v0.5): Appx A.5 Xiaodong contribution narrowed to 'California tennis sessions' for sensor setup, matching frontmatter and Appx A.7.)"
 ---
 
 ## 0. How to use this document
 
-This file captures the OSU IRB and IEEE publication requirements that govern the sEMG/IMU tennis study. It is the **reference context** when drafting `IRB_Packet_OSU_sEMG_Tennis.md` and the ethics sections of `paper_cnib.md`. Direct quotes from authoritative sources are marked with `>`. Items marked **TBD** require user/PI input before submission.
+This file captures the OSU IRB and IEEE publication requirements that govern the sEMG/IMU study. It is the **reference context** when drafting `IRB_Packet_OSU_sEMG_IMU_Athletic_Practice.md` and the ethics sections of any **future IEEE-targeted manuscript** that draws on data collected under this protocol. Direct quotes from authoritative sources are marked with `>`. Items marked **TBD** require user/PI input before submission.
+
+**Scope clarification.** This IRB packet is being prepared to support **future IEEE biomedical submissions**. Any prior or in-flight engineering write-ups produced from pre-IRB engineering test data are out of scope of this protocol and are not "research analysis, conference submission, or publication" as those terms are used in this document; only data collected after IRB approval will be used to support IEEE-targeted research publications.
 
 When IEEE policy and OSU policy collide, OSU policy controls study conduct (it has legal force); IEEE policy controls only what must be in the manuscript.
 
@@ -59,7 +61,7 @@ Source: [OSU IRB — Submission Information](https://research.oregonstate.edu/ir
 | Category | Typical timeline | Applies when |
 |---|---|---|
 | Exempt | 3–4 weeks | Specific [45 CFR 46.104](https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-A/part-46/subpart-A/section-46.104) categories — generally **not** for research with minors involving sensors |
-| **Expedited** | **6–8 weeks** | **Anticipated for this study** — minimal-risk research involving noninvasive physiological sensor recording and research on individual characteristics, behavior, and movement during ordinary tennis practice. **OSU determines the applicable expedited category** under [45 CFR 46.110](https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-A/part-46/subpart-A/section-46.110); the request will not pre-assign a category. |
+| **Expedited** | **6–8 weeks** | **Anticipated for this study** — minimal-risk research involving noninvasive physiological sensor recording and research on individual characteristics, behavior, and movement during ordinary athletic practice (tennis practice for one participant; running at a neighborhood fitness center for the other). **OSU determines the applicable expedited category** under [45 CFR 46.110](https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-A/part-46/subpart-A/section-46.110); the request will not pre-assign a category. |
 | Full Board | 12 weeks | Greater than minimal risk, vulnerable populations beyond minor-only, etc. |
 
 OSU determines the category from the application; the applicant requests but does not assign.
@@ -124,9 +126,9 @@ Source: [45 CFR 46 Subpart D (eCFR)](https://www.ecfr.gov/current/title-45/subti
 Source: [OSU HRPP Policy and Procedure Manual](https://research.oregonstate.edu/ori/irb/policy-and-procedure-manual)
 
 - OSU IRB has jurisdiction via the PI's institutional affiliation regardless of where data is collected
-- Protocol must **describe** non-OSU sites (residential courts, weather/safety procedures, supervising adult)
+- Protocol must **describe** non-OSU sites (residential court for tennis, neighborhood fitness center for running; weather/safety/equipment procedures; supervising adult)
 - Multi-state participation (Ryan in CA, Theodore in OR) is allowed under OSU IRB but must be explicitly described
-- No school-based-research clearance needed because data collection is at residential courts, not at Westview HS or Crescent Valley HS
+- No school-based-research clearance needed because data collection is at a residential tennis court (Ryan) and a neighborhood fitness center (Theodore), not at Westview HS or Crescent Valley HS
 
 ### 1.10 Continuing review and amendments
 
@@ -249,7 +251,7 @@ The exact submission target affects which biomedical norms above are mandatory v
 | Subpart D handling | OSU 1.8 | IRB Packet Doc 1 (procedures), Doc 2 (parental permission for both kids), Doc 3 (assent for both kids) |
 | Two-parent permission (study-specific stance) | OSU/Subpart D §46.408(b) — IRB may allow one parent for §46.404 work, but we elect both | Both Ryan's and Theodore's parents sign permission when feasible; IRB Packet Doc 2A & 2B |
 | 18th-birthday re-consent (Ryan ~Sep 2026) | OSU 1.8 | IRB Packet Doc 1 §6 + amendment plan |
-| 18th-birthday provision (Theodore ~Sep 2027) | OSU 1.8 | IRB Packet Doc 1 §6 |
+| 18th-birthday provision (Theodore ~Sep 2028) | OSU 1.8 | IRB Packet Doc 1 §6 |
 | CITI training | OSU 1.3 | IRB Packet Cover Letter + Appx D (CITI tracker) |
 | COI Management Plan | OSU 1.6 + IEEE 2.3 | IRB Packet Doc 6; restated in manuscript COI declaration |
 | Independent Assent Administrator | OSU 1.6 mitigation | IRB Packet Doc 8 |
@@ -269,7 +271,7 @@ The exact submission target affects which biomedical norms above are mandatory v
 
 ### 4.1 TBDs to be filled in the packet (consolidated)
 
-These are bracketed `[TBD]` placeholders that must have real values written into `IRB_Packet_OSU_sEMG_Tennis.md` before Cayuse submission.
+These are bracketed `[TBD]` placeholders that must have real values written into `IRB_Packet_OSU_sEMG_IMU_Athletic_Practice.md` before Cayuse submission.
 
 | TBD | Where it appears in the packet |
 | --- | --- |
@@ -277,7 +279,7 @@ These are bracketed `[TBD]` placeholders that must have real values written into
 | IAA name, title, department, email, phone | Doc 1 §2; Doc 8 §8.1; Appx D |
 | Theodore's exact date of birth (day in September) | Frontmatter; Doc 1 §6; Doc 2B; Doc 3B |
 | Ryan's residential court address (city, state, court description) | Doc 1 §5 Site A; Doc 2A "What Will Happen" |
-| Theodore's residential court address (Corvallis, OR; specific court if relevant) | Doc 1 §5 Site B; Doc 2B "What Will Happen" |
+| Theodore's neighborhood fitness center address (Corvallis, OR; facility name if applicable) | Doc 1 §5 Site B; Doc 2B "What Will Happen" |
 | Ryan's other parent's name | Doc 2A signature lines |
 | Theodore's other parent's name | Doc 2B signature lines |
 | OSU HRPP/IRB participant-rights contact (phone + email) | Doc 2A/2B "Questions" section |
@@ -311,7 +313,8 @@ Concrete tasks (verbs with owners). Check each box as completed.
 #### C. Site descriptions
 
 - [ ] Capture Ryan's residential court address (city + state at minimum) for Doc 1 §5 Site A and Doc 2A
-- [ ] Capture Theodore's residential court address (Corvallis, OR; specific court name if applicable) for Doc 1 §5 Site B and Doc 2B
+- [ ] Capture Theodore's neighborhood fitness center address (Corvallis, OR; facility name if applicable) for Doc 1 §5 Site B and Doc 2B
+- [ ] **Confirm whether the Corvallis neighborhood fitness center requires written site permission / facility authorization for data collection.** If required, obtain a letter of cooperation or document facility approval before Cayuse submission. (Member-access residential or condo gyms typically do not; commercial gyms may.)
 
 #### D. Decisions to document
 
@@ -390,18 +393,18 @@ OSU and IEEE policies change. Before each IRB submission or manuscript submissio
 
 1. Re-fetch the URLs in Part 5 and confirm any direct quotes still match.
 2. Update the `last_verified` date in the frontmatter.
-3. If a policy changed, log the diff in this file and update affected sections of `IRB_Packet_OSU_sEMG_Tennis.md`.
+3. If a policy changed, log the diff in this file and update affected sections of `IRB_Packet_OSU_sEMG_IMU_Athletic_Practice.md`.
 
 ---
 
 ## Part 7 — Protocol-drafting checklist (derived from review)
 
-These are not OSU/IEEE *requirements* per se; they are protocol elements that an internal review of this document flagged as worth including in `IRB_Packet_OSU_sEMG_Tennis.md` because they materially strengthen the OSU IRB application or address known reviewer concerns.
+These are not OSU/IEEE *requirements* per se; they are protocol elements that an internal review of this document flagged as worth including in `IRB_Packet_OSU_sEMG_IMU_Athletic_Practice.md` because they materially strengthen the OSU IRB application or address known reviewer concerns.
 
 ### 7.1 Closed-cohort recruitment and no compensation
 - No public recruitment; closed N=2 cohort known to study team.
 - No compensation, no cost to participants.
-- Participation does not affect school standing, tennis opportunities, family relationships, authorship, or other benefits.
+- Participation does not affect school standing, sports/athletic opportunities, family relationships, authorship, or other benefits.
 
 ### 7.2 Participation–authorship separation
 - Authorship and acknowledgment decisions are not contingent on a minor's continued data-collection participation.
@@ -421,18 +424,19 @@ These are not OSU/IEEE *requirements* per se; they are protocol elements that an
 - The system is used only for non-clinical research signal recording and engineering analysis.
 - Not used for diagnosis, treatment, prevention, monitoring of a medical condition, or clinical decision-making.
 - The study does not test a therapeutic or diagnostic device claim. The PI will address any OSU questions about FDA/device applicability if raised, rather than asserting a categorical "not a medical device" determination upfront.
-- **No medical feedback to participants.** Participants and parents will not receive medical interpretation, diagnosis, treatment advice, or individualized health recommendations based on the sEMG/IMU data. Tennis coaching or practice decisions remain outside the research protocol.
+- **No medical feedback to participants.** Participants and parents will not receive medical interpretation, diagnosis, treatment advice, or individualized health recommendations based on the sEMG/IMU data. Athletic coaching, training, or practice decisions remain outside the research protocol.
 
-### 7.6 Ordinary tennis risk vs. research-added risk
-- Tennis itself involves ordinary athletic risk (fatigue, soreness, falls, minor injury).
-- Research does not require participants to exceed normal practice intensity.
+### 7.6 Ordinary athletic risk vs. research-added risk
+- Ordinary athletic activity includes tennis-specific risks for Ryan (court hazards, swing-related strain) and running/fitness-equipment risks for Theodore (treadmill, slip surfaces, equipment use).
+- Research does not require participants to exceed normal training intensity.
 - Research-added risks are limited to possible mild skin irritation, minor inconvenience, and confidentiality risk.
 
-### 7.7 Off-site / private-court privacy
-- No public spectators invited by researchers.
-- No video or audio recording.
-- No school or team involvement; collection at private residential courts only.
-- Supervising adult present for safety; collection postponed for unsafe weather/court conditions.
+### 7.7 Off-site / private-site and community-fitness privacy
+- No public spectators are invited by the research team.
+- No video or audio is recorded.
+- No school or team involvement; collection occurs at a private residential court (Ryan, tennis) or a neighborhood fitness center (Theodore, running) only.
+- Supervising adult on-site for safety; collection postponed for unsafe weather, court, facility, treadmill, or equipment conditions.
+- No data are collected from facility staff, members, patrons, coaches, or any other third party.
 
 ### 7.8 Reportable adverse events / deviations (specifics)
 - Skin redness lasting beyond a session.
@@ -440,7 +444,7 @@ These are not OSU/IEEE *requirements* per se; they are protocol elements that an
 - Pain or unusual discomfort from device placement.
 - Privacy breach, lost device, or lost data.
 - Distress or perceived pressure to participate.
-- Any tennis injury during a research-recorded session — even if likely ordinary sport-related — logged and evaluated.
+- Any athletic injury during a research-recorded session — tennis-related or running/fitness-related, even if likely ordinary sport-related — logged and evaluated.
 
 ### 7.9 Adult re-consent operational detail
 - New data collection pauses at age 18 until adult informed consent is obtained.
