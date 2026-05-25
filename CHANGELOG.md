@@ -3,6 +3,16 @@
 ## [Unreleased] — 2026-05-24
 
 ### Added
+- **N4: `journal_n4_comparative.md`** — expanded comparative analysis draft (journal §2
+  Related Work). Contains: (a) engineering comparison table across this work, Delsys
+  Trigno, Noraxon Ultium, Cerone HD-sEMG, Lynn/Athos, Yang e-textiles, and
+  MultiSenseBadminton — columns: cost, EMG fs, IMU fs, raw access, BLE robustness,
+  timeline reconstruction, multi-platform, open HW/SW; (b) methodology comparison
+  narrative (§2.1–2.3) positioning vs. Rota 2014, Wang LH 2019, Girard 2011, SENIAM
+  gap; (c) dry/no-gel electrode contact quality refs (Joutsen, Boyer, Ravichandran);
+  (d) IMU-as-context vs. fusion distinction (Taborri, Bangaru). Three reference cells
+  marked TBD (Joutsen, Boyer, Ravichandran exact citations) — to verify before submission.
+
 - **N1: `abs_us_validate.py`** — quantitative `abs_us` timeline reconstruction
   validation script (journal paper §5.4). Compares three strategies across
   log0305 (7.10M samples, 59.2 min) and log0303 (inter-connection reconnect):
