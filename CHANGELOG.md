@@ -3,6 +3,25 @@
 ## [Unreleased] — 2026-05-24
 
 ### Added
+- **N2 Approach B: `mdf_pre_impact` in `emg_util_yaml_runner.py`** — pre-impact MDF
+  window (journal §6.6). When `impact_mask_thr_g > 0` and a swing shows acc_dyn peak
+  >= threshold, computes MDF from `[t_impact-600ms, t_impact-20ms]` (~580ms pre-contact
+  window) using Welch with nperseg=512. Stored as `mdf_pre_impact` in swing_features.csv.
+  New config key: `impact_pre_impact_ms` (default 600). PC-only (yaml_runner); no
+  nopandas port needed.
+  - log0305 results (3.0g threshold): 512/633 swings (81%) have impact detected.
+    Full-window MDF 133.7±43.4 Hz → pre-impact MDF 160.4±52.0 Hz.
+    Δ: mean=+26.7 Hz, std=44.5 Hz, median=+3.9 Hz. Distribution right-skewed
+    (p75=+46.9 Hz, p95=+101.6 Hz); 25% of swings show no shift, 50% show positive.
+  - Physiological interpretation: pre-impact window captures active contraction phase
+    before ball contact; higher MDF in this phase vs full window confirms that
+    post-impact follow-through contributes lower-frequency components to full-window
+    PSD. Window selection matters for fatigue estimation — IMU enables principled choice.
+
+- **`n2_preimpact_mdf.py`** — standalone analysis script for N2 figure generation.
+  Outputs `paper_figures/fig_n2_preimpact_mdf.png` (violin/box + scatter + CDF) and
+  `paper_figures/table_n2_preimpact_mdf.csv`.
+
 - **N4: `journal_n4_comparative.md`** — expanded comparative analysis draft (journal §2
   Related Work). Contains: (a) engineering comparison table across this work, Delsys
   Trigno, Noraxon Ultium, Cerone HD-sEMG, Lynn/Athos, Yang e-textiles, and

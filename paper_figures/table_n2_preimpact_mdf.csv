@@ -1,0 +1,11 @@
+Metric,Value
+N total swings,633
+N swings with impact_acc_dyn >= 3.0g,512
+Full-window MDF (impact swings): mean ± std,133.7 ± 43.4 Hz
+Full-window MDF (impact swings): median,125.0 Hz
+Pre-impact MDF (impact swings): mean ± std,160.4 ± 52.0 Hz
+Pre-impact MDF (impact swings): median,168.0 Hz
+Delta (pre-impact - full): mean ± std,26.70 ± 44.45 Hz
+Delta (pre-impact - full): median,3.91 Hz
+"Delta: p5, p25, p75, p95","-8.7, 0.0, 46.9, 101.6 Hz"
+Pre-impact window,"[t_impact - 600 ms, t_impact - 20 ms] ≈ 580 ms (nperseg=512)"

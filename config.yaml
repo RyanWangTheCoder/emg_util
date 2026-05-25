@@ -31,6 +31,10 @@ swing_detection:
   # Set to 0.0 to disable (backward-compatible default).
   impact_mask_thr_g: 0.0    # g; 3.0 recommended for tennis; 0 = disabled
   impact_mask_half_ms: 20   # ms; half-width of masked region around impact peak
+  # N2 / Approach B: pre-impact MDF window [t_impact-pre_ms, t_impact-20ms].
+  # Only computed when impact_mask_thr_g > 0 and impact is detected.
+  # Output column: mdf_pre_impact (uses nperseg=512 for better segment averaging).
+  impact_pre_impact_ms: 600 # ms; pre-contact window length for Approach B MDF
 baseline:
   mode: swing
   warmup_skip_min: 10

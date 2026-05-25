@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import yaml
+from scipy.signal import welch as scipy_welch
 
 import emg_util as core
 import capture_loader as loader
@@ -932,6 +933,7 @@ def per_swing_emg_features_stitched(
     ssc_thr = float(cfg.get('features', {}).get('ssc_thr', 0.01))
     impact_thr_g = float(cfg.get('swing_detection', {}).get('impact_mask_thr_g', 0.0))
     impact_half_ms = float(cfg.get('swing_detection', {}).get('impact_mask_half_ms', 20.0))
+    impact_pre_ms = float(cfg.get('swing_detection', {}).get('impact_pre_impact_ms', 600.0))
 
     # Pre-sort EMG by abs_us for fast binary-search indexing
     emg_sorted = emg_df.dropna(subset=['raw']).sort_values('abs_us').reset_index(drop=True)
@@ -1017,6 +1019,7 @@ def per_swing_emg_features_stitched(
         impact_detected = False
         impact_acc_dyn_g = np.nan
         mdf_impact_masked = np.nan
+        mdf_pre_impact = np.nan
         if impact_thr_g > 0 and imu_ts_arr is not None and raw_pad.size >= 32:
             t0p_ms = t0_ms - pad_ms
             t1p_ms = t1_ms + pad_ms
@@ -1043,6 +1046,27 @@ def per_swing_emg_features_stitched(
                     proc_masked = proc[keep[:len(proc)]]
                     if proc_masked.size >= 32:
                         _, mdf_impact_masked = core.mnf_mdf(proc_masked, fs)
+                    # Approach B: pre-impact MDF window [t_impact-pre_ms, t_impact-20ms].
+                    # Extracts the clean pre-contact activation phase (~580ms) and
+                    # recomputes MDF with nperseg=512 for better segment averaging.
+                    pre_lo_us = int((impact_t_ms - impact_pre_ms) * 1000.0)
+                    pre_hi_us = int((impact_t_ms - impact_half_ms) * 1000.0)
+                    if pre_lo_us < pre_hi_us:
+                        k0 = int(np.searchsorted(abs_us_arr, pre_lo_us, side='left'))
+                        k1 = int(np.searchsorted(abs_us_arr, pre_hi_us, side='right'))
+                        raw_pre = raw_arr[k0:k1]
+                        if raw_pre.size >= 64:
+                            proc_pre = core.preprocess_emg(raw_pre, fs)
+                            nperseg_b = min(512, len(proc_pre))
+                            noverlap_b = min(nperseg_b // 2, len(proc_pre) - 1)
+                            f_pre, Pxx_pre = scipy_welch(
+                                proc_pre, fs=fs, nperseg=nperseg_b,
+                                noverlap=noverlap_b, window='hann', scaling='density')
+                            Pxx_pre = np.maximum(Pxx_pre, 1e-20)
+                            s_pre = float(np.sum(Pxx_pre))
+                            cdf_pre = np.cumsum(Pxx_pre)
+                            mdf_pre_impact = float(f_pre[min(
+                                np.searchsorted(cdf_pre, 0.5 * s_pre), len(f_pre) - 1)])
 
         rows.append({
             'swing_id': int(r['swing_id']),
@@ -1066,6 +1090,7 @@ def per_swing_emg_features_stitched(
             'impact_detected': impact_detected,
             'impact_acc_dyn_g': impact_acc_dyn_g,
             'mdf_impact_masked': float(mdf_impact_masked) if np.isfinite(mdf_impact_masked) else np.nan,
+            'mdf_pre_impact': float(mdf_pre_impact) if np.isfinite(mdf_pre_impact) else np.nan,
         })
 
     return pd.DataFrame(rows)
