@@ -1586,3 +1586,57 @@ No system-overview figure currently. If added, it becomes Fig. 1 and all others 
 | Reference verification uncovers wrong PMIDs | Run PubMed check on all R1–R28 before Day 12 |
 | 5 pages insufficient for full content | Merge Fig 3+7, shorten System Design, move Related Work to 2 paragraphs in Intro |
 | Deadline moves or submission system issues | Submit 24h before May 23 deadline |
+
+---
+
+## Build Commands
+
+### paper_cnib.pdf
+
+Full rebuild from source (run from `/local/mnt/workspace/wangx/projects/emg_util/`):
+
+```bash
+# Step 1: Regenerate analysis figures from log data
+python paper_figures.py
+
+# Step 2: Assemble paper_cnib.docx from paper_cnib.md + SPLNPROC template
+python build_cnib_docx.py
+
+# Step 3: Convert docx → PDF
+soffice --headless --convert-to pdf paper_cnib.docx --outdir .
+```
+
+**Notes:**
+- `paper_figures.py` reads from `log0305/` and `log0303/`; requires `fft-env` conda env
+- `build_cnib_docx.py` uses `splnproc1703_mac.docm` (CNIB/Springer LNCS template); strips macros to `.splnproc_clean.docx` internally
+- TIF figures for CNIB submission are in `paper_figures_tif/` (generated separately by `paper_figures.py` via Pillow)
+- `soffice` warning "failed to launch javaldx" is harmless
+
+### icpics_draft.pdf
+
+Full rebuild from source (run from `/local/mnt/workspace/wangx/projects/emg_util/`):
+
+```bash
+# Step 1: Regenerate scriptable ICPICS figures
+python gen_icpics_fig1.py    # → icpics_figures/fig_system_architecture.png
+python gen_icpics_fig4.py    # → icpics_figures/fig_emg_imu_sync.png
+
+# Step 2: Assemble icpics_draft.docx from icpics_draft.md + IEEE template
+python build_icpics_docx.py
+
+# Step 3: Convert docx → PDF
+soffice --headless --convert-to pdf icpics_draft.docx --outdir .
+```
+
+**Notes:**
+- `icpics_figures/fig_timing_accuracy.png` and `icpics_figures/fig_protocol.png` are static committed assets — no script generates them; edit manually if needed
+- `build_icpics_docx.py` uses `icpics_Templates.docx` (IEEE conference format); Heading1 auto-numbers Roman, Heading2 alpha
+- The `.bak` files in `icpics_figures/` are backups of the previous figure versions
+
+### Quick reference
+
+| Output | Command sequence |
+|---|---|
+| `paper_cnib.pdf` | `python paper_figures.py` → `python build_cnib_docx.py` → `soffice --headless --convert-to pdf paper_cnib.docx --outdir .` |
+| `icpics_draft.pdf` | `python gen_icpics_fig1.py && python gen_icpics_fig4.py` → `python build_icpics_docx.py` → `soffice --headless --convert-to pdf icpics_draft.docx --outdir .` |
+| `journal_sensors_pandoc.pdf` | See `journal_plan.md § Build Workflow` |
