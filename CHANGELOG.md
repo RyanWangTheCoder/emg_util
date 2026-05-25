@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased] — 2026-05-24
+
+### Added
+- **N1: `abs_us_validate.py`** — quantitative `abs_us` timeline reconstruction
+  validation script (journal paper §5.4). Compares three strategies across
+  log0305 (7.10M samples, 59.2 min) and log0303 (inter-connection reconnect):
+  - Method A (dev_us-only): fails at device reboot — clock resets 208,136,241 →
+    45,183,736 µs confirmed in log0303. C2 appears immediately after C1 with no gap.
+  - Method B (host_rx_ms-only): survives reconnects but batch-resolution only;
+    per-sample timing loss p50=13.5 ms, p99=81.0 ms.
+  - Method C (abs_us hybrid, this work): per-sample ±25 µs precision within
+    connection + host_rx_ms gap bridging across reconnects (p99 ≈ 170 ms accuracy).
+  - BLE notification interval: p50=9 ms, p95=105 ms, p99=170 ms (mean 53.8 samples/notif).
+  - Output figures: `paper_figures/fig_absus_error_cdf.png` (reconstruction error
+    characterization) and `paper_figures/fig_absus_timeline_methods.png` (three-method
+    comparison at log0303 reconnect). Summary stats in `table_absus_validation.csv`.
+
+- **`journal_plan.md`** — combined journal submission plan for MDPI Sensors merging
+  `paper_cnib.md` (CNIB methodology paper) and `icpics_draft.md` (ICPICS system paper)
+  into a single methodology-first paper. Supersedes `paper2_plan.md` (single-paper
+  journal extension approach). Authors: Ryan Wang, Theodore Di, Dr. YanMing Di.
+  Four new contributions beyond the conference papers: quantitative `abs_us`
+  validation, ball-impact masking analysis (Approach B / pre-impact MDF window),
+  multi-subject collection, expanded comparative analysis.
+
 ## [Unreleased] — 2026-05-03
 
 ### Added
