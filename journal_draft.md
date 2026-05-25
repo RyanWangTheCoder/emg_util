@@ -2,39 +2,52 @@
 title: "Trustworthy Field sEMG Fatigue Monitoring on a Low-Cost Wearable: Electrode Settling, IMU-Conditioned Validity, and Continuity Auditing on a $99 ESP32 Platform"
 author:
   - name: "Ryan Wang"
-    affiliation: "Westview High School"
+    num: 1
+    affiliation: "Westview High School, San Diego, CA 92131, USA"
     email: ryanwang2020@gmail.com
-    corresponding: true
+    corresponding: false
   - name: "Theodore Di"
-    affiliation: "Crescent Valley High School"
+    num: 2
+    affiliation: "Crescent Valley High School, Corvallis, OR 97330, USA"
     email: theodore.l.di@gmail.com
-  - name: "Dr. YanMing Di"
-    affiliation: "Oregon State University"
+    corresponding: false
+  - name: "YanMing Di"
+    num: 3
+    affiliation: "Oregon State University, Corvallis, OR 97331, USA"
     email: Yanming.Di@oregonstate.edu
+    corresponding: true
 date: "2026"
-journal: "MDPI Sensors (target)"
-status: "SKELETON DRAFT — Pull from paper_cnib.md + icpics_draft_long.md per journal_plan.md. TODOs marked."
+bibliography: references.bib
+conference: "Extended from: (1) R. Wang et al., Field Validity of Wearable sEMG Fatigue Metrics in Tennis, CNIB, 2026; (2) R. Wang, A Robust Self-Describing BLE Platform for Real-Time Wearable EMG-IMU Sensing, ICPICS, 2026."
 abstract: |
-  **[TODO: Write combined abstract after §6.7 multi-subject results are available.]**
-
-  Skeleton placeholder:
   Wearable surface electromyography (sEMG) promises objective fatigue monitoring in
-  field sports, but deployment is undermined by electrode settling, contact-quality drift,
-  motion artifacts, and wireless session gaps. We combine a low-cost ($99) ESP32
-  EMG–IMU wearable platform with a trustworthiness-first methodology to demonstrate
-  field-valid sEMG fatigue monitoring during tennis practice. The platform achieves
-  2000 Hz EMG + 200 Hz IMU BLE streaming with ±25 µs timestamp accuracy across 7.5M
-  samples, via dual-core FreeRTOS scheduling, DMA oversampling, and a self-describing
-  BLE TLV protocol. A hybrid abs_us timeline reconstruction bridges device resets and
-  BLE reconnections; quantitative validation confirms ±25 µs within-connection precision
-  and p99 ≤ 170 ms cross-connection accuracy. In a 63.1-min field session (626 swings),
-  MDF followed a three-phase settling–reference–fatigue trajectory distinguishable only
-  with ≥20 min warmup exclusion; IMU swing intensity remained flat (r = +0.029,
-  p = 0.468), excluding reduced effort. Pre-impact MDF windowing (Approach B) using
-  IMU-detected ball contact timing shows [TODO: fill after N2 analysis complete].
-  **[TODO: Add multi-subject results summary (N3).]**
-keywords: [sEMG, fatigue monitoring, electrode settling, BLE wearable, ESP32, IMU,
-           sports biomechanics, field deployment, tennis]
+  field sports, but deployment is undermined by electrode settling, contact-quality
+  drift, and wireless session gaps. We present a low-cost ($99 USD) ESP32-based
+  EMG--IMU wearable achieving 2000 Hz EMG and 200 Hz IMU BLE streaming, paired with
+  a trustworthiness-first methodology for no-gel tennis forearm fatigue monitoring.
+  The platform achieves ±25 µs per-sample timestamp accuracy (99.03% over 7.5 million
+  samples) via DMA oversampling, a self-describing BLE TLV protocol surviving three
+  firmware revisions, and a hybrid *abs_us* timeline validated at ±25 µs
+  intra-connection and p99 ≤ 170 ms cross-connection. In a 63.1-min field session
+  (626 swings), MDF followed a three-phase settling--reference--fatigue trajectory
+  (115.7 → 167.6 → 149.5 Hz) visible only with ≥20 min warmup exclusion; a 10-min
+  skip missed the fatigue signal entirely (−2.6% vs. +28.1% at 20 min). IMU swing
+  intensity remained flat (r = +0.029, p = 0.468), excluding reduced effort.
+  IMU-guided pre-impact MDF windowing produced a mean +26.7 Hz shift versus
+  full-window MDF (81% of swings), confirming physiologically motivated temporal
+  partitioning. A BLE reconnection gap created an apparent 28.7% spurious fatigue
+  signal that collapsed to 4.9% for the continuous segment.
+  **[TODO: Add multi-subject results (N3).]**
+keywords:
+  - sEMG
+  - fatigue monitoring
+  - electrode settling
+  - BLE wearable
+  - ESP32
+  - IMU
+  - sports biomechanics
+  - field deployment
+  - tennis
 ---
 
 <!-- SOURCE MAP:
@@ -58,7 +71,7 @@ general tiredness, but subjective perception is not a quantitative, muscle-speci
 local fatigue. Objective EMG monitoring may complement perception by enabling session-to-session
 workload tracking and future overuse-risk assessment — upper-extremity tennis injuries are
 frequently chronic and repetitive, and lateral elbow tendinopathy is associated with repeated
-forearm muscle loading [1].
+forearm muscle loading [@aaos2023].
 
 However, a player may maintain swing speed through compensation even as local forearm muscle
 physiology changes, making external kinematics an insufficient proxy. In real court deployment,
@@ -66,20 +79,20 @@ gel electrode preparation is impractical: gel smears during play and affects rac
 players resist pre-session preparation. This study intentionally evaluates a no-added-gel,
 field-deployable configuration because routine on-court monitoring requires fast setup and
 minimal interference with play — contrasting with SENIAM-style laboratory preparation where
-skin preparation and gel are recommended [5].
+skin preparation and gel are recommended [@hermens2000].
 
-Commercial research-grade systems (e.g., Delsys Trigno [3], Noraxon Ultium [4]) capture
+Commercial research-grade systems (e.g., Delsys Trigno [@delsys2024], Noraxon Ultium [@noraxon2024]) capture
 EMG and IMU reliably but at $5,000–$30,000 per unit are out of reach for youth sport and most
 field research. Low-cost alternatives based on commodity microcontrollers face three practical
 challenges: (i) achieving 2000 Hz EMG sampling without sample loss requires careful ADC
 architecture; (ii) reliable BLE streaming at the combined EMG + IMU data rate demands
 efficient packetization and reconnection handling; (iii) multi-sensor systems require precise
 timestamp alignment across sensors with different sampling rates (2000 Hz vs. 200 Hz).
-Prior low-cost wearable EMG systems [6,7,8] typically achieve adequate sampling in controlled
+Prior low-cost wearable EMG systems [@cerone2019;@lynn2018;@yang2024] typically achieve adequate sampling in controlled
 laboratory settings but rarely document the failure modes encountered in field deployment.
 
 Existing IMU–EMG wearable studies typically fuse both modalities as feature sources for
-activity or fatigue classification [11,12]. In contrast, this work uses the IMU as an
+activity or fatigue classification [@taborri2020;@bangaru2022]. In contrast, this work uses the IMU as an
 **independent biomechanical context sensor** for EMG validity assessment. Because tennis
 swings generate repeatable forearm kinematic signatures, stable IMU swing intensity provides
 a reference: when EMG changes while IMU is stable, the cause — electrode settling, contact
@@ -103,24 +116,24 @@ degradation, or local muscle fatigue — can be inferred from temporal context.
 ### 2.1 Field vs. Laboratory sEMG Fatigue in Tennis
 
 The majority of sEMG fatigue studies use laboratory settings with controlled contractions,
-gel electrodes, and stationary subjects. SENIAM guidelines [5] provide electrode placement
+gel electrodes, and stationary subjects. SENIAM guidelines [@hermens2000] provide electrode placement
 and signal quality standards but were developed for controlled gel-electrode configurations;
 forearm placement during dynamic sport is not addressed.
 
-**Rota et al. 2014** [2] measured upper limb EMG (wrist extensors, deltoid, biceps) during
+**Rota et al. 2014** [@rota2014] measured upper limb EMG (wrist extensors, deltoid, biceps) during
 sustained tennis rally play in a controlled indoor setting using gel electrodes and a
 commercial Bagnoli system. They report progressive MDF decline in wrist extensors over a
 ~25-minute session — a finding this work extends to a no-gel field setting with online swing
 detection. Rota et al. did not address electrode settling artifacts, contact-quality monitoring,
 or timestamp continuity; their laboratory setting made these unnecessary.
 
-**Wang LH et al. 2019** [3] examined forearm muscle fatigue and skill level effects on serve
+**Wang LH et al. 2019** [@wanglh2019] examined forearm muscle fatigue and skill level effects on serve
 ball speed, using a surface EMG system with gel electrodes. They report MNF and MDF
 differences between skill levels during fatiguing serves. The three-phase MDF trajectory we
 report (§6.1) appears in their data as a "warm-up then fatigue" pattern but is not isolated
 from electrode settling artifacts.
 
-**Girard et al. 2011** [4] examined spinal and peripheral components of fatigue during
+**Girard et al. 2011** [@girard2011] examined spinal and peripheral components of fatigue during
 prolonged tennis play using neuromuscular testing at rest intervals. Their protocol required
 laboratory apparatus not compatible with practice courts.
 
@@ -134,15 +147,15 @@ novel contributions to the tennis sEMG fatigue literature.
 
 Dry electrodes are required for rapid field deployment where gel application is not practical.
 
-**Joutsen et al. 2024** [13] characterized ECG signal quality in long-term dry electrode
+**Joutsen et al. 2024** [@joutsen2024] characterized ECG signal quality in long-term dry electrode
 recordings, showing that skin–electrode impedance decreases as sweat accumulates, with
 practical implications for settling duration. This is the physical basis for the Phase I
 settling behavior we report in §4.2.
 
-**Boyer et al. 2023** [14] reviewed techniques for reducing noise and artifacts in single-channel
+**Boyer et al. 2023** [@boyer2023] reviewed techniques for reducing noise and artifacts in single-channel
 EMG, with discussion of dry electrode contact quality and practical EMG reliability.
 
-**Ravichandran et al. 2023** [15] characterized impedance properties of dry e-textile electrodes,
+**Ravichandran et al. 2023** [@ravichandran2023] characterized impedance properties of dry e-textile electrodes,
 including the effect of contact force and perspiration on electrode-skin interface behavior.
 
 Our contact-quality metric (§4.7) uses the ENV/RAW amplitude ratio as a proxy for contact state,
@@ -150,13 +163,13 @@ avoiding the need for dedicated impedance circuitry.
 
 ### 2.3 IMU + EMG Integration
 
-**Fusion vs. context.** Taborri et al. 2020 [11] surveyed IMU + EMG integration in sports
+**Fusion vs. context.** Taborri et al. 2020 [@taborri2020] surveyed IMU + EMG integration in sports
 biomechanics. Most fusion approaches treat the IMU as a signal to be combined with EMG at the
 feature level. Our approach uses the IMU as *context* for EMG validity: the IMU provides swing
 detection, ball-impact timing, and motion-state classification that determines which EMG windows
 are interpretable. This "IMU-as-context" framework (§4.5) is distinct from fusion.
 
-**Bangaru et al. 2022** [12] used IMU + EMG for construction worker fatigue monitoring in a
+**Bangaru et al. 2022** [@bangaru2022] used IMU + EMG for construction worker fatigue monitoring in a
 field setting, but their capture infrastructure did not require the engineering work described
 here (reconnect robustness, timestamp continuity, BLE protocol design).
 
@@ -169,12 +182,12 @@ here (reconnect robustness, timestamp continuity, BLE protocol design).
 | Platform | Cost (USD) | EMG fs (Hz) | IMU fs (Hz) | Raw EMG | BLE robustness | Timeline reconstruction | Multi-platform | Open HW/SW |
 |---|---|---|---|---|---|---|---|---|
 | **This work** (ESP32, $99) | ~$99 | 2000 | 200 | Yes (RAW+ENV) | Self-describing TLV, CRC, two-layer watchdog | abs_us hybrid: ±25 µs within, p99 ≤ 170 ms across reconnect | PC + Android | Yes |
-| Delsys Trigno [3] | $5–30K | 2000 | 148.1 | Yes (proprietary) | Proprietary RF | Proprietary; reconnect not documented | PC only | No |
-| Noraxon Ultium [4] | $5–20K | 2000 | 200 | Yes (proprietary) | Proprietary BLE/ANT+ | Proprietary | PC only | No |
-| Cerone HD-sEMG [6] | Research | 2048 | — | Yes (HD-sEMG) | Undocumented | Not documented | PC | Partial |
-| Lynn/Athos [7] | ~$500–2K | 200 | Yes | No (ENV only) | Closed system | Not documented | Mobile | No |
-| Yang e-textiles [8] | Varies | Varies | Varies | Depends | Not documented | Not documented | Varies | Research |
-| MultiSenseBadminton [9] | ~$500–1K | — | 200–1000 | — (no EMG) | Not documented | Camera sync | PC | Dataset only |
+| Delsys Trigno [@delsys2024] | $5–30K | 2000 | 148.1 | Yes (proprietary) | Proprietary RF | Proprietary; reconnect not documented | PC only | No |
+| Noraxon Ultium [@noraxon2024] | $5–20K | 2000 | 200 | Yes (proprietary) | Proprietary BLE/ANT+ | Proprietary | PC only | No |
+| Cerone HD-sEMG [@cerone2019] | Research | 2048 | — | Yes (HD-sEMG) | Undocumented | Not documented | PC | Partial |
+| Lynn/Athos [@lynn2018] | ~$500–2K | 200 | Yes | No (ENV only) | Closed system | Not documented | Mobile | No |
+| Yang e-textiles [@yang2024] | Varies | Varies | Varies | Depends | Not documented | Not documented | Varies | Research |
+| MultiSenseBadminton [@seong2024] | ~$500–1K | — | 200–1000 | — (no EMG) | Not documented | Camera sync | PC | Dataset only |
 
 Key differentiators: (1) $99 cost vs. $5–30K for research-grade systems; (2) simultaneous RAW+ENV access enabling spectral fatigue analysis; (3) self-describing TLV so FSR changes don't break host decoders; (4) abs_us timeline with quantified accuracy (§5.4); (5) full PC+Android feature parity.
 
@@ -203,7 +216,7 @@ output (RAW) on separate pins, essential for concurrent amplitude and spectral E
 | **Total** | | | **≈ $99** |
 
 REF electrode is placed over the lateral epicondyle (bony prominence, opposite side of
-forearm from flexors), consistent with vendor guidance [10]. The RAW signal is routed via
+forearm from flexors), consistent with vendor guidance [@sparkfun2023]. The RAW signal is routed via
 a direct solder bypass from the MyoWare PTH pad to ESP32 GPIO 32, correcting a
 field-discovered pogo-pin routing failure described in §5.5.
 
@@ -289,7 +302,7 @@ wall-clock interval. Formal validation of abs_us reconstruction accuracy is pres
 
 ### 4.1 No-Added-Gel Field Configuration
 
-Gel and skin preparation are standard in laboratory EMG [5] but were not used. This study
+Gel and skin preparation are standard in laboratory EMG [@hermens2000] but were not used. This study
 intentionally evaluates a no-added-gel, field-deployable configuration, motivating the
 characterization of dry-electrode settling under field conditions.
 
@@ -649,28 +662,7 @@ electrode preparation and wireless continuous monitoring.
 
 ## 9. References
 
-<!-- Merged reference list — to be renumbered and formatted per MDPI Sensors style at submission -->
-
-[1] American Academy of Orthopaedic Surgeons. Tennis Elbow (Lateral Epicondylitis). OrthoInfo. 2023.
-[2] Rota S, Morel B, Saboul D, Rogowski I, Hautier C. Influence of fatigue on upper limb muscle activity and performance in tennis. J Electromyogr Kinesiol. 2014;24(1):90–97.
-[3] Delsys Inc., "Trigno Wireless EMG System — Technical Specifications," Natick, MA, USA, 2024.
-[4] Noraxon USA. "Ultium EMG Sensor System — Product Documentation." Scottsdale, AZ, USA, 2024.
-[5] Hermens HJ, Freriks B, Disselhorst-Klug C, Rau G. Development of recommendations for SEMG sensors and sensor placement procedures. J Electromyogr Kinesiol. 2000;10(5):361–374.
-[6] Cerone GL, Botter A, Gazzoni M. A modular, smart, and wearable system for high density sEMG detection. IEEE Trans Biomed Eng. 2019;66(12):3371–3380.
-[7] Lynn SK, Watkins CM, Wong MA, Balfany K, Feeney DF. Validity and reliability of surface electromyography measurements from a wearable athlete performance system. J Sports Sci Med. 2018;17(2):205–215.
-[8] Yang K, et al. E-textiles for sports and fitness sensing: current state, challenges, and future opportunities. Sensors. 2024;24(4):1058.
-[9] Seong M, Kim G, Yeo D, et al. MultiSenseBadminton: wearable sensor-based biomechanical dataset for evaluation of badminton performance. Sci Data. 2024;11:343.
-[10] SparkFun Electronics. MyoWare 2.0 Muscle Sensor Advanced Guide. 2023.
-[11] Taborri J, Keogh J, Kos A, et al. Sport biomechanics applications using inertial, force, and EMG sensors: A literature overview. Appl Bionics Biomech. 2020;2020:2041549.
-[12] Bangaru SS, Wang C, Aghazadeh F. Automated and continuous fatigue monitoring in construction workers using forearm EMG and IMU wearable sensors and recurrent neural network. Sensors. 2022;22(24):9729.
-[13] Joutsen A, Cömert A, Kaappa E, et al. ECG signal quality in intermittent long-term dry electrode recordings. Sci Rep. 2024;14:8936.
-[14] Boyer M, Bouyer L, Roy JS, Campeau-Lecours A. Reducing noise, artifacts and interference in single-channel EMG signals: a review. Sensors. 2023;23(6):2927.
-[15] Ravichandran V, et al. Characterizing the impedance properties of dry e-textile electrodes based on contact force and perspiration. Biosensors. 2023;13(2):217.
-[16] Wang LH, Lo KC, Su FC. Skill level and forearm muscle fatigue effects on ball speed in tennis serve. Sports Biomechanics. 2019;18(5):566–579.
-[17] Girard O, Racinais S, Micallef JP, Millet GP. Spinal modulations accompany peripheral fatigue during prolonged tennis. Scand J Med Sci Sports. 2011;21(3):455–464.
-[18] Rigozzi CJ, Vio GA, Poronnik P. Grip strength, forearm muscle activity, and shock transmission in the forehand stroke of experienced and recreational tennis players. Sensors. 2023;23(11):5146.
-[19] Fabre JB, Martin V, Gondin J, Cottin F, Grelot L. Effect of playing surface on neuromuscular fatigue in tennis. Med Sci Sports Exerc. 2012;44(1):75–83.
-[20] Farago E, MacIsaac D, Suk M, et al. A review of techniques for surface electromyography signal quality analysis. IEEE Rev Biomed Eng. 2022;16:494–511.
+<!-- Generated automatically by pandoc --citeproc from references.bib — do not edit here -->
 
 ---
 
@@ -703,9 +695,21 @@ All figures in this paper can be regenerated from recorded analysis-output direc
 - §6.1–6.5 figures: `python paper_figures_runner.py` (TODO: create this script)
 - N3 (multi-subject): awaiting data collection
 
-**LaTeX build (MDPI Sensors format):**
+**LaTeX build (MDPI Sensors format, run from `emg_util/`):**
+```bash
+pandoc journal_draft.md \
+  --template mdpi_template/mdpi_pandoc_template.tex \
+  --bibliography references.bib \
+  --natbib \
+  --syntax-highlighting=none \
+  --shift-heading-level-by=-1 \
+  --wrap=preserve \
+  -o mdpi_template/journal_sensors_pandoc.tex && \
+cd mdpi_template && \
+pdflatex -interaction=nonstopmode journal_sensors_pandoc.tex && \
+bibtex journal_sensors_pandoc && \
+pdflatex -interaction=nonstopmode journal_sensors_pandoc.tex && \
+pdflatex -interaction=nonstopmode journal_sensors_pandoc.tex
 ```
-cd mdpi_template && pdflatex journal_sensors.tex && pdflatex journal_sensors.tex
-```
-Two passes required: first pass compiles content; second pass resolves cross-references
-and page numbers. Output: `mdpi_template/journal_sensors.pdf`.
+Output: `mdpi_template/journal_sensors_pandoc.pdf` (3× pdflatex required for bibtex
+cross-references). See `journal_plan.md § Build Workflow` for full documentation.
