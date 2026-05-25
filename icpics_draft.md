@@ -16,37 +16,27 @@ header-includes:
 
 ## Abstract
 
-Monitoring muscle activity and body motion together reveals how neuromuscular effort evolves during athletic movement — in tennis, for example, fatigue manifests as greater muscle activation required to produce the same swing. Surface electromyography (EMG) records the electrical activity of contracting muscles, capturing effort and fatigue before they are visible in motion; an inertial measurement unit (IMU) records the acceleration and rotation of the moving limb. Research-grade systems that capture both reliably cost $5,000–$30,000, while commodity-microcontroller alternatives are affordable but rarely survive the timing, wireless, and physical-contact failures of real field deployment.
-
-We present a $99 ESP32-based wearable that streams concurrent EMG and IMU data over Bluetooth Low Energy (BLE) with tens-of-microseconds timing accuracy and field-tested reliability. A dual-core architecture dedicates one CPU core entirely to sensor acquisition while the other handles wireless transmission, preventing BLE processing from interrupting sample collection. Analog-to-digital (ADC) sampling with direct memory access (DMA) at 20 kHz per channel, decimated 10× in software, yields a 2 kHz EMG output stream with per-sample timestamp accuracy of ±25 µs, empirically verified across 2.3 million samples. A self-describing binary frame format embeds sensor-range metadata in every packet so firmware gain changes do not break host parsers, and a two-layer device/host watchdog with hybrid timeline reconstruction recovers from BLE dropouts and full device resets without data corruption. Across 150+ minutes of tennis field recording, the system showed zero detected sample drops. We also document a field-discovered hardware failure — a pogo-pin contact producing a "ghost" signal that mimics real EMG until filtering reveals it as flat — together with a quantitative diagnostic and solder-bypass fix. By delivering accurate, time-aligned biosignal streams from a robust low-cost platform, this work supports the downstream signal processing, data fusion, and intelligent movement-analysis pipelines targeted by ICPICS. Although demonstrated in tennis, the platform is application-agnostic and supports a broad range of wearable biosignal use cases.
+Wearable EMG–IMU sensing can reveal how muscle effort and limb motion evolve during athletic movement, but research-grade systems are costly and low-cost prototypes often fail under field conditions. We present a $99 ESP32-based wearable for concurrent EMG and IMU acquisition over Bluetooth Low Energy (BLE). The system uses dual-core FreeRTOS scheduling, ADC DMA at 20 kHz per EMG channel, 10× boxcar decimation to paired 2 kHz ENV/RAW samples, a self-describing binary BLE protocol, and host-side timeline reconstruction across reconnects and device resets. Across 7,496,659 unique 2 kHz EMG output samples from a 63.1-min field session, 98.65% of received-sample intervals were within ±25 µs of the expected 500 µs period. Across 151 min of tennis field recordings, EMG sequence loss was 0.98% in the cleaner session and 2.64% across both sessions combined (with the noisier session at 7.66%), consistent with host-visible BLE/parser loss rather than confirmed device-side acquisition gaps. We also report a field-discovered pogo-pin ghost-signal failure with a quantitative diagnostic and solder-bypass repair. The result is a reproducible low-cost platform for field-debuggable EMG–IMU capture.
 
 ## I. Introduction
 
-Surface electromyography (EMG) and inertial measurement (IMU) together address a central question in athletic fatigue monitoring: *is the muscle working harder to produce the same motion?* Tennis is one well-studied case where prolonged practice alters upper-limb muscle activity and degrades stroke performance [1]; the hardware and capture pipeline are however application-agnostic and apply equally to rehabilitation assessment, gesture recognition, occupational ergonomics [2], or e-sports performance monitoring.
+Surface electromyography (EMG) and inertial measurement (IMU) together support field studies of how muscle effort and limb motion evolve during athletic movement. Tennis is one well-studied case [1] — for example, prolonged practice changes upper-limb muscle activation patterns associated with fatigue — but the hardware and capture pipeline are application-agnostic and apply equally to rehabilitation assessment, gesture recognition, occupational ergonomics [2], or e-sports performance monitoring.
 
-Commercial research-grade systems (e.g., Delsys Trigno [7], Noraxon Ultium [8]) capture EMG and IMU reliably with sub-millisecond synchronization, but at $5,000–$30,000 per unit they are out of reach for youth sport and most field research outside well-funded laboratories. The principal barrier is engineering effort — sensing modalities and microcontroller hardware are inexpensive — and a low-cost alternative becomes feasible once the timing, wireless, and physical-contact failure modes are addressed systematically.
+Commercial research-grade systems (e.g., Delsys Trigno [3], Noraxon Ultium [4]) capture EMG and IMU reliably but at $5,000–$30,000 per unit are out of reach for youth sport and most field research. Low-cost alternatives based on commodity microcontrollers face three practical challenges: (i) achieving 2000 Hz EMG sampling without sample loss requires careful ADC architecture, since naive timer-based sampling competes with the Bluetooth stack; (ii) reliable BLE streaming at the combined EMG + IMU data rate demands efficient packetization and reconnection handling; (iii) multi-sensor systems require precise timestamp alignment across sensors with different sampling rates (2000 Hz vs. 200 Hz). Prior low-cost wearable EMG systems [5,6,7] typically achieve adequate sampling in controlled laboratory settings but rarely document the failure modes encountered in field deployment — pogo-pin routing failures, ADC crosstalk, BLE reconnection, and timestamp drift.
 
-Low-cost alternatives based on commodity microcontrollers face three practical challenges: (i) achieving 2000 Hz EMG sampling without sample loss requires careful ADC architecture, since naive timer-based sampling at this rate consumes excessive CPU and competes with the Bluetooth stack; (ii) reliable BLE streaming at the combined EMG + IMU data rate demands efficient packetization and reconnection handling; (iii) multi-sensor systems require precise timestamp alignment across sensors with different sampling rates (2000 Hz vs. 200 Hz). Prior low-cost wearable EMG systems [4,5,6] typically achieve adequate sampling in controlled laboratory settings but rarely document the failure modes encountered in field deployment — pogo-pin routing failures, ADC crosstalk, BLE reconnection, and timestamp drift.
-
-This paper presents the design and field validation of a complete $99 wearable EMG–IMU acquisition system. Our contributions span firmware, protocol, and capture-pipeline engineering:
-
-1. **Reliable high-rate EMG sampling.** ADC samples stream directly to memory without CPU involvement; 20 kHz per-channel acquisition decimated 10× in software, combined with per-sample timestamp reconstruction, yields ±25 µs accuracy at the 2 kHz output rate, empirically validated over 2.3 million samples.
-2. **Protocol robustness across firmware changes.** A self-describing BLE frame format embeds IMU full-scale-range codes in every frame, enabling firmware parameter updates without host decoder changes — demonstrated unchanged across three firmware FSR revisions.
-3. **Concurrent sensing without wireless interference.** A dual-core FreeRTOS architecture with explicit task-priority assignment achieves zero detected sample drops during concurrent EMG (2 kHz) + IMU (200 Hz) BLE streaming, evaluated across 150+ minutes of field recordings.
-4. **Recovery from field interruptions.** A two-layer device/host watchdog (device-side pause at 18 s, reboot at 30 s) combined with host-side hybrid timeline reconstruction (`abs_us`) handles BLE-dropout and ESP32-reset cases; field testing demonstrated clean recovery from an inter-run reconnect without file corruption or parser failure.
-5. **Physical-contact failure diagnosis.** A pogo-pin ADC ghost signal consistent with charge sharing or floating-input coupling (r = 0.998 with the envelope channel) that survives visual inspection but is silently destroyed by routine high-pass filtering, with quantified diagnosis and a reproducible solder-bypass fix.
+This paper presents the design and field validation of a complete $99 wearable EMG–IMU acquisition system. Our contributions are: (1) DMA-driven 20 kHz/channel ADC acquisition decimated to paired 2 kHz ENV/RAW EMG output samples with empirically verified ±25 µs per-sample timestamp accuracy; (2) a self-describing BLE TLV protocol that carries IMU full-scale-range metadata so firmware revisions do not break host decoders; (3) dual-core FreeRTOS scheduling for concurrent 2 kHz EMG + 200 Hz IMU streaming with quantified per-session sample-loss accounting; (4) a device/host watchdog and hybrid `abs_us` timeline supporting recovery from BLE dropouts and device resets, with no file corruption observed across the recorded reconnect; and (5) a quantitative diagnosis and solder-bypass repair of a pogo-pin RAW-channel ghost-signal failure mode that survives visual inspection but is silently destroyed by routine high-pass filtering.
 
 ## II. Related Work
 
-**Commercial and low-cost wearable EMG.** Lab-grade systems (Delsys Trigno [7], Noraxon Ultium [8]) provide research-quality EMG with sub-millisecond synchronization but are inaccessible at \$5,000–\$30,000 per unit, and their proprietary pipelines provide little reproducible engineering reference. Low-cost academic systems are more open: Cerone et al. [4] presented a modular HD-sEMG system with detailed analog front-end design but limited documentation of the BLE capture pipeline; Lynn et al. [9] validated the Athos compression-shirt platform but treated the underlying acquisition system as a black box; Yang et al. [6] surveyed e-textile EMG sensors with focus on electrode design rather than capture-pipeline engineering. These works generally do not document timestamp accuracy or BLE reliability metrics required for unattended multi-session field recording.
+Commercial EMG systems such as Delsys Trigno [3] and Noraxon Ultium [4] provide synchronized EMG/IMU acquisition but cost \$5,000–\$30,000 and use mostly proprietary acquisition pipelines. Low-cost academic and wearable EMG systems [5]–[8] demonstrate feasibility, but typically emphasize sensor design, validation, or downstream analytics rather than the full acquisition stack needed for unattended field recording.
 
-**IMU–EMG fusion and engineering documentation gap.** Taborri et al. [3] surveyed inertial-and-EMG sensors for sports biomechanics; Bangaru et al. [2] document construction-worker fatigue capture but rarely the firmware or protocol that collected it. The MultiSenseBadminton dataset [10] provides multi-modal sport recordings but does not describe the engineering decisions that made robust capture possible. More broadly, most published BLE biosignal systems report scientific results without describing reconnection robustness, multi-clock timestamp reconstruction, or on-device protocol-evolution strategies — magic-byte resync, exponential-backoff reconnection, hybrid device/host timeline reconstruction — leaving these details to firmware repositories rather than the published record. Few low-cost wearable EMG systems document the full stack from firmware DMA design through BLE protocol to field-validated reliability metrics for a concurrent 2 kHz EMG + 200 Hz IMU wearable, including a quantitative analysis of physical-contact failure modes encountered in real deployment.
+For sports biomechanics, prior EMG/IMU work has surveyed sensing modalities [9] and released multimodal datasets [10], but rarely reports the implementation details that determine whether low-cost systems survive field deployment: DMA sampling, BLE packetization, reconnect behavior, multi-clock timestamp reconstruction, firmware/host metadata compatibility, per-session sample-drop accounting, and physical-contact failure diagnostics. This paper focuses on those details for a concurrent 2 kHz EMG + 200 Hz IMU wearable.
 
 ## III. System Architecture
 
 ### A. Hardware
 
-The system uses five components totaling approximately $99 USD (Table I). The MyoWare 2.0 muscle sensor provides both a hardware-rectified envelope output (ENV) and a raw AC-coupled output (RAW) on separate pins, essential for concurrent amplitude and spectral EMG analysis.
+Table I summarizes the $99 hardware. The MyoWare 2.0 provides both envelope (ENV) and raw AC-coupled (RAW) outputs; the dual-output is essential for downstream spectral analysis (fatigue-biomarker computation itself is outside this paper). Earlier prototype work by the lead author [11] used a single-output Seeed Grove EMG Detector [12] that exposes only an amplified-filtered envelope, motivating the move to a sensor with explicit RAW access. The ICM-20948 provides 6-axis motion at 200 Hz; MAX30105 and MAX17048 modules are included for extensibility and battery monitoring but are not part of the EMG/IMU evaluation. A field-discovered routing failure on the MyoWare Wireless Shield is repaired by a direct solder jumper from the RAW pad to ESP32 GPIO 32 (ADC1 channel 4) and characterized quantitatively in §VII.D.
 
 **Table I.** Bill of Materials.
 
@@ -60,10 +50,6 @@ The system uses five components totaling approximately $99 USD (Table I). The My
 | PCB / battery / wiring | Integration | — | ~$17 |
 | **Total** | | | **≈ $99** |
 
-The MAX30105 (SpO2/HR) and MAX17048 (battery gauge) are included for extensibility and device monitoring; the present evaluation focuses on EMG and IMU acquisition and the SpO2/HR channel is not part of the contributions reported here.
-
-A field-discovered hardware issue: the MyoWare Wireless Shield routes the RAW signal through spring-loaded pogo pins to ESP32 GPIO 32. Under movement, pogo contact is unreliable, producing a ghost signal on the RAW channel that is highly correlated with ENV (r = 0.998), consistent with ADC multiplexer charge sharing or floating-input coupling — the floating RAW input appeared to track the previously sampled ENV voltage. After filtering, the ghost signal flatlines, causing silent loss of usable RAW spectral EMG. The fix is a direct solder jumper from the MyoWare RAW pad to GPIO 32 (ADC1 channel 4). Post-fix, the RAW channel shows the expected AC EMG waveform during contraction.
-
 ### B. Dual-Core FreeRTOS Architecture
 
 The ESP32 dual-core architecture enables strict separation of real-time sensor acquisition from BLE protocol processing. Fig. 1 shows the task allocation.
@@ -73,7 +59,7 @@ The ESP32 dual-core architecture enables strict separation of real-time sensor a
 **Core 1 (Sensor CPU):** Three tasks run concurrently:
 - `emgDrainTask` (priority 2): drains ADC DMA buffer, decimates 10× to 2000 Hz, writes to ring buffer
 - `imuTask` (priority 2): reads ICM-20948 at 200 Hz via timer-triggered I2C
-- `spo2Task` (priority 0): computes SpO2/HR every ~30 seconds in background
+- `spo2Task` (priority 0, optional / not evaluated): MAX30105 SpO2/HR background placeholder
 
 **Core 0 (Protocol CPU):** `loop()` handles BLE notifications, host watchdog, LED state machine, and battery monitoring. This separation prevents BLE stack processing from interrupting sensor acquisition.
 
@@ -81,123 +67,119 @@ Task priority 2 for both `emgDrainTask` and `imuTask` was selected after observi
 
 ## IV. Signal Acquisition
 
-### A. ADC DMA Oversampling
+### A. ADC DMA Oversampling and Decimation
 
-Timer-based ADC sampling at 2000 Hz would require 2000 ISR calls per second per channel, competing with FreeRTOS scheduling overhead. Instead, we use the ESP32 ADC Continuous (DMA) driver configured for 40,000 total conversions/s across the two channels (ENV and RAW), yielding 20,000 conversions/s per channel; *emgDrainTask* then applies 10× software decimation to produce the 2,000 Hz output rate per channel.
-
-The DMA frame size is 256 bytes (64 results × 4 bytes each), covering 1.6 ms of acquisition — well within FreeRTOS task scheduling jitter. *emgDrainTask* is notified by DMA completion and drains frames from a circular DMA buffer.
+The ESP32 ADC Continuous (DMA) driver is configured for 40,000 conversions/s across ENV and RAW (20 kHz/channel), avoiding the per-conversion ISR cost of timer-based sampling. *emgDrainTask* averages every 10 conversions per channel into one paired 2 kHz EMG output sample `(ENV, RAW, dev_us)`. The 10-tap boxcar provides first-stage attenuation with first null at the 2 kHz output rate and −3 dB near 880 Hz; combined with the MyoWare RAW analog band-limiting (passband below 1 kHz), this was adequate for the acquisition-platform evaluation reported here. A future firmware revision could substitute a sharper FIR if higher-frequency contamination becomes relevant. Tighter post-decimation band-limiting (50–450 Hz bandpass + 60/120 Hz notches) runs in the host pipeline before any spectral analysis. Throughout this paper, *EMG output sample* refers to one decimated 2 kHz output comprising a paired (ENV, RAW) value; *ADC conversion* refers to a pre-decimation 20 kHz reading on a single channel.
 
 ### B. Per-Sample Timestamp Back-Calculation
 
-A key challenge is that DMA frame completion notification may arrive up to 16 ms after the actual last sample in the frame. We correct this using the known frame duration: for each DMA frame of *N* samples drained at the ESP32 timer reading *t<sub>end</sub>*, the *i*-th sample's timestamp is back-calculated as *t<sub>end</sub>* − (*N* − *i*) · *T*, where *T* = 500 µs is the per-sample period. Fig. 2 shows the empirical inter-sample interval distribution across 2.3 million samples from a 131.7-second field session: 99.03% of samples fall within ±25 µs of the expected 500 µs interval, with 97.7% at exactly 500 µs. The p99.9 outliers (925 µs) correspond to DMA buffer stalls during brief BLE TX bursts and represent < 0.1% of samples.
+DMA frame completion notification may arrive up to 16 ms after the actual last sample in the frame. We correct this using the known frame duration: for each DMA frame of *N* samples drained at the ESP32 timer reading *t<sub>end</sub>*, the *i*-th sample's timestamp is back-calculated as *t<sub>end</sub>* − (*N* − *i*) · *T*, *T* = 500 µs. Empirical inter-sample interval distribution from log0305 is shown in Fig. 2 and Table III.
 
-![Fig. 2. Inter-sample interval distribution across 2.3 million samples. 99.03% of samples fall within ±25 µs of the expected 500 µs period (2000 Hz).](icpics_figures/fig_timing_accuracy.png)
+![Fig. 2. Inter-sample interval distribution across 7,496,659 unique 2 kHz EMG output samples (deduplicated by sequence number) from a 63.1-minute single-session field recording (log0305). 98.65% of received-sample intervals fall within ±25 µs of the expected 500 µs period.](icpics_figures/fig_timing_accuracy.png)
 
 ### C. Multi-Sensor I2C Bus Management
 
-The IMU, SpO2, and battery gauge share a 400 kHz I2C bus serialized by a FreeRTOS mutex (`wireMutex`) across `imuTask`, `spo2Task`, and `loop()`; ICM-20948 reads at 200 Hz consume ~3% of bandwidth, leaving ample margin.
+The IMU, SpO2, and battery gauge share a 400 kHz I2C bus serialized by a FreeRTOS mutex (`wireMutex`); ICM-20948 reads at 200 Hz consume ~3% of bandwidth.
 
 ## V. Protocol Design
 
 ### A. Binary TLV Frame Format
 
-Fig. 3 shows the binary frame format (all multi-byte fields little-endian). The 14-byte header contains: 2-byte magic (0xA5 0x5A), protocol version, flags, 4-byte sequence number, 4-byte frame timestamp (32-bit µs, host-extended to 64-bit), and 2-byte payload length. A CRC16-CCITT checksum over header + payload enables corruption detection. Three TLV types — `TLV_EMG_BATCH (0x01)`, `TLV_IMU_BATCH (0x02)`, `TLV_VITALS (0x03)` — can be concatenated for batched sensor data.
+Fig. 3 shows the binary frame format (multi-byte fields little-endian). The 14-byte header carries 2-byte magic (0xA5 0x5A), version, flags, 4-byte BLE-frame sequence number, 4-byte 32-bit µs frame timestamp (host-extended to 64-bit), and 2-byte payload length. A CRC16-CCITT covers header + payload. Three TLV types — `TLV_EMG_BATCH (0x01)`, `TLV_IMU_BATCH (0x02)`, `TLV_VITALS (0x03)` — concatenate into one frame. Two distinct sequence notions are used in this paper: the *BLE-frame sequence number* (in the header) indexes outgoing notifications, and the *EMG / IMU sample sequence number* is assigned per-sample inside the EMG/IMU TLV payloads and recorded as `emg_seq` / `imu_seq` in the captured CSVs. Sample-loss analyses in §VII use the per-sample sequence numbers.
 
 ![Fig. 3. Binary TLV frame format. PROTO_VER = 0x02 adds IMU FSR metadata in FLAG_IMU_META_V2.](icpics_figures/fig_protocol.png)
 
 ### B. Self-Describing Sensor-Metadata Protocol
 
-A practical problem in iterative firmware development: when the IMU full-scale range (FSR) setting changes (e.g., gyroscope ±250 → ±1000 → ±2000 dps to prevent saturation during hard tennis swings), the host decoder must apply the correct scale factor; hardcoding the FSR creates brittle coupling. Our solution: every `TLV_IMU_BATCH` frame includes `acc_fsr_code` and `gyro_fsr_code` when `FLAG_IMU_META_V2` is set. The host maps these codes to physical scale factors at runtime (`ACC_FSR_CODE_TO_G = {0:2, 1:4, 2:8, 3:16}`; `GYRO_FSR_CODE_TO_DPS = {0:250, 1:500, 2:1000, 3:2000}`). This design was validated across the three FSR revisions in Table II with no host decoder changes required.
+When the IMU full-scale range (FSR) changes (e.g., gyroscope ±250 → ±1000 → ±2000 dps to prevent saturation during hard tennis swings), the host decoder must apply the correct scale factor; hardcoding the FSR creates brittle coupling. Each `TLV_IMU_BATCH` includes `acc_fsr_code` and `gyro_fsr_code` when `FLAG_IMU_META_V2` is set; the host maps these codes to physical scale factors at runtime (e.g., `GYRO_FSR_CODE_TO_DPS = {0:250, 1:500, 2:1000, 3:2000}`). This was validated unchanged across the three FSR revisions in Table II.
 
 **Table II.** IMU full-scale-range (FSR) revisions across firmware iterations.
 
 | Firmware revision | Gyro FSR | Acc FSR | Gyro code | Acc code | Reason for change |
 |:---|:---:|:---:|:---:|:---:|:---|
-| v1 (initial) | ±250 dps | ±2 g | 0 | 0 | ICM-20948 default; saturated on hard tennis swings |
-| v2 (mid-development) | ±1000 dps | ±4 g | 2 | 1 | Reduce gyro saturation; still occasional acc clipping |
-| v3 (current, since 2026-03-03) | ±2000 dps | ±8 g | 3 | 2 | Eliminate saturation across all observed swings |
+| v1 (initial) | ±250 dps | ±2 g | 0 | 0 | ICM-20948 default; saturated on hard swings |
+| v2 (mid-development) | ±1000 dps | ±4 g | 2 | 1 | Reduce gyro saturation; occasional acc clipping |
+| v3 (since 2026-03-03) | ±2000 dps | ±8 g | 3 | 2 | Eliminate saturation across all observed swings |
 
 ### C. Host Watchdog with Graceful Degradation
 
-Unattended field recording requires the device to recover from host disconnection or BLE stack hangs. We implement a three-state watchdog driven by host PINGs (sent every ~1 s via the BLE RX characteristic): **Normal** (< 18 s since last PING) — streaming active; **Pause** (18–30 s) — ADC DMA stopped (~40 mA current reduction observed), IMU and SpO2 suspend; **Reboot** (> 30 s) — hardware reset, BLE advertising restarts automatically. This was exercised during a between-run BLE reconnect in field sessions totaling over 150 minutes, with no detected sample drops in active-stream segments and no file corruption after reconnection.
+A three-state device watchdog driven by host PINGs (~1 s): **Normal** (< 18 s) — streaming; **Pause** (18–30 s) — ADC DMA stopped (~40 mA reduction), IMU/SpO2 suspended; **Reboot** (> 30 s) — hardware reset, BLE advertising restarts. This was exercised by a between-run reconnect in the 150+-min corpus; recording resumed cleanly into a new file series and no file corruption was observed.
 
 ## VI. Host Capture Pipeline
 
-The PC host receiver (`btCentral.py`, built on Bleak) uses an asynchronous task pipeline: the BLE callback enqueues raw bytes onto an `asyncio.Queue`, a consumer task drains the queue in batches, a `FrameParser` re-synchronizes on the 0xA5 0x5A magic bytes and validates each frame's CRC16, decoded TLVs are appended to in-memory row buffers, and a writer task flushes buffers to disk every 2 s. Captured frames are logged to time-rotating CSV files (`emg_log_<session>_<idx>.csv`, `imu_log_<session>_<idx>.csv`, default 30 min per segment), each with a sidecar `.meta.json` (FSR codes, sample rate, MAC, segment open/close times). Metadata files are written tmp-file-then-rename for atomicity. A best-effort UDP mirror feeds an optional real-time plotter without affecting the recording path.
-
-A host-side watchdog complements the device-side watchdog: if no notifications arrive for 5 s, it first re-subscribes to NUS TX; if that fails, it triggers a full reconnect with exponential backoff (0.5 s → 20 s cap), flushing buffered rows beforehand. To handle the harder case — when the device itself reboots and its clock restarts — the host computes a hybrid `abs_us` timeline. Within a single BLE connection, `abs_us` follows the host-extended device timestamp `dev_us` (precise to ±25 µs from § IV.B). Between connections, `abs_us` advances by the difference in `host_rx_ms` across the gap. This rule unifies BLE-dropout and ESP32-reset cases without requiring the host to identify which occurred. Formal validation against `host_rx_ms` ground truth across the inter-run gap is deferred to an extended journal version.
+The host receiver (`btCentral.py`, Bleak) queues BLE notifications onto an `asyncio.Queue`, resynchronizes on the 0xA5 0x5A magic bytes, validates each frame's CRC16, and flushes decoded EMG/IMU TLVs to time-rotating CSV files (default 30 min/segment) every 2 s, with sidecar `.meta.json` (FSR codes, sample rate, MAC, segment open/close times) written tmp-then-rename for atomicity. If notifications stop for 5 s, the host first re-subscribes to NUS TX; if that fails it triggers a full reconnect with exponential backoff (0.5 → 20 s). For analysis, the host constructs a hybrid `abs_us` timeline: within a BLE connection it follows the host-extended device microsecond clock (precise to ±25 µs from §IV.B); across reconnects or device resets it advances by the difference in `host_rx_ms`, unifying BLE-dropout and device-reset cases. Formal validation of `abs_us` against `host_rx_ms` ground truth is deferred to a journal extension.
 
 ## VII. Evaluation
 
 ### A. Timestamp Accuracy
 
-As shown in Fig. 2 and Table III, empirical analysis of 2.3 million samples from a 131.7-second field recording confirms the ±25 µs timestamp accuracy claim. The 0.97% of samples outside ±25 µs are bounded within ±500 µs (99.96%), corresponding to brief DMA stalls during BLE TX bursts.
+Table III reports inter-sample interval statistics for 7,496,659 unique 2 kHz EMG output samples (deduplicated by sequence number) from log0305. 98.65% of received-sample intervals fall within ±25 µs of the expected 500 µs period and 99.98% within ±500 µs. Timing distributions from log0303 segments agreed within 0.3 percentage points. Intervals outside ±25 µs include both device-side scheduling jitter and intervals adjacent to unrecovered missing samples, and are interpreted together with the sequence-loss analysis in Table IV.
 
-**Table III.** Inter-sample interval statistics (log0305, 2,324,791 samples).
+**Table III.** Inter-sample interval statistics (log0305, 7,496,659 unique 2 kHz EMG output samples).
 
 | Metric | Value |
 |:---|:---|
 | Expected interval | 500 µs (2000 Hz) |
-| Within ±25 µs | **99.03%** |
-| Exactly 500 µs | 97.7% |
-| Within ±500 µs | 99.96% |
+| Within ±25 µs | **98.65%** |
+| Exactly 500 µs | 97.68% |
+| Within ±500 µs | 99.98% |
 
 ### B. Data Throughput and Drop Rate
 
-The combined data rate is approximately 12.5 KB/s (EMG: 8000 B/s, IMU: 2400 B/s, headers/CRC: ~2100 B/s), near BLE 4.2 capacity at MTU=244 with CONNECTION_PRIORITY_HIGH. Across two field sessions totaling 150+ minutes and 823 detected swings, sequence-number continuity analysis showed **zero detected EMG or IMU sample drops during active streaming**, with CRC error rate < 0.01%. The single between-run reconnect was handled without file corruption or parser lockup. Table IV summarizes per-session reliability metrics.
+The combined data rate is ~12.5 KB/s (EMG 8000 B/s = two 16-bit channels at 2 kHz; IMU 2400 B/s = six 16-bit axes at 200 Hz; headers/CRC ~2100 B/s), near BLE 4.2 capacity at MTU 244 with CONNECTION_PRIORITY_HIGH. The MAX30105 vitals payload is excluded from this figure since the present evaluation reports EMG/IMU streaming only. Across 150+ minutes and 823 swings, sequence-number continuity gives an aggregate EMG sample loss of 266,368 / 10,078,200 = 2.64% (log0305: 0.98%; log0303: 7.66% across two BLE sub-sessions of 11.74% and 0.37%); log0303 was an early field session with the v3 firmware shortly after its 2026-03-03 rollout and is retained as worst-case characterization, while log0305 reflects the same firmware in a more stable RF environment. The single between-run reconnect was handled without file corruption or parser lockup. The host validates CRC16-CCITT on every frame and drops failures, but per-session CRC failure counts were not retained as separate counters in this evaluation. Table IV summarizes per-session reliability.
 
-**Table IV.** Field validation summary.
+**Table IV.** Field validation summary. EMG sample drops = `max_seq − min_seq + 1 − unique_seq_count` per BLE session.
 
-| Session | Duration (min) | Swings | btCentral runs | Inter-run reconnects | Sample drops | CRC errors |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| log0303 | 87.9 | 197 | 2 | 1 | 0 | <0.01% |
-| log0305 | 63.1 | 626 | 1 | 0 | 0 | <0.01% |
-| **Total** | **151.0** | **823** | **3** | **1** | **0** | **<0.01%** |
+| Session | Duration (min) | Swings | btCentral runs | Inter-run reconnects | EMG sample drops |
+|:---|:---:|:---:|:---:|:---:|:---|
+| log0303 | 87.9 | 197 | 2 | 1 | 192,231 / 2,508,204 (7.66%) |
+| log0305 | 63.1 | 626 | 1 | 0 | 74,137 / 7,570,796 (0.98%) |
+| **Total** | **151.0** | **823** | **3** | **1** | **266,368 / 10,078,200 (2.64%)** |
 
-Fig. 4 illustrates the time-aligned concurrent acquisition: a 4-second window around a tennis swing shows EMG envelope amplitude rising in advance of the gyro-magnitude peak, demonstrating that 2 kHz EMG and 200 Hz IMU streams co-register on the platform's *abs_us* timeline.
+Fig. 4 illustrates the time-aligned concurrent acquisition: a 4-second window around a tennis swing shows EMG envelope and gyro magnitude co-registered on the platform's *abs_us* timeline, demonstrating that 2 kHz EMG and 200 Hz IMU streams remain mutually synchronized through capture and host reconstruction. The relative timing of the EMG envelope rise and the gyro-magnitude peak is shown for visual context only; quantitative biomechanical or fatigue-related interpretation of that timing is outside the scope of this platform paper.
 
-![Fig. 4. Synchronized EMG (2 kHz) and IMU (200 Hz) over a 4-second window centered on a tennis swing (red dashed line). EMG envelope (top, 50-ms rolling RMS) precedes the gyro magnitude peak (bottom).](icpics_figures/fig_emg_imu_sync.png)
+![Fig. 4. Time-aligned EMG (2 kHz) and IMU (200 Hz) over a 4-second window centered on a tennis swing (red dashed line). EMG envelope (top, 50-ms rolling RMS) and gyro magnitude (bottom) plotted on the platform's `abs_us` timeline; the figure illustrates cross-modality co-registration only.](icpics_figures/fig_emg_imu_sync.png)
 
 ### C. BLE Reconnection Robustness
 
-One between-run BLE reconnect was observed across the field sessions (within log0303, session_id changed from `20260303_183639` to `20260303_191258`). Recording resumed cleanly into a new file series; the hybrid `abs_us` timeline correctly preserved the inter-run gap, enabling downstream analysis to detect session discontinuities rather than treating them as continuous data. Within-run BLE re-subscriptions (handled by the host watchdog without process restart) are deferred to the journal extension.
+One between-run BLE reconnect was observed (within log0303, session_id changed from `20260303_183639` to `20260303_191258`). Recording resumed cleanly into a new file series; the hybrid `abs_us` timeline preserved the inter-run gap, enabling downstream analysis to detect session discontinuities rather than treating them as continuous data.
 
 ### D. Field Failure: Pogo-Pin Ghost Signal
 
-Before the GPIO 32 solder bypass, the RAW channel exhibited a ghost signal with Pearson r = 0.998 vs. ENV and near-zero variance (SD < 5 ADC counts vs. expected 50–500 during contraction). After bandpass filtering (50–450 Hz), the ghost flatlined entirely. Post-bypass, RAW showed independent AC EMG oscillation (SD > 100 counts during contraction) and ENV-RAW correlation dropped to r = −0.013 for filtered signals. The diagnostic signature — high RAW–ENV correlation, near-zero RAW variance, post-filter flatline, disappearance after solder bypass — generalizes to any high-impedance analog input routed through a non-soldered contact and sampled on a multiplexed ADC.
-
-### E. Data Collection and Consent
-
-Field recordings were collected during normal tennis practice with non-invasive wearable sEMG/IMU sensors. Written informed consent was obtained from a parent/legal guardian; participant assent was obtained where applicable. Data were anonymized before analysis.
+The MyoWare Wireless Shield originally routes RAW through spring-loaded pogo pins to ESP32 GPIO 32; under movement, pogo contact is unreliable and the floating ADC input tracks the previously sampled ENV voltage (consistent with multiplexer charge sharing). Before the solder bypass the RAW channel exhibited Pearson r = 0.998 vs. ENV with near-zero variance (SD < 5 ADC counts vs. expected 50–500 during contraction); after 50–450 Hz bandpass the ghost flatlined entirely. Post-bypass, RAW showed independent AC oscillation (SD > 100) and filtered ENV–RAW correlation dropped to r = −0.013. The diagnostic signature — high cross-channel correlation + near-zero per-channel variance + post-filter flatline that disappears after solder bypass — generalizes to any high-impedance analog input routed through a non-soldered contact and sampled on a multiplexed ADC.
 
 ## VIII. Discussion
 
-The pogo-pin failure mode is not specific to MyoWare. Any wearable that routes a high-impedance analog signal through a non-soldered contact (pogo pin, snap, spring contact, ZIF socket) and samples it on a multiplexed ADC is vulnerable; the diagnostic — Pearson correlation > 0.95 between channels that should be electrically independent, plus near-zero variance on one — should be checked in early field captures rather than trusting visual inspection, because high-pass filtering will silently destroy the ghost. The hybrid `abs_us` reconstruction has no MyoWare- or tennis-specific assumptions: any BLE logger that records both a device microsecond timestamp and a host millisecond receive time can apply the same two-case rule. The reconstruction gap is bounded by the BLE notification interval on the dropout end and the BLE advertising interval on the reset end.
+The main field lesson is that physical contacts can fail silently: a floating RAW input can track ENV through ADC coupling, pass visual inspection, and then disappear after filtering. Early captures should therefore check cross-channel correlation and per-channel variance before downstream analysis. The current BLE 4.2 path also operates near its practical throughput limit, producing measurable host-visible sequence loss; future versions should add onboard buffering with retransmission, tighter TLV batching, dedicated CRC/resync counters, or BLE 5 2M PHY. The hybrid `abs_us` reconstruction has no MyoWare- or tennis-specific assumptions and applies to any BLE logger that records both a device microsecond timestamp and a host millisecond receive time.
 
-**Limitations and future work.** Validation rests on a single sport, one subject, and 150+ minutes; broader subject and sport diversity are needed. The combined data rate (~12.5 KB/s) is near BLE 4.2 sustained throughput at MTU 244, so adding more sensors will require BLE 5.0 with 2M PHY. Formal validation of `abs_us` against `host_rx_ms` ground truth, AD5933-based on-board impedance monitoring, multi-device synchronized acquisition, and an Android Chaquopy port for on-device spectral analysis are deferred to a journal extension.
+**Limitations and future work.** Validation rests on a single sport, one subject, and 150+ minutes; broader subject and sport diversity are needed. Spectral fatigue-biomarker computation and validation (e.g., MDF/MNF on the RAW channel) are out of scope here and are the subject of a separate methodology study. Future firmware will retain CRC failure, parser-resync, and dropped-frame counters as first-class telemetry rather than only post-validation CSV rows. Formal `abs_us` validation against `host_rx_ms` ground truth, on-board impedance monitoring, multi-device synchronized acquisition, and an Android Chaquopy port are deferred to a journal extension.
 
 ## IX. Conclusion
 
-We presented a low-cost ($99) ESP32 wearable achieving reliable concurrent EMG (2000 Hz) and IMU (200 Hz) BLE streaming through five engineering contributions: DMA-driven oversampling ADC with ±25 µs timestamp accuracy (99.03% of 2.3 M samples), self-describing sensor-metadata protocol surviving three firmware revisions, dual-core FreeRTOS architecture with zero detected sample drops, two-layer device/host watchdog with hybrid timeline reconstruction for unattended field sessions, and quantitative diagnosis and repair of a pogo-pin ghost-signal failure mode. Field-tested across 150+ minutes of sports deployment, the system provides a reproducible low-cost platform for wearable biosignal acquisition research. By delivering accurate, time-aligned EMG–IMU streams at low cost, the platform serves as a building block for downstream signal processing, sensor-data fusion, and intelligent movement-analysis pipelines.
+We presented a $99 ESP32 wearable for field-tested concurrent 2 kHz EMG and 200 Hz IMU BLE streaming with five engineering contributions: DMA-driven oversampling ADC with ±25 µs timestamp accuracy (98.65% of 7.5 M EMG output samples over 63.1 minutes), self-describing sensor-metadata protocol surviving three FSR revisions, dual-core FreeRTOS architecture with measured EMG sequence loss of 0.98% in the cleaner session and 2.64% across 150+ minutes combined, two-layer device/host watchdog with hybrid timeline reconstruction, and quantitative diagnosis and repair of a pogo-pin ghost-signal failure mode. The platform serves as a reproducible low-cost building block for downstream signal processing, sensor-data fusion, and movement-analysis pipelines on time-aligned EMG–IMU streams.
 
 ## References
 
-[1] Rota S, Morel B, Saboul D, Rogowski I, Hautier C. "Influence of fatigue on upper limb muscle activity and performance in tennis." J Electromyogr Kinesiol. 2014;24(1):90–97.
+[1] S. Rota, B. Morel, D. Saboul, I. Rogowski, and C. Hautier, "Influence of fatigue on upper limb muscle activity and performance in tennis," *J. Electromyogr. Kinesiol.*, vol. 24, no. 1, pp. 90–97, Feb. 2014.
 
-[2] Bangaru SS, Wang C, Aghazadeh F. "Automated and continuous fatigue monitoring in construction workers using forearm EMG and IMU wearable sensors and recurrent neural network." Sensors. 2022;22(24):9729.
+[2] S. S. Bangaru, C. Wang, and F. Aghazadeh, "Automated and continuous fatigue monitoring in construction workers using forearm EMG and IMU wearable sensors and recurrent neural network," *Sensors*, vol. 22, no. 24, art. no. 9729, 2022.
 
-[3] Taborri J, et al. "Sport biomechanics applications using inertial, force, and EMG sensors: A literature overview." Appl Bionics Biomech. 2020;2020:2041549.
+[3] Delsys Inc., "Trigno Wireless EMG System — Technical Specifications," Natick, MA, USA, 2024.
 
-[4] Cerone GL, Botter A, Gazzoni M. "A modular, smart, and wearable system for high density sEMG detection." IEEE Trans Biomed Eng. 2019;66(12):3371–3380.
+[4] Noraxon USA, "Ultium EMG Sensor System — Product Documentation," Scottsdale, AZ, USA, 2024.
 
-[5] Farago E, et al. "A review of techniques for surface electromyography signal quality analysis." IEEE Rev Biomed Eng. 2022;16:494–511.
+[5] G. L. Cerone, A. Botter, and M. Gazzoni, "A modular, smart, and wearable system for high density sEMG detection," *IEEE Trans. Biomed. Eng.*, vol. 66, no. 12, pp. 3371–3380, Dec. 2019.
 
-[6] Yang K, et al. "E-textiles for sports and fitness sensing: current state, challenges, and future opportunities." Sensors. 2024;24(4):1058.
+[6] E. Farago, D. MacIsaac, M. Suk, and A. D. C. Chan, "A review of techniques for surface electromyography signal quality analysis," *IEEE Rev. Biomed. Eng.*, vol. 16, pp. 494–511, 2023.
 
-[7] Delsys Inc. "Trigno Wireless EMG System — Technical Specifications." Natick, MA, USA, 2024.
+[7] K. Yang *et al.*, "E-textiles for sports and fitness sensing: Current state, challenges, and future opportunities," *Sensors*, vol. 24, no. 4, art. no. 1058, 2024.
 
-[8] Noraxon USA. "Ultium EMG Sensor System — Product Documentation." Scottsdale, AZ, USA, 2024.
+[8] S. K. Lynn, C. M. Watkins, M. A. Wong, K. Balfany, and D. F. Feeney, "Validity and reliability of surface electromyography measurements from a wearable athlete performance system," *J. Sports Sci. Med.*, vol. 17, no. 2, pp. 205–215, 2018.
 
-[9] Lynn SK, Watkins CM, Wong MA, Balfany K, Feeney DF. "Validity and reliability of surface electromyography measurements from a wearable athlete performance system." J Sports Sci Med. 2018;17(2):205–215.
+[9] J. Taborri *et al.*, "Sport biomechanics applications using inertial, force, and EMG sensors: A literature overview," *Appl. Bionics Biomech.*, vol. 2020, art. no. 2041549, 2020.
 
-[10] Seong M, Kim G, Yeo D, et al. "MultiSenseBadminton: Wearable sensor-based biomechanical dataset for evaluation of badminton performance." Sci Data. 2024;11:343.
+[10] M. Seong, G. Kim, D. Yeo *et al.*, "MultiSenseBadminton: Wearable sensor-based biomechanical dataset for evaluation of badminton performance," *Sci. Data*, vol. 11, art. no. 343, 2024.
+
+[11] R. Wang, "Low-cost wearable kit and algorithms to predict and prevent muscle overuse injuries," poster, 102nd Annual Meeting, AAAS Pacific Division, University of San Diego, San Diego, CA, USA, June 17–20, 2024.
+
+[12] Seeed Studio, "Grove – EMG Detector," product documentation. [Online]. Available: https://www.seeedstudio.com/Grove-EMG-Detector-p-1737.html (accessed May 2026).
