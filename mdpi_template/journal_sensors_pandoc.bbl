@@ -1,0 +1,103 @@
+\begin{thebibliography}{999}
+
+\bibitem[{American Academy of Orthopaedic Surgeons}(2023)]{aaos2023}
+{American Academy of Orthopaedic Surgeons}.
+\newblock Tennis Elbow ({Lateral Epicondylitis}).
+\newblock OrthoInfo,  2023.
+\newblock Accessed: 1 January 2026.
+
+\bibitem[Hermens et~al.(2000)Hermens, Freriks, Disselhorst-Klug, and
+  Rau]{hermens2000}
+Hermens, H.; Freriks, B.; Disselhorst-Klug, C.; Rau, G.
+\newblock Development of recommendations for {SEMG} sensors and sensor
+  placement procedures.
+\newblock {\em J. Electromyogr. Kinesiol.} {\bf 2000}, {\em 10},~361--374.
+
+\bibitem[{Delsys Inc.}(2024)]{delsys2024}
+{Delsys Inc.}.
+\newblock {\em {Trigno} Wireless {EMG} System---Technical Specifications}.
+\newblock Delsys Inc., Natick, MA, USA,  2024.
+
+\bibitem[{Noraxon USA}(2024)]{noraxon2024}
+{Noraxon USA}.
+\newblock {\em Ultium {EMG} Sensor System---Product Documentation}.
+\newblock Noraxon USA, Scottsdale, AZ, USA,  2024.
+
+\bibitem[Cerone et~al.(2019)Cerone, Botter, and Gazzoni]{cerone2019}
+Cerone, G.; Botter, A.; Gazzoni, M.
+\newblock A modular, smart, and wearable system for high density {sEMG}
+  detection.
+\newblock {\em IEEE Trans. Biomed. Eng.} {\bf 2019}, {\em 66},~3371--3380.
+
+\bibitem[Lynn et~al.(2018)Lynn, Watkins, Wong, Balfany, and Feeney]{lynn2018}
+Lynn, S.; Watkins, C.; Wong, M.; Balfany, K.; Feeney, D.
+\newblock Validity and reliability of surface electromyography measurements
+  from a wearable athlete performance system.
+\newblock {\em J. Sports Sci. Med.} {\bf 2018}, {\em 17},~205--215.
+
+\bibitem[Yang et~al.(2024)]{yang2024}
+Yang, K.;  et~al.
+\newblock E-textiles for sports and fitness sensing: current state, challenges,
+  and future opportunities.
+\newblock {\em Sensors} {\bf 2024}, {\em 24},~1058.
+
+\bibitem[Taborri et~al.(2020)Taborri, Keogh, Kos, et~al.]{taborri2020}
+Taborri, J.; Keogh, J.; Kos, A.;  et~al.
+\newblock Sport biomechanics applications using inertial, force, and {EMG}
+  sensors: a literature overview.
+\newblock {\em Appl. Bionics Biomech.} {\bf 2020}, {\em 2020},~2041549.
+
+\bibitem[Bangaru et~al.(2022)Bangaru, Wang, and Aghazadeh]{bangaru2022}
+Bangaru, S.; Wang, C.; Aghazadeh, F.
+\newblock Automated and continuous fatigue monitoring in construction workers
+  using forearm {EMG} and {IMU} wearable sensors and recurrent neural network.
+\newblock {\em Sensors} {\bf 2022}, {\em 22},~9729.
+
+\bibitem[Rota et~al.(2014)Rota, Morel, Saboul, Rogowski, and Hautier]{rota2014}
+Rota, S.; Morel, B.; Saboul, D.; Rogowski, I.; Hautier, C.
+\newblock Influence of fatigue on upper limb muscle activity and performance in
+  tennis.
+\newblock {\em J. Electromyogr. Kinesiol.} {\bf 2014}, {\em 24},~90--97.
+
+\bibitem[Wang et~al.(2019)Wang, Lo, and Su]{wanglh2019}
+Wang, L.H.; Lo, K.C.; Su, F.C.
+\newblock Skill level and forearm muscle fatigue effects on ball speed in
+  tennis serve.
+\newblock {\em Sports Biomech.} {\bf 2019}, {\em 18},~566--579.
+
+\bibitem[Girard et~al.(2011)Girard, Racinais, Micallef, and Millet]{girard2011}
+Girard, O.; Racinais, S.; Micallef, J.P.; Millet, G.
+\newblock Spinal modulations accompany peripheral fatigue during prolonged
+  tennis.
+\newblock {\em Scand. J. Med. Sci. Sports} {\bf 2011}, {\em 21},~455--464.
+
+\bibitem[Joutsen et~al.(2024)Joutsen, C{\"o}mert, Kaappa, et~al.]{joutsen2024}
+Joutsen, A.; C{\"o}mert, A.; Kaappa, E.;  et~al.
+\newblock {ECG} signal quality in intermittent long-term dry electrode
+  recordings.
+\newblock {\em Sci. Rep.} {\bf 2024}, {\em 14},~8936.
+
+\bibitem[Boyer et~al.(2023)Boyer, Bouyer, Roy, and Campeau-Lecours]{boyer2023}
+Boyer, M.; Bouyer, L.; Roy, J.S.; Campeau-Lecours, A.
+\newblock Reducing noise, artifacts and interference in single-channel {EMG}
+  signals: a review.
+\newblock {\em Sensors} {\bf 2023}, {\em 23},~2927.
+
+\bibitem[Ravichandran et~al.(2023)]{ravichandran2023}
+Ravichandran, V.;  et~al.
+\newblock Characterizing the impedance properties of dry e-textile electrodes
+  based on contact force and perspiration.
+\newblock {\em Biosensors} {\bf 2023}, {\em 13},~217.
+
+\bibitem[Seong et~al.(2024)Seong, Kim, Yeo, et~al.]{seong2024}
+Seong, M.; Kim, G.; Yeo, D.;  et~al.
+\newblock {MultiSenseBadminton}: wearable sensor-based biomechanical dataset
+  for evaluation of badminton performance.
+\newblock {\em Sci. Data} {\bf 2024}, {\em 11},~343.
+
+\bibitem[{SparkFun Electronics}(2023)]{sparkfun2023}
+{SparkFun Electronics}.
+\newblock {\em {MyoWare} 2.0 Muscle Sensor Advanced Guide}.
+\newblock SparkFun Electronics, Boulder, CO, USA,  2023.
+
+\end{thebibliography}

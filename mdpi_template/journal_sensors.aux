@@ -1,0 +1,189 @@
+\relax 
+\providecommand*\new@tpo@label[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\bibstyle{Definitions/mdpi}
+\citation{aaos2023}
+\newmarginnote{note.1.1}{{1}{10945661sp}}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\newlabel{sec:intro@cref}{{[section][1][]1}{[1][1][]1}}
+\citation{hermens2000}
+\citation{delsys2024}
+\citation{noraxon2024}
+\citation{cerone2019,lynn2018,yang2024}
+\citation{taborri2020,bangaru2022}
+\citation{hermens2000}
+\citation{rota2014}
+\citation{wanglh2019}
+\citation{girard2011}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\newlabel{sec:related}{{2}{2}{Related Work}{section.2}{}}
+\newlabel{sec:related@cref}{{[section][2][]2}{[1][2][]2}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Field vs. Laboratory sEMG Fatigue in Tennis}{2}{subsection.2.1}\protected@file@percent }
+\citation{joutsen2024}
+\citation{boyer2023}
+\citation{ravichandran2023}
+\citation{taborri2020}
+\citation{bangaru2022}
+\citation{delsys2024}
+\citation{noraxon2024}
+\citation{cerone2019}
+\citation{lynn2018}
+\citation{yang2024}
+\citation{seong2024}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Dry Electrode and Contact Quality}{3}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}IMU + EMG Integration}{3}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Wearable EMG--IMU Platforms}{3}{subsection.2.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Engineering comparison of wearable EMG platforms for field deployment. \relax }}{3}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:comparison}{{1}{3}{Engineering comparison of wearable EMG platforms for field deployment. \relax }{table.caption.1}{}}
+\newlabel{tab:comparison@cref}{{[table][1][]1}{[1][3][]3}}
+\citation{sparkfun2023}
+\@writefile{toc}{\contentsline {section}{\numberline {3}The \$99 ESP32 EMG--IMU Platform}{4}{section.3}\protected@file@percent }
+\newlabel{sec:platform}{{3}{4}{The \$99 ESP32 EMG--IMU Platform}{section.3}{}}
+\newlabel{sec:platform@cref}{{[section][3][]3}{[1][3][]4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Hardware and Bill of Materials}{4}{subsection.3.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Bill of materials.\relax }}{4}{table.caption.2}\protected@file@percent }
+\newlabel{tab:bom}{{2}{4}{Bill of materials.\relax }{table.caption.2}{}}
+\newlabel{tab:bom@cref}{{[table][2][]2}{[1][4][]4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Dual-Core FreeRTOS Architecture}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces System architecture showing dual-core FreeRTOS task allocation, sensor connections, and host interfaces. Core\nobreakspace  {}1 (Sensor CPU) handles \texttt  {emgDrainTask} (priority\nobreakspace  {}2), \texttt  {imuTask} (priority\nobreakspace  {}2), and \texttt  {spo2Task} (priority\nobreakspace  {}0). Core\nobreakspace  {}0 (Protocol CPU) handles BLE notifications, host watchdog, and LED state machine.\relax }}{4}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:arch}{{1}{4}{System architecture showing dual-core FreeRTOS task allocation, sensor connections, and host interfaces. Core~1 (Sensor CPU) handles \texttt {emgDrainTask} (priority~2), \texttt {imuTask} (priority~2), and \texttt {spo2Task} (priority~0). Core~0 (Protocol CPU) handles BLE notifications, host watchdog, and LED state machine.\relax }{figure.caption.3}{}}
+\newlabel{fig:arch@cref}{{[figure][1][]1}{[1][4][]4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}ADC DMA Oversampling and Timestamp Accuracy}{4}{subsection.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Inter-sample interval distribution across 2.3 million samples (131.7\nobreakspace  {}s field recording). Of all samples, 99.03\% fall within $\pm $25\nobreakspace  {}$\mu $s of the expected 500\nobreakspace  {}$\mu $s period.\relax }}{5}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:timing}{{2}{5}{Inter-sample interval distribution across 2.3 million samples (131.7~s field recording). Of all samples, 99.03\% fall within $\pm $25~$\mu $s of the expected 500~$\mu $s period.\relax }{figure.caption.4}{}}
+\newlabel{fig:timing@cref}{{[figure][2][]2}{[1][5][]5}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Timestamp accuracy summary (2,324,791 samples, log0305).\relax }}{5}{table.caption.5}\protected@file@percent }
+\newlabel{tab:timing}{{3}{5}{Timestamp accuracy summary (2,324,791 samples, log0305).\relax }{table.caption.5}{}}
+\newlabel{tab:timing@cref}{{[table][3][]3}{[1][5][]5}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Self-Describing BLE TLV Protocol}{5}{subsection.3.4}\protected@file@percent }
+\citation{hermens2000}
+\citation{joutsen2024,ravichandran2023}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Binary TLV frame format. \texttt  {PROTO\_VER = 0x02} adds IMU FSR metadata in \texttt  {FLAG\_IMU\_META\_V2}, enabling self-describing firmware--host decoupling.\relax }}{6}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:protocol}{{3}{6}{Binary TLV frame format. \texttt {PROTO\_VER = 0x02} adds IMU FSR metadata in \texttt {FLAG\_IMU\_META\_V2}, enabling self-describing firmware--host decoupling.\relax }{figure.caption.6}{}}
+\newlabel{fig:protocol@cref}{{[figure][3][]3}{[1][5][]6}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Two-Layer Watchdog and Hybrid \textit  {abs\_us} Timeline}{6}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Methodology}{6}{section.4}\protected@file@percent }
+\newlabel{sec:methods}{{4}{6}{Methodology}{section.4}{}}
+\newlabel{sec:methods@cref}{{[section][4][]4}{[1][6][]6}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}No-Added-Gel Field Configuration}{6}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Physical Basis of Electrode Settling}{6}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Signal Processing Pipeline}{6}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Swing Detection}{7}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}IMU-Conditioned EMG Validity Framework}{7}{subsection.4.5}\protected@file@percent }
+\newlabel{sec:imu_cond}{{4.5}{7}{IMU-Conditioned EMG Validity Framework}{subsection.4.5}{}}
+\newlabel{sec:imu_cond@cref}{{[subsection][5][4]4.5}{[1][7][]7}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces IMU-conditioned interpretation of EMG spectral changes.\relax }}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:validity}{{4}{7}{IMU-conditioned interpretation of EMG spectral changes.\relax }{table.caption.7}{}}
+\newlabel{tab:validity@cref}{{[table][4][]4}{[1][7][]7}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Warmup-Skip Sensitivity Protocol}{7}{subsection.4.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7}Contact-Quality Metric}{7}{subsection.4.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8}Ball-Impact Window Masking (Approach B)}{7}{subsection.4.8}\protected@file@percent }
+\newlabel{sec:approach_b}{{4.8}{7}{Ball-Impact Window Masking (Approach B)}{subsection.4.8}{}}
+\newlabel{sec:approach_b@cref}{{[subsection][8][4]4.8}{[1][7][]7}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Field Validation: Platform Reliability}{8}{section.5}\protected@file@percent }
+\newlabel{sec:validation}{{5}{8}{Field Validation: Platform Reliability}{section.5}{}}
+\newlabel{sec:validation@cref}{{[section][5][]5}{[1][7][]8}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Timestamp Accuracy}{8}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}EMG/IMU Sequence Loss Accounting}{8}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Per-session field reliability metrics.\relax }}{8}{table.caption.8}\protected@file@percent }
+\newlabel{tab:sessions}{{5}{8}{Per-session field reliability metrics.\relax }{table.caption.8}{}}
+\newlabel{tab:sessions@cref}{{[table][5][]5}{[1][8][]8}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}BLE Reconnection Robustness}{8}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Quantitative \textit  {abs\_us} Validation}{8}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:absus_val}{{5.4}{8}{Quantitative \textit {abs\_us} Validation}{subsection.5.4}{}}
+\newlabel{sec:absus_val@cref}{{[subsection][4][5]5.4}{[1][8][]8}}
+\newlabel{fig:absus_cdf}{{4\normalfont  (\textbf  {a})}{9}{Subfigure 4\protect \normalfont  (\protect \textbf  {a})}{subfigure.4.1}{}}
+\newlabel{sub@fig:absus_cdf}{{(\normalfont  (\textbf  {a}))}{\normalfont  (\textbf  {a})}{Subfigure 4\normalfont  (\textbf  {a})\relax }{subfigure.4.1}{}}
+\newlabel{fig:absus_cdf@cref}{{[subfigure][1][4]4\normalfont  (\textbf  {a})}{[1][8][]9}}
+\newlabel{fig:absus_methods}{{4\normalfont  (\textbf  {b})}{9}{Subfigure 4\protect \normalfont  (\protect \textbf  {b})}{subfigure.4.2}{}}
+\newlabel{sub@fig:absus_methods}{{(\normalfont  (\textbf  {b}))}{\normalfont  (\textbf  {b})}{Subfigure 4\normalfont  (\textbf  {b})\relax }{subfigure.4.2}{}}
+\newlabel{fig:absus_methods@cref}{{[subfigure][2][4]4\normalfont  (\textbf  {b})}{[1][8][]9}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Quantitative \textit  {abs\_us} timeline validation. (\textbf  {a})\nobreakspace  {}BLE notification interval characterization. (\textbf  {b})\nobreakspace  {}Method comparison at reconnect. \relax }}{9}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:absus_full}{{4}{9}{Quantitative \textit {abs\_us} timeline validation. (\textbf {a})~BLE notification interval characterization. (\textbf {b})~Method comparison at reconnect. \relax }{figure.caption.9}{}}
+\newlabel{fig:absus_full@cref}{{[figure][4][]4}{[1][8][]9}}
+\@writefile{lof}{\contentsline {subfigure}{\numberline{(\normalfont (\textbf {a}))}{\ignorespaces {\centering BLE notification interval CDF (log0305, 59.2\nobreakspace {}min). Left panel shows CDF of inter-notification intervals; right panel shows a 5-second window with \textit {host\_rx\_ms} batch granularity (staircase) vs. \textit {dev\_us} per-sample precision (smooth line).}}}{9}{subfigure.4.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {subfigure}{\numberline{(\normalfont (\textbf {b}))}{\ignorespaces {\centering Three-method timeline comparison at BLE reconnection (log0303, 84.0-s gap). Method\nobreakspace {}A: clock reset causes C2 to appear immediately after C1. Method\nobreakspace {}B: correct gap with batch-level granularity. Method\nobreakspace {}C (\textit {abs\_us} hybrid): correct gap with per-sample precision.}}}{9}{subfigure.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Pogo-Pin Ghost-Signal Field Failure}{9}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:pogo}{{5.5}{9}{Pogo-Pin Ghost-Signal Field Failure}{subsection.5.5}{}}
+\newlabel{sec:pogo@cref}{{[subsection][5][5]5.5}{[1][9][]9}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Results}{10}{section.6}\protected@file@percent }
+\newlabel{sec:results}{{6}{10}{Results}{section.6}{}}
+\newlabel{sec:results@cref}{{[section][6][]6}{[1][10][]10}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Three-Phase MDF Trajectory}{10}{subsection.6.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Three-phase MDF trajectory in log0305 (63.1\nobreakspace  {}min, 626\nobreakspace  {}swings). Phase\nobreakspace  {}I (settling, 0--21\nobreakspace  {}min): MDF 115.7 $\pm $ 33.5\nobreakspace  {}Hz. Phase\nobreakspace  {}II (stable reference, 21--42\nobreakspace  {}min): MDF 167.6 $\pm $ 50.1\nobreakspace  {}Hz. Phase\nobreakspace  {}III (fatigue-consistent, 42--63\nobreakspace  {}min): MDF 149.5 $\pm $ 45.1\nobreakspace  {}Hz. IMU swing intensity remains flat across all phases ($r = +0.029$, $p = 0.468$). Warmup markers at 10/15/20\nobreakspace  {}min shown. \relax }}{10}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:settling}{{5}{10}{Three-phase MDF trajectory in log0305 (63.1~min, 626~swings). Phase~I (settling, 0--21~min): MDF 115.7 $\pm $ 33.5~Hz. Phase~II (stable reference, 21--42~min): MDF 167.6 $\pm $ 50.1~Hz. Phase~III (fatigue-consistent, 42--63~min): MDF 149.5 $\pm $ 45.1~Hz. IMU swing intensity remains flat across all phases ($r = +0.029$, $p = 0.468$). Warmup markers at 10/15/20~min shown. \relax }{figure.caption.10}{}}
+\newlabel{fig:settling@cref}{{[figure][5][]5}{[1][10][]10}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Warmup-Skip Sensitivity}{11}{subsection.6.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Warmup-skip sensitivity analysis. Left: baseline MDF per skip condition vs. stable settled reference (167.6\nobreakspace  {}Hz). Right: MDF change (\%) per condition. A 10-min skip produces $-$2.6\% (fatigue missed); 15-min produces $-$26.2\% (inverted); 20-min produces $+$28.1\% MDF decline (fatigue-consistent).\relax }}{11}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:warmup}{{6}{11}{Warmup-skip sensitivity analysis. Left: baseline MDF per skip condition vs. stable settled reference (167.6~Hz). Right: MDF change (\%) per condition. A 10-min skip produces $-$2.6\% (fatigue missed); 15-min produces $-$26.2\% (inverted); 20-min produces $+$28.1\% MDF decline (fatigue-consistent).\relax }{figure.caption.11}{}}
+\newlabel{fig:warmup@cref}{{[figure][6][]6}{[1][10][]11}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}IMU-Conditioned Validity}{11}{subsection.6.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces IMU--EMG diagnostic matrix (log0305, 626\nobreakspace  {}swings). IMU peak gyro magnitude (kinematic proxy) vs. MDF, colored by session third. Early and Late swings cluster at lower MDF despite similar IMU intensity. $r = +0.029$, $p = 0.468$. \relax }}{11}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:imu_emg}{{7}{11}{IMU--EMG diagnostic matrix (log0305, 626~swings). IMU peak gyro magnitude (kinematic proxy) vs. MDF, colored by session third. Early and Late swings cluster at lower MDF despite similar IMU intensity. $r = +0.029$, $p = 0.468$. \relax }{figure.caption.12}{}}
+\newlabel{fig:imu_emg@cref}{{[figure][7][]7}{[1][11][]11}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Contact-Quality Evolution}{12}{subsection.6.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Contact quality evolution (log0305). RMS-normalized metric increases during Phase\nobreakspace  {}I--II settling and shows late-session decline.\relax }}{12}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:contact}{{8}{12}{Contact quality evolution (log0305). RMS-normalized metric increases during Phase~I--II settling and shows late-session decline.\relax }{figure.caption.13}{}}
+\newlabel{fig:contact@cref}{{[figure][8][]8}{[1][12][]12}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Session-Gap Artifact}{12}{subsection.6.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces log0303 session-gap artifact. Full session (orange): apparent 28.7\% MDF drop. First continuous BLE segment alone (navy): 4.9\% change. An 84-second BLE reconnection gap (66\nobreakspace  {}min apparent practice gap) separates the two segments (purple shading).\relax }}{12}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:gap}{{9}{12}{log0303 session-gap artifact. Full session (orange): apparent 28.7\% MDF drop. First continuous BLE segment alone (navy): 4.9\% change. An 84-second BLE reconnection gap (66~min apparent practice gap) separates the two segments (purple shading).\relax }{figure.caption.14}{}}
+\newlabel{fig:gap@cref}{{[figure][9][]9}{[1][12][]12}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Ball-Impact Masking Impact on MDF Estimates}{13}{subsection.6.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Pre-impact MDF window analysis (log0305, 633\nobreakspace  {}swings, 512\nobreakspace  {}with $a_{\text  {dyn}} \geq 3.0$\nobreakspace  {}g). \textbf  {(a)}\nobreakspace  {}Violin + box comparison of full-window vs. pre-impact MDF distributions. \textbf  {(b)}\nobreakspace  {}Per-swing scatter (full vs. pre-impact MDF). \textbf  {(c)}\nobreakspace  {}CDF of $\Delta $MDF\nobreakspace  {}=\nobreakspace  {}pre-impact\nobreakspace  {}$-$\nobreakspace  {}full-window.\relax }}{13}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:preimpact}{{10}{13}{Pre-impact MDF window analysis (log0305, 633~swings, 512~with $a_{\text {dyn}} \geq 3.0$~g). \textbf {(a)}~Violin + box comparison of full-window vs. pre-impact MDF distributions. \textbf {(b)}~Per-swing scatter (full vs. pre-impact MDF). \textbf {(c)}~CDF of $\Delta $MDF~=~pre-impact~$-$~full-window.\relax }{figure.caption.15}{}}
+\newlabel{fig:preimpact@cref}{{[figure][10][]10}{[1][13][]13}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.7}Multi-Subject Results}{13}{subsection.6.7}\protected@file@percent }
+\newlabel{sec:multi_subject}{{6.7}{13}{Multi-Subject Results}{subsection.6.7}{}}
+\newlabel{sec:multi_subject@cref}{{[subsection][7][6]6.7}{[1][13][]13}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Discussion}{13}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{7}{13}{Discussion}{section.7}{}}
+\newlabel{sec:discussion@cref}{{[section][7][]7}{[1][13][]13}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Platform--Methodology Coupling}{13}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Three-Phase Trajectory as a General Framework}{14}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Pogo-Pin Failure Mode Generalization}{14}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Practical Recommendations}{14}{subsection.7.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Limitations}{14}{subsection.7.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusions}{14}{section.8}\protected@file@percent }
+\newlabel{sec:conclusions}{{8}{14}{Conclusions}{section.8}{}}
+\newlabel{sec:conclusions@cref}{{[section][8][]8}{[1][14][]14}}
+\bibcite{aaos2023}{{1}{}{{}}{{}}}
+\bibcite{rota2014}{{2}{}{{}}{{}}}
+\bibcite{wanglh2019}{{3}{}{{}}{{}}}
+\bibcite{girard2011}{{4}{}{{}}{{}}}
+\bibcite{hermens2000}{{5}{}{{}}{{}}}
+\bibcite{delsys2024}{{6}{}{{}}{{}}}
+\bibcite{noraxon2024}{{7}{}{{}}{{}}}
+\bibcite{cerone2019}{{8}{}{{}}{{}}}
+\bibcite{lynn2018}{{9}{}{{}}{{}}}
+\bibcite{yang2024}{{10}{}{{}}{{}}}
+\bibcite{seong2024}{{11}{}{{}}{{}}}
+\bibcite{taborri2020}{{12}{}{{}}{{}}}
+\bibcite{bangaru2022}{{13}{}{{}}{{}}}
+\bibcite{sparkfun2023}{{14}{}{{}}{{}}}
+\bibcite{joutsen2024}{{15}{}{{}}{{}}}
+\bibcite{boyer2023}{{16}{}{{}}{{}}}
+\bibcite{ravichandran2023}{{17}{}{{}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}References}{15}{section.9}\protected@file@percent }
+\newlabel{LastPage}{{}{15}{}{page.15}{}}
+\xdef\lastpage@lastpage{15}
+\xdef\lastpage@lastpageHy{15}
+\providecommand\NAT@force@numbers{}\NAT@force@numbers
+\gdef \@abspage@last{15}
