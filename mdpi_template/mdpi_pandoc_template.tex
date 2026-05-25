@@ -1,0 +1,94 @@
+%  MDPI Sensors pandoc template
+%  Usage:
+%    pandoc journal_draft.md \
+%      --template mdpi_template/mdpi_pandoc_template.tex \
+%      --bibliography references.bib \
+%      --citeproc \
+%      --csl mdpi_template/mdpi.csl \
+%      -o mdpi_template/journal_sensors.tex
+%
+%  YAML front matter variables used:
+%    title, author (list with name/affiliation/email/corresponding),
+%    abstract, keywords (list), date, conference
+
+\documentclass[sensors,article,submit,pdftex,moreauthors]{Definitions/mdpi}
+
+% Required for pandoc-generated tables and Unicode characters
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{newunicodechar}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{−}{\ensuremath{-}}
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{≈}{\ensuremath{\approx}}
+\newunicodechar{±}{\ensuremath{\pm}}
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{Δ}{\ensuremath{\Delta}}
+\newunicodechar{µ}{\ensuremath{\mu}}
+% Pandoc compatibility macros
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\newcounter{none}  % longtable uses \LTcaptype=none; needs a dummy counter
+\newunicodechar{Ω}{\ensuremath{\Omega}}
+% Pandoc 3.x image wrappers — define as passthroughs
+\newcommand{\pandocbounded}[1]{#1}
+% Pandoc 3.x adds alt={} to \includegraphics; graphicx doesn't support it — ignore silently
+\makeatletter\define@key{Gin}{alt}{}\makeatother
+
+\firstpage{1}
+\makeatletter
+\setcounter{page}{\@firstpage}
+\makeatother
+\pubvolume{1}
+\issuenum{1}
+\articlenumber{0}
+\pubyear{$date$}
+\copyrightyear{$date$}
+\datereceived{ }
+\daterevised{ }
+\dateaccepted{ }
+\datepublished{ }
+
+$if(conference)$
+\conference{$conference$}
+$endif$
+
+\Title{$title$}
+
+$if(orcid-a)$
+\newcommand{\orcidauthorA}{$orcid-a$}
+$else$
+\newcommand{\orcidauthorA}{0000-0000-0000-0000}
+$endif$
+
+\Author{$for(author)$$author.name$$if(author.num)$\textsuperscript{$author.num$}$endif$$if(author.corresponding)$\orcidA{}*$endif$$sep$, $endfor$}
+
+\AuthorNames{$for(author)$$author.name$$sep$, $endfor$}
+
+\address{%
+$for(author)$$if(author.num)$\textsuperscript{$author.num$}$endif$ \quad $author.affiliation$$if(author.email)$; $author.email$$endif$\\
+$endfor$}
+
+$for(author)$
+$if(author.corresponding)$
+\corres{Correspondence: $author.email$}
+$endif$
+$endfor$
+
+\abstract{$abstract$}
+
+\keyword{$for(keywords)$$keywords$$sep$; $endfor$}
+
+\begin{document}
+
+$body$
+
+$if(bibliography)$
+\begin{adjustwidth}{-\extralength}{0cm}
+\reftitle{References}
+\bibliographystyle{Definitions/mdpi}
+\bibliography{$bibliography$}
+\end{adjustwidth}
+$endif$
+
+\end{document}
