@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased] — 2026-05-25
+
+### Added
+- **`mdpi_template/journal_sensors.tex`** — complete MDPI Sensors LaTeX manuscript
+  using MDPI ACS citation style (downloaded `MDPI_template_ACS.zip`, 13 March 2026).
+  Compiles cleanly to 15 pages with `pdflatex` (no errors, no undefined references).
+  Document class: `[sensors,article,submit,pdftex,moreauthors]{Definitions/mdpi}`.
+  Covers all sections per `journal_draft.md` content-mapping table (§§1–8, 17 `\bibitem`
+  entries in MDPI ACS format, figure paths to `../paper_figures/` and
+  `../icpics_figures/`). Wide Table 1 (platform comparison) in `adjustwidth/fulllength`.
+  Two-panel abs_us figure (§5.4) using `\subfloat/adjustwidth`. `\conference{}` field
+  notes source conference papers per journal-extension policy.
+  §6.7 (multi-subject) and abstract marked TODO pending N3 data collection.
+  Build: `cd mdpi_template && pdflatex journal_sensors.tex && pdflatex journal_sensors.tex`
+
 ## [Unreleased] — 2026-05-24
 
 ### Added
