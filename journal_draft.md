@@ -702,3 +702,10 @@ All figures in this paper can be regenerated from recorded analysis-output direc
 - N2 (pre-impact MDF): `python n2_preimpact_mdf.py` → `paper_figures/fig_n2_preimpact_mdf.png`
 - §6.1–6.5 figures: `python paper_figures_runner.py` (TODO: create this script)
 - N3 (multi-subject): awaiting data collection
+
+**LaTeX build (MDPI Sensors format):**
+```
+cd mdpi_template && pdflatex journal_sensors.tex && pdflatex journal_sensors.tex
+```
+Two passes required: first pass compiles content; second pass resolves cross-references
+and page numbers. Output: `mdpi_template/journal_sensors.pdf`.
