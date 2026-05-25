@@ -1,0 +1,4 @@
+Method,Within-connection precision,Handles device reboot,Cross-connection gap accuracy
+A. dev_us-only,±25 µs per sample,"NO — clock restarts, C2 appears immediately after C1",None (gap absent)
+B. host_rx_ms-only,"Batch-resolution: p50=9 ms, p99=170 ms (~54 samples share one timestamp)",YES,±one notification interval (p99 ≈ 170 ms)
+C. abs_us hybrid (this work),±25 µs per sample (dev_us),YES,±one notification interval (p99 ≈ 170 ms)
