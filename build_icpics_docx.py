@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -163,6 +164,49 @@ def add_image_paragraph(doc, img_path: Path, alt_text: str, width_in: float = 3.
     return p
 
 
+def _set_section_columns(section, num: int):
+    """Set the column count of a Section by manipulating its <w:cols> element."""
+    sectPr = section._sectPr
+    cols = sectPr.find(qn("w:cols"))
+    if cols is None:
+        cols = OxmlElement("w:cols")
+        sectPr.append(cols)
+    cols.set(qn("w:num"), str(num))
+
+
+def add_wide_figure(doc, img_path: Path, alt_text: str, caption_runs, width_in: float = 6.5):
+    """Insert a figure + caption that spans both columns of an IEEE 2-col layout
+    by wrapping them in a single-column continuous section. Switches back to
+    2-column layout afterwards so subsequent body text continues normally."""
+    # Switch to single-column for the figure
+    sect = doc.add_section(WD_SECTION.CONTINUOUS)
+    _set_section_columns(sect, 1)
+
+    # Image
+    p = doc.add_paragraph()
+    try:
+        p.style = doc.styles["image"]
+    except KeyError:
+        p.style = doc.styles["Normal"]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    run.add_picture(str(img_path), width=Inches(width_in))
+    set_pic_alt_text(run.element, alt_text, title=alt_text[:80])
+
+    # Caption (also single-column; auto-numbers via Figurecaption style)
+    cap_p = doc.add_paragraph()
+    try:
+        cap_p.style = doc.styles["Figurecaption"]
+    except KeyError:
+        cap_p.style = doc.styles["Normal"]
+    _apply_runs(cap_p, caption_runs)
+
+    # Switch back to two-column for following text
+    sect2 = doc.add_section(WD_SECTION.CONTINUOUS)
+    _set_section_columns(sect2, 2)
+    return p
+
+
 def _add_table_borders(tbl_element):
     tblPr = tbl_element.find(qn("w:tblPr"))
     if tblPr is None:
@@ -182,13 +226,40 @@ def _add_table_borders(tbl_element):
     tblPr.append(tblBorders)
 
 
-def add_table(doc, header_row, data_rows):
-    """Insert a Word table with bold header (Tablecolhead) + body (TableContents)."""
+def add_table(doc, header_row, data_rows, total_width_in: float | None = None):
+    """Insert a Word table with bold header (Tablecolhead) + body (TableContents).
+
+    `total_width_in` (in inches) sets an explicit total table width when given.
+    This is essential because python-docx's `autofit=True` + `tblW=auto` results
+    in tables expanding to the full BODY width even when placed inside a 2-col
+    section, overlapping the adjacent column. Pass ~3.0\" for tables in a 2-col
+    section, ~6.5\" for tables in a 1-col (wide) section."""
     cols = len(header_row)
     table = doc.add_table(rows=1 + len(data_rows), cols=cols)
     _add_table_borders(table._tbl)
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    table.autofit = True
+
+    if total_width_in is not None:
+        table.autofit = False
+        # Set total table width via tblW
+        tblPr = table._tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = OxmlElement("w:tblPr")
+            table._tbl.insert(0, tblPr)
+        tblW_existing = tblPr.find(qn("w:tblW"))
+        if tblW_existing is not None:
+            tblPr.remove(tblW_existing)
+        tblW = OxmlElement("w:tblW")
+        tblW.set(qn("w:type"), "dxa")
+        tblW.set(qn("w:w"), str(int(total_width_in * 1440)))
+        tblPr.insert(0, tblW)
+        # Set per-column width on every row's cells
+        per_col_in = total_width_in / cols
+        for row in table.rows:
+            for cell in row.cells:
+                cell.width = Inches(per_col_in)
+    else:
+        table.autofit = True
 
     for j, cell_text in enumerate(header_row):
         cell = table.rows[0].cells[j]
@@ -210,6 +281,23 @@ def add_table(doc, header_row, data_rows):
             except KeyError:
                 pass
             _apply_runs(p, parse_inline(cell_text.strip()))
+
+    # Keep all rows together so a wide table doesn't split across a page
+    # boundary — the LibreOffice mid-table page break is what triggers the
+    # overlap of the wide-table section with surrounding 2-col body text.
+    # cantSplit prevents an individual row from splitting; keepNext on each
+    # row's paragraphs (except the last) asks the layout engine to keep
+    # consecutive rows on the same page when possible. Apply AFTER cells
+    # are populated, since `cell.text = ""` resets paragraph formatting.
+    rows = table.rows
+    for ri, row in enumerate(rows):
+        trPr = row._tr.get_or_add_trPr()
+        cant_split = OxmlElement("w:cantSplit")
+        trPr.append(cant_split)
+        if ri < len(rows) - 1:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    p.paragraph_format.keep_with_next = True
 
     return table
 
@@ -348,9 +436,28 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
             if mfig:
                 cap_rest = mfig.group(1)
             alt = re.sub(r"\s+", " ", cap_rest).strip()
-            # Per-figure width: emg-imu sync figure is wide-aspect; narrower fits column.
-            fig_width = 2.7 if "emg_imu_sync" in img_path.name else 3.0
-            add_image_paragraph(doc, img_path, alt_text=alt, width_in=fig_width)
+            # Wide-aspect figures (system architecture, protocol, EMG/IMU sync)
+            # span both columns of the IEEE 2-col layout for legibility relative to
+            # body tables; the timing-accuracy histogram fits a single column.
+            wide_figures = ("fig_system_architecture", "fig_protocol", "fig_emg_imu_sync")
+            if any(name in img_path.name for name in wide_figures):
+                add_wide_figure(
+                    doc,
+                    img_path,
+                    alt_text=alt,
+                    caption_runs=parse_inline(cap_rest),
+                    width_in=6.5,
+                )
+                after_heading = False
+                i += 1
+                continue
+            # Single-column figures
+            fig_width = 3.0
+            img_p = add_image_paragraph(doc, img_path, alt_text=alt, width_in=fig_width)
+            # Keep image with its caption — without this the 2-col layout can
+            # break a column at the image, leaving the caption stranded at the
+            # top of the next column far from the figure.
+            img_p.paragraph_format.keep_with_next = True
             # Caption — Figurecaption auto-numbers, so just emit cap_rest
             p = doc.add_paragraph()
             p.style = doc.styles["Figurecaption"]
@@ -359,7 +466,7 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
             i += 1
             continue
 
-        # Table block
+        # Table block (no caption above — fall back to narrow-column rendering)
         if line.lstrip().startswith("|"):
             tbl_lines = []
             while i < len(lines) and lines[i].lstrip().startswith("|"):
@@ -367,15 +474,33 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
                 i += 1
             res = parse_md_table(tbl_lines)
             if res:
-                add_table(doc, res[0], res[1])
+                add_table(doc, res[0], res[1], total_width_in=3.0)
             after_heading = False
             continue
 
-        # Standalone "**Table N.** caption" before a table → emit as Caption style
+        # Standalone "**Table N.** caption" before a table → emit as Caption style.
+        # If the upcoming table is wide (≥ 4 columns) wrap caption + table in a
+        # single-column continuous section so the table spans the full body width
+        # of the IEEE 2-col layout instead of being clipped to one column.
         m = re.match(r"^\*\*Table\s*([IVX0-9]+)\.\*\*\s*(.+?)\s*$", line)
         if m:
             n = m.group(1)
             cap = m.group(2)
+            # Look ahead for the table block to decide on wide vs. single-column
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            wide_table = False
+            if j < len(lines) and lines[j].lstrip().startswith("|"):
+                header_cells = [c.strip() for c in lines[j].strip().strip("|").split("|")]
+                wide_table = len(header_cells) >= 4
+            if wide_table:
+                # CONTINUOUS section break is now safe because the table has an
+                # explicit `tblW=6.5\"` — without that, LibreOffice expanded the
+                # auto-width table to full body width inside the surrounding
+                # 2-col flow, visually overlapping the adjacent column.
+                _set_section_columns(doc.add_section(WD_SECTION.CONTINUOUS), 1)
+            # Caption (keep on the same page as the table that follows it)
             p = doc.add_paragraph()
             try:
                 p.style = doc.styles["Caption"]
@@ -384,8 +509,21 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
             bold = p.add_run(f"Table {n}. ")
             bold.bold = True
             _apply_runs(p, parse_inline(cap))
+            p.paragraph_format.keep_with_next = True
+            # Consume blank lines, then emit the table inline
+            i = j
+            if i < len(lines) and lines[i].lstrip().startswith("|"):
+                tbl_lines = []
+                while i < len(lines) and lines[i].lstrip().startswith("|"):
+                    tbl_lines.append(lines[i])
+                    i += 1
+                res = parse_md_table(tbl_lines)
+                if res:
+                    # Wide table → 6.5" body width; narrow table → 3.0" column
+                    add_table(doc, res[0], res[1], total_width_in=(6.5 if wide_table else 3.0))
+            if wide_table:
+                _set_section_columns(doc.add_section(WD_SECTION.CONTINUOUS), 2)
             after_heading = False
-            i += 1
             continue
 
         # Reference list item
@@ -514,6 +652,14 @@ def build():
         # email
         if a.get("email"):
             add_paragraph_styled(doc, "Affiliation", runs=[(a["email"], False, False, False)])
+
+    # ---- Switch from 1-col title block to 2-col body (IEEE conf layout) ----
+    # The cleared template only preserves its final-section sectPr (cols=default
+    # = 1-col), so the title/authors/abstract/body would all otherwise render in
+    # one wide column. Insert a continuous section break here so abstract,
+    # keywords, body, and references all flow in 2-column layout per IEEE conf
+    # style. Wide figures (Fig 1/3/4) override locally with cols=1 sections.
+    _set_section_columns(doc.add_section(WD_SECTION.CONTINUOUS), 2)
 
     # ---- Abstract ----
     p = doc.add_paragraph()
