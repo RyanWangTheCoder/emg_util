@@ -3,6 +3,15 @@
 ## [Unreleased] — 2026-05-24
 
 ### Added
+- **`journal_draft.md`** — journal manuscript skeleton merging both conference papers per
+  content-mapping table in `journal_plan.md`. Includes: §1 Introduction (combined thesis),
+  §2 Related Work (with N4 comparative table), §3 Platform (from ICPICS §III–VI),
+  §4 Methodology (all 8 subsections incl. §4.8 Approach B ball-impact masking),
+  §5 Field Validation (incl. §5.4 N1 abs_us results), §6 Results (incl. §6.6 N2 results;
+  §6.7 is TODO awaiting N3 multi-subject data), §7 Discussion, §8 Conclusion, merged
+  references [1–20]. Figure inventory and reproducibility notes in appendices.
+  Status: skeleton — prose pulled from source papers; §6.7 and abstract are TODO/N3.
+
 - **N2 Approach B: `mdf_pre_impact` in `emg_util_yaml_runner.py`** — pre-impact MDF
   window (journal §6.6). When `impact_mask_thr_g > 0` and a swing shows acc_dyn peak
   >= threshold, computes MDF from `[t_impact-600ms, t_impact-20ms]` (~580ms pre-contact
