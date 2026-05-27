@@ -1,10 +1,29 @@
 {
   "folders": [
-    { "name": "data capture", "path": "../arduino/py_scripts" },
-    { "name": "data analysis", "path": "./" },
-    { "name": "arduino", "path": "../arduino/myoware_imu_v2" },
-    { "name": "Android bleApp", "path": "../btLeApp/FastBleLib" },
-    { "name": "Athelet app", "path": "../btLeApp/app" }
+    {
+      "name": "data capture",
+      "path": "../arduino/py_scripts"
+    },
+    {
+      "name": "data analysis",
+      "path": "./"
+    },
+    {
+      "name": "arduino",
+      "path": "../arduino/myoware_imu_v2"
+    },
+    {
+      "name": "Android bleApp",
+      "path": "../btLeApp/FastBleLib"
+    },
+    {
+      "name": "Athelet app",
+      "path": "../btLeApp/app"
+    },
+    {
+      "name": "AI tracker",
+      "path": "../aitracker"
+    }
   ],
   
   "dev.containers.enabled": false,

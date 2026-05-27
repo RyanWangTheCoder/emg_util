@@ -207,6 +207,70 @@ def add_wide_figure(doc, img_path: Path, alt_text: str, caption_runs, width_in: 
     return p
 
 
+def _clear_table_borders(tbl_element):
+    """Make a table borderless (for author grid)."""
+    tblPr = tbl_element.find(qn("w:tblPr"))
+    if tblPr is None:
+        tblPr = OxmlElement("w:tblPr")
+        tbl_element.insert(0, tblPr)
+    existing = tblPr.find(qn("w:tblBorders"))
+    if existing is not None:
+        tblPr.remove(existing)
+    tblBorders = OxmlElement("w:tblBorders")
+    for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        b = OxmlElement(f"w:{name}")
+        b.set(qn("w:val"), "none")
+        b.set(qn("w:sz"), "0")
+        b.set(qn("w:space"), "0")
+        b.set(qn("w:color"), "auto")
+        tblBorders.append(b)
+    tblPr.append(tblBorders)
+
+
+def add_author_table(doc, authors, total_width_in: float = 7.0):
+    """Render authors in a borderless 2-column table matching the IEEE template layout."""
+    ncols = 2
+    tbl = doc.add_table(rows=1, cols=ncols)
+    _clear_table_borders(tbl._tbl)
+    tbl.autofit = False
+    tbl.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Explicit total table width
+    tblPr = tbl._tbl.find(qn("w:tblPr"))
+    if tblPr is None:
+        tblPr = OxmlElement("w:tblPr")
+        tbl._tbl.insert(0, tblPr)
+    tblW_existing = tblPr.find(qn("w:tblW"))
+    if tblW_existing is not None:
+        tblPr.remove(tblW_existing)
+    tblW = OxmlElement("w:tblW")
+    tblW.set(qn("w:type"), "dxa")
+    tblW.set(qn("w:w"), str(int(total_width_in * 1440)))
+    tblPr.insert(0, tblW)
+    per_col_in = total_width_in / ncols
+    for cell in tbl.rows[0].cells:
+        cell.width = Inches(per_col_in)
+    for col_idx, a in enumerate(authors[:ncols]):
+        cell = tbl.rows[0].cells[col_idx]
+        p = cell.paragraphs[0]
+        try:
+            p.style = doc.styles["Author"]
+        except KeyError:
+            p.style = doc.styles["Normal"]
+        _apply_runs(p, [(a["name"], False, False, False)])
+        dept = a.get("dept", "")
+        org = a.get("org", "")
+        dept_org = ", ".join(x for x in [dept, org] if x) if dept else org
+        for text in [dept_org, a.get("city_country", ""), a.get("email", "")]:
+            if text:
+                p2 = cell.add_paragraph()
+                try:
+                    p2.style = doc.styles["Affiliation"]
+                except KeyError:
+                    p2.style = doc.styles["Normal"]
+                _apply_runs(p2, [(text, False, False, False)])
+    return tbl
+
+
 def _add_table_borders(tbl_element):
     tblPr = tbl_element.find(qn("w:tblPr"))
     if tblPr is None:
@@ -226,18 +290,20 @@ def _add_table_borders(tbl_element):
     tblPr.append(tblBorders)
 
 
-def add_table(doc, header_row, data_rows, total_width_in: float | None = None):
+def add_table(doc, header_row, data_rows, total_width_in: float | None = None,
+              col_widths: list | None = None):
     """Insert a Word table with bold header (Tablecolhead) + body (TableContents).
 
-    `total_width_in` (in inches) sets an explicit total table width when given.
-    This is essential because python-docx's `autofit=True` + `tblW=auto` results
-    in tables expanding to the full BODY width even when placed inside a 2-col
-    section, overlapping the adjacent column. Pass ~3.0\" for tables in a 2-col
-    section, ~6.5\" for tables in a 1-col (wide) section."""
+    `total_width_in` sets an explicit total table width (inches). Pass ~3.0\" for
+    tables in a 2-col section. `col_widths` (list of floats, inches) overrides
+    equal-distribution per-column widths; its sum should equal `total_width_in`."""
     cols = len(header_row)
     table = doc.add_table(rows=1 + len(data_rows), cols=cols)
     _add_table_borders(table._tbl)
     table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    if col_widths is not None:
+        total_width_in = sum(col_widths)
 
     if total_width_in is not None:
         table.autofit = False
@@ -254,10 +320,10 @@ def add_table(doc, header_row, data_rows, total_width_in: float | None = None):
         tblW.set(qn("w:w"), str(int(total_width_in * 1440)))
         tblPr.insert(0, tblW)
         # Set per-column width on every row's cells
-        per_col_in = total_width_in / cols
+        widths = col_widths if col_widths is not None else [total_width_in / cols] * cols
         for row in table.rows:
-            for cell in row.cells:
-                cell.width = Inches(per_col_in)
+            for j, cell in enumerate(row.cells):
+                cell.width = Inches(widths[j])
     else:
         table.autofit = True
 
@@ -277,7 +343,7 @@ def add_table(doc, header_row, data_rows, total_width_in: float | None = None):
             cell.text = ""
             p = cell.paragraphs[0]
             try:
-                p.style = doc.styles["TableContents"]
+                p.style = doc.styles["Tablecolsubhead"]
             except KeyError:
                 pass
             _apply_runs(p, parse_inline(cell_text.strip()))
@@ -436,23 +502,9 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
             if mfig:
                 cap_rest = mfig.group(1)
             alt = re.sub(r"\s+", " ", cap_rest).strip()
-            # Wide-aspect figures (system architecture, protocol, EMG/IMU sync)
-            # span both columns of the IEEE 2-col layout for legibility relative to
-            # body tables; the timing-accuracy histogram fits a single column.
-            wide_figures = ("fig_system_architecture", "fig_protocol", "fig_emg_imu_sync")
-            if any(name in img_path.name for name in wide_figures):
-                add_wide_figure(
-                    doc,
-                    img_path,
-                    alt_text=alt,
-                    caption_runs=parse_inline(cap_rest),
-                    width_in=6.5,
-                )
-                after_heading = False
-                i += 1
-                continue
-            # Single-column figures
-            fig_width = 3.0
+            # All figures rendered single-column to avoid CONTINUOUS section-break
+            # gaps that leave right columns empty in LibreOffice's 2-col layout.
+            fig_width = 3.3
             img_p = add_image_paragraph(doc, img_path, alt_text=alt, width_in=fig_width)
             # Keep image with its caption — without this the 2-col layout can
             # break a column at the image, leaving the caption stranded at the
@@ -486,28 +538,27 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
         if m:
             n = m.group(1)
             cap = m.group(2)
-            # Look ahead for the table block to decide on wide vs. single-column
+            # Look ahead for the table block
             j = i + 1
             while j < len(lines) and lines[j].strip() == "":
                 j += 1
-            wide_table = False
-            if j < len(lines) and lines[j].lstrip().startswith("|"):
-                header_cells = [c.strip() for c in lines[j].strip().strip("|").split("|")]
-                wide_table = len(header_cells) >= 4
-            if wide_table:
-                # CONTINUOUS section break is now safe because the table has an
-                # explicit `tblW=6.5\"` — without that, LibreOffice expanded the
-                # auto-width table to full body width inside the surrounding
-                # 2-col flow, visually overlapping the adjacent column.
-                _set_section_columns(doc.add_section(WD_SECTION.CONTINUOUS), 1)
-            # Caption (keep on the same page as the table that follows it)
+            # All tables rendered single-column (no section breaks) to avoid
+            # CONTINUOUS-break gaps leaving right columns empty in LibreOffice.
+            # Custom col_widths for Tables II and IV: narrow numeric columns,
+            # wider last (Reason / EMG drops) column.
+            TABLE_COL_WIDTHS = {
+                # Table II (8pt): Firmware rev | Gyro FSR | Acc FSR | Gyro code | Acc code | Reason
+                "II":  [0.45, 0.38, 0.18, 0.25, 0.19, 1.55],
+                # Table IV (8pt): Session | Duration | Swings | Runs | Reconnects | EMG drops
+                "IV":  [0.40, 0.40, 0.30, 0.40, 0.50, 1.00],
+            }
+            col_widths = TABLE_COL_WIDTHS.get(n)
+            # Caption — Tablehead style auto-numbers "TABLE N.", so just emit the text.
             p = doc.add_paragraph()
             try:
-                p.style = doc.styles["Caption"]
+                p.style = doc.styles["Tablehead"]
             except KeyError:
                 p.style = doc.styles["Normal"]
-            bold = p.add_run(f"Table {n}. ")
-            bold.bold = True
             _apply_runs(p, parse_inline(cap))
             p.paragraph_format.keep_with_next = True
             # Consume blank lines, then emit the table inline
@@ -519,10 +570,7 @@ def parse_body(doc, body: str, fig_paths: dict, fig_index: dict):
                     i += 1
                 res = parse_md_table(tbl_lines)
                 if res:
-                    # Wide table → 6.5" body width; narrow table → 3.0" column
-                    add_table(doc, res[0], res[1], total_width_in=(6.5 if wide_table else 3.0))
-            if wide_table:
-                _set_section_columns(doc.add_section(WD_SECTION.CONTINUOUS), 2)
+                    add_table(doc, res[0], res[1], total_width_in=3.0, col_widths=col_widths)
             after_heading = False
             continue
 
@@ -635,23 +683,12 @@ def build():
     # ---- Title ----
     add_paragraph_styled(doc, "Papertitle", runs=parse_inline(title))
 
-    # ---- Authors ----
-    # IEEE conf format: each author = Author paragraph (name) followed by
-    # 4 Affiliation paragraphs (dept, org, city/country, email).
-    for a in authors:
-        add_paragraph_styled(doc, "Author", runs=[(a["name"], False, False, False)])
-        # dept (optional)
-        if a.get("dept"):
-            add_paragraph_styled(doc, "Affiliation", runs=[(a["dept"], False, False, False)])
-        # org
-        if a.get("org"):
-            add_paragraph_styled(doc, "Affiliation", runs=[(a["org"], False, False, False)])
-        # city/country
-        if a.get("city_country"):
-            add_paragraph_styled(doc, "Affiliation", runs=[(a["city_country"], False, False, False)])
-        # email
-        if a.get("email"):
-            add_paragraph_styled(doc, "Affiliation", runs=[(a["email"], False, False, False)])
+    # ---- Authors (2-column layout per IEEE template) ----
+    add_author_table(doc, authors)
+
+    # Spacer: table cell space-after doesn't escape the table, so add an
+    # explicit blank line to restore the gap between authors and abstract.
+    add_paragraph_styled(doc, "Affiliation")
 
     # ---- Switch from 1-col title block to 2-col body (IEEE conf layout) ----
     # The cleared template only preserves its final-section sectPr (cols=default
