@@ -626,7 +626,13 @@ and other high-impedance biosignal sources routed through multiplexed ADCs.
   than physiologically confirmed
 - Settling duration varies with sweat rate, ambient conditions, and electrode state; 20-min
   skip is empirically selected for this session, not a universal threshold
-- No direct in-session impedance measurement — settling is inferred indirectly from MDF/RMS
+- No direct in-session impedance measurement — settling is inferred indirectly from MDF/RMS;
+  planned future work: handheld LCR meter at t=0,5,10,15,20,30 min to directly characterize
+  the settling curve (see paper2_plan.md §H1)
+- No gel-vs-no-gel comparison — the three-phase trajectory is attributed to dry-electrode
+  contact dynamics, but a paired session with standard EMG gel would directly confirm that
+  Phase I is absent (or shorter) with gel, converting the attribution from indirect to
+  controlled; planned as paper2_plan.md §H2
 - BLE 4.2 throughput ceiling: combined data rate (~12.5 KB/s) is near MTU 244 capacity;
   adding more sensors requires rate reduction or BLE 5.0 migration
 - Contact quality metric not validated against direct impedance

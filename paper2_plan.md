@@ -252,9 +252,34 @@ Validation tool. Blocked by Experiment 10. Revisit after Level 1 racket tap.
 Level 0 (Exp 10): ✅ DONE — null result, acc_dyn not a valid trigger
 Levels 1-5: ☐ Not done
 
-### Impedance Measurement
-Near-term: handheld LCR meter at t=0,5,10,15,20,30 min during one session.
-Paper 2: AD5933 chip on ESP32 I2C bus for automatic impedance logging.
+### Hardware Bench / New-Session Experiments
+
+#### H1. Electrode Impedance Measurement
+Near-term: handheld LCR meter (or multimeter @ 1 kHz) at t=0,5,10,15,20,30 min during one
+active forearm session. Record electrode-skin impedance on all three snap contacts at each
+time point. Goal: replace the indirect MDF/RMS settling inference with a direct impedance
+curve to confirm the 17–20 min settling window. Compare slope against literature dry-electrode
+curves (Joutsen 2024, Ravichandran 2023).
+Paper 2: AD5933 chip on ESP32 I2C bus for automatic per-sample impedance logging.
+
+#### H2. Gel vs. No-Gel Comparative Session
+One paired session: snap electrodes applied with standard EMG gel (e.g., Signa Spray or
+conductive gel pad) and standard skin prep (light abrasion), same forearm placement,
+same exercise protocol as log0305. Run the full analysis pipeline and compare:
+- Phase I settling duration (expected: shorter or absent with gel)
+- Baseline MDF level (expected: higher with gel due to lower impedance)
+- Warmup-skip sensitivity curve (expected: 5–10 min skip sufficient with gel)
+- Contact quality metric trajectory
+
+This directly validates the no-gel Phase I claim: if gel eliminates Phase I, it confirms
+dry-electrode contact dynamics as the cause, not physiology. If Phase I persists with gel,
+it suggests the settling is partly physiological (Ag/AgCl equilibration, not just impedance).
+Value: converts the journal limitation ("no gel comparison") into a controlled confirmation.
+
+#### H3. Pogo-Pin Ghost Signal Bench Characterisation
+From log0303 pre-bypass data: quantitative ghost amplitude vs. ENV amplitude scatter,
+before/after RAW-channel std distribution, ADC-mux charge-sharing analytical model.
+Needed for journal §9 ghost-signal section depth (paper2_plan.md Next Step 5).
 
 ---
 
