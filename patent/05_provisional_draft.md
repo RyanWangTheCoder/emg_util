@@ -703,130 +703,238 @@ Potential commercial or application areas include:
 
 ## 17. CLAIM CONCEPTS (NON-LIMITING)
 
-These are technical brainstorming drafts, not attorney-reviewed legal claims.
+These are technical brainstorming drafts, not attorney-reviewed legal claims. Three independent concepts (C1–C3) and fifteen dependent concepts (C4–C18) are included to support broad claim coverage.
 
-### 17.1 Method Claim Concept
+---
 
-A method for validating wearable electromyography signal quality, comprising:
+### C1 — Independent Method Concept
 
-1. receiving raw electromyography samples from a wearable electromyography sensor;
-2. receiving hardware envelope samples acquired simultaneously with the raw electromyography samples;
+A method comprising:
+
+1. receiving, by one or more processors, raw electromyography samples from a wearable electromyography sensor;
+2. receiving hardware envelope samples acquired simultaneously from the same wearable electromyography sensor;
 3. receiving inertial measurement samples from a wearable inertial sensor;
-4. computing a raw-derived amplitude signal from the raw electromyography samples;
-5. comparing the raw-derived amplitude signal with the hardware envelope samples to determine at least one signal-quality metric;
-6. determining a movement context from the inertial measurement samples;
-7. classifying a time window, movement event, or session according to the signal-quality metric and the movement context; and
-8. modifying interpretation of at least one electromyography-derived metric based on the classification.
+4. computing a raw-derived amplitude or envelope feature from the raw electromyography samples;
+5. generating one or more signal-quality metrics by comparing the raw-derived amplitude or envelope feature with the hardware envelope samples;
+6. determining a motion context from the inertial measurement samples;
+7. classifying a trustworthiness state of one or more electromyography windows based on the signal-quality metrics and the motion context; and
+8. modifying downstream interpretation of at least one electromyography-derived activation or fatigue metric based on the trustworthiness state.
 
-### 17.2 System Claim Concept
+---
+
+### C2 — Independent System Concept
 
 A wearable sensing system comprising:
 
-- an electromyography sensor configured to output raw electromyography data and hardware envelope data;
-- an inertial measurement unit configured to output motion data;
+- an electromyography sensor configured to output raw electromyography data and hardware envelope data simultaneously;
+- an inertial measurement unit configured to output motion data; and
 - one or more processors configured to:
-  - derive an amplitude or envelope feature from the raw electromyography data;
-  - compare the derived feature with the hardware envelope data;
+  - derive a raw-based amplitude or envelope feature from the raw electromyography data;
+  - compare the raw-based feature with the hardware envelope data to generate signal-quality metrics;
   - determine a motion context from the motion data;
-  - generate a signal-quality classification; and
-  - gate, adjust, suppress, or annotate an electromyography-derived fatigue or activation metric based on the signal-quality classification.
-
-### 17.3 Baseline Gating Claim Concept
-
-A method for selecting a wearable EMG baseline, comprising:
-
-1. detecting movement events using IMU data;
-2. extracting raw EMG features and hardware-envelope features for each movement event;
-3. rejecting candidate baseline events based on one or more of low raw RMS, RAW/ENV mismatch, envelope saturation, raw flatline, or abnormal IMU context;
-4. computing a baseline from remaining candidate events; and
-5. using the baseline to compute downstream EMG changes.
-
-### 17.4 Ghost Signal Detection Claim Concept
-
-A method for detecting a failed raw EMG channel, comprising:
-
-1. acquiring raw EMG and hardware envelope signals from a wearable EMG sensor;
-2. computing correlation between the raw EMG signal and hardware envelope signal;
-3. computing variance or dynamic range of the raw EMG signal;
-4. filtering the raw EMG signal to remove low-frequency or envelope-like components;
-5. classifying the raw EMG channel as failed or ghost-coupled when correlation is high, variance is low, and the filtered signal is flat or below a threshold.
-
-### 17.5 IMU Artifact Context Claim Concept
-
-A method for identifying motion-contaminated EMG events, comprising:
-
-1. detecting a movement event from IMU data;
-2. extracting an EMG feature from a window around the movement event;
-3. computing IMU shock, jerk, acceleration, or gyroscope features for the same window;
-4. identifying the EMG feature as artifact-prone when it is an outlier and coincides with a high-motion or high-impact IMU feature;
-5. down-weighting or excluding the EMG feature from fatigue or activation analysis.
-
-### 17.6 Additional Claim Concept Summary
-
-Further embodiments include:
-
-- gating fatigue estimation based on signal validity;
-- detecting hardware failures using cross-channel consistency;
-- segmenting analysis based on session continuity;
-- generating confidence-aware physiological outputs;
-- outputting corrective user prompts;
-- adapting baseline collection based on contact-quality metrics;
-- using IMU context to distinguish reduced effort from physiological fatigue.
+  - classify a signal trustworthiness state based on the signal-quality metrics and the motion context; and
+  - gate, adjust, suppress, segment, or annotate an electromyography-derived fatigue or activation metric based on the trustworthiness state.
 
 ---
 
-## 18. CANDIDATE DEPENDENT CLAIM FEATURES
+### C3 — Independent Computer-Readable Medium Concept
 
-Dependent claims may include:
+A non-transitory computer-readable medium storing instructions that, when executed by one or more processors, cause the processors to:
 
-- raw EMG sampled at 1000 Hz or higher;
-- hardware envelope sampled at lower bandwidth than raw EMG;
-- raw-derived envelope generated by DC tracking, rectification, and low-pass filtering;
-- DC tracking using a slow low-pass filter;
-- hardware envelope saturation threshold;
-- raw flatline threshold;
-- RAW/ENV ratio;
-- RAW/ENV correlation;
-- contact quality score based on RMS percentile;
-- rejecting baseline windows below a fraction of a session RMS percentile;
-- using IMU gyro magnitude for movement event detection;
-- using IMU acceleration or jerk to detect impact artifacts;
-- classifying electrode settling based on early low EMG quality with later recovery;
-- classifying movement-confounded fatigue when IMU intensity decreases;
-- outputting a confidence score;
-- outputting a user instruction to adjust electrodes;
-- applying to tennis, racket sports, throwing sports, rehabilitation, occupational ergonomics, e-sports, or gesture control;
-- operating in real time on a mobile device;
-- operating offline after session capture;
-- preserving session discontinuities and preventing cross-gap baseline comparisons.
+1. receive raw electromyography samples, hardware envelope samples, and inertial measurement samples from a wearable sensor system;
+2. compute signal-quality metrics by comparing raw-derived amplitude or envelope features with the hardware envelope samples;
+3. determine motion context from the inertial measurement samples;
+4. classify a trustworthiness state of one or more electromyography windows based on the signal-quality metrics and the motion context; and
+5. modify downstream electromyography-derived fatigue or activation interpretation based on the trustworthiness state.
 
 ---
 
-## 19. POTENTIAL FIGURES FOR PROVISIONAL
+### C4 — Dependent: Modification Actions
 
-1. **System block diagram**
-   - RAW EMG + hardware ENV + IMU → quality evaluator → gated EMG analytics.
+The method of C1, wherein modifying downstream interpretation comprises one or more of: accepting a window for analysis, rejecting a window, delaying baseline initialization, down-weighting an unreliable window, correcting a metric, segmenting analysis across a session discontinuity, suppressing a fatigue output, annotating a metric with a confidence label, or prompting a user to adjust electrode placement.
 
-2. **Raw-derived envelope computation**
-   - raw signal → DC tracker → rectifier → LPF → software envelope → comparison to hardware ENV.
+---
 
-3. **Quality decision matrix**
-   - RAW/ENV metrics combined with IMU context.
+### C5 — Dependent: Signal-Quality Metrics
 
-4. **Example RAW/ENV diagnostic**
-   - raw RMS vs ENV scatter;
-   - RAW/ENV ratio over time.
+The method of C1, wherein the signal-quality metrics comprise one or more of: raw electromyography variance, a ratio of raw-derived amplitude to hardware envelope amplitude, a correlation between the raw-derived envelope and the hardware envelope, a hardware envelope saturation count or percentage, a raw electromyography flatline indicator after bandpass filtering, or a contact-quality score computed as a ratio of a windowed raw electromyography RMS to a session-level RMS percentile.
 
-5. **Ghost-signal diagnostic**
-   - high raw/env correlation and raw flatline before fix;
-   - independent raw after fix.
+---
 
-6. **Baseline gating flowchart**
-   - collect candidates → quality filter → baseline finalization → fatigue output.
+### C6 — Dependent: Motion Context Classification
 
-7. **IMU-conditioned interpretation**
-   - stable IMU with early EMG recovery = settling;
-   - stable IMU with late EMG decline = candidate fatigue.
+The method of C1, wherein determining a motion context comprises classifying the inertial measurement samples as indicating one or more of: stable movement intensity, declining movement intensity, a transient shock or impact event, a vibration artifact, or absence of movement.
+
+---
+
+### C7 — Dependent: Electrode Settling Detection
+
+The method of C1, wherein classifying the trustworthiness state comprises detecting electrode settling when the signal-quality metrics indicate low raw electromyography amplitude with gradual recovery over time while the motion context indicates stable or consistent movement intensity.
+
+---
+
+### C8 — Dependent: Reduced-Effort Confound Detection
+
+The method of C1, wherein classifying the trustworthiness state comprises detecting a reduced-effort confound when a decline in electromyography-derived spectral features coincides with declining inertial movement intensity, and wherein modifying downstream interpretation comprises down-weighting or suppressing a fatigue metric derived during that period.
+
+---
+
+### C9 — Dependent: Ghost-Channel / Hardware Failure Detection
+
+The method of C1, wherein classifying the trustworthiness state comprises detecting a raw electromyography channel failure or ghost-channel coupling when: (a) a correlation between the raw electromyography signal and the hardware envelope signal exceeds a first threshold; (b) variance of the raw electromyography signal is below a second threshold; and (c) the raw electromyography signal after bandpass filtering is below a third threshold or is substantially flat.
+
+---
+
+### C10 — Dependent: Hardware Envelope Saturation Detection
+
+The method of C1, wherein classifying the trustworthiness state comprises detecting hardware envelope saturation when one or more hardware envelope samples are at or near a maximum output level, and wherein modifying downstream interpretation comprises reducing reliance on the hardware envelope for signal-quality assessment during the saturation period.
+
+---
+
+### C11 — Dependent: Quality-Gated Baseline Selection
+
+The method of C1, further comprising:
+
+- collecting candidate baseline windows from a plurality of movement events;
+- accepting a candidate baseline window only when: raw electromyography variance exceeds a flatline threshold, hardware envelope saturation is below a saturation threshold, the signal-quality metrics satisfy a consistency condition, the contact-quality score exceeds a minimum threshold, the motion context indicates stable movement intensity, and no session discontinuity is present within the window; and
+- computing a baseline electromyography metric from the accepted baseline windows.
+
+---
+
+### C12 — Dependent: Session Continuity Audit
+
+The method of C1, further comprising:
+
+- detecting a session discontinuity based on a gap in sample timestamps, a wireless connection event, or a device reset indicator;
+- assigning a segment identifier to samples on each side of the discontinuity; and
+- performing electromyography analysis independently within each segment, without computing fatigue metrics that compare data across the discontinuity.
+
+---
+
+### C13 — Dependent: Raw-Derived Envelope Computation
+
+The method of C1, wherein computing the raw-derived amplitude or envelope feature comprises: removing a direct-current component from the raw electromyography samples using a low-pass filter; rectifying the result; and applying a smoothing low-pass filter to produce a software envelope tracking the amplitude of the raw electromyography signal.
+
+---
+
+### C14 — Dependent: Contact-Quality Metric
+
+The method of C1, wherein the signal-quality metrics include a contact-quality score computed as a ratio of a windowed root-mean-square amplitude of the raw electromyography samples to a high-percentile root-mean-square value derived from the full session, wherein a contact-quality score below a threshold indicates low signal-to-noise ratio or degraded electrode-skin contact.
+
+---
+
+### C15 — Dependent: Confidence Score Output
+
+The method of C1, further comprising generating a confidence score associated with the electromyography-derived fatigue or activation metric, wherein the confidence score is based on one or more of the signal-quality metrics, the motion context, session continuity state, and the trustworthiness classification.
+
+---
+
+### C16 — Dependent: User Feedback and Electrode Adjustment Prompt
+
+The method of C1, further comprising generating a user-perceptible alert when the trustworthiness state indicates raw channel failure, persistent low contact quality, or hardware envelope saturation, wherein the alert prompts a user to reposition, re-apply, or reseat the electromyography sensor.
+
+---
+
+### C17 — Dependent: Real-Time and Offline Operation
+
+The method of C1, wherein the method is performed in real time during a monitoring session on a mobile device, wearable microcontroller, or edge processor; or performed offline during post-processing on a host computer or cloud system.
+
+---
+
+### C18 — Dependent: Application Scope
+
+The method of C1, wherein the electromyography-derived fatigue or activation metric is applied to one or more of: athletic performance monitoring, sports injury prevention, physical rehabilitation, occupational ergonomics, prosthetic or orthotic control, human-computer gesture interfaces, or clinical muscle assessment.
+
+---
+
+## 18. DEPENDENT CLAIM FEATURE NOTES
+
+The dependent concepts above (C4–C18) cover the following feature areas for attorney claim drafting:
+
+| Feature area | Concepts |
+|---|---|
+| Action vocabulary (accept / reject / delay / down-weight / suppress / annotate) | C4 |
+| Signal-quality metric enumeration | C5 |
+| IMU context states | C6 |
+| Electrode settling detection | C7 |
+| Reduced-effort confound | C8 |
+| Ghost-channel / raw failure detection | C9 |
+| ENV saturation detection | C10 |
+| Quality-gated baseline selection | C11 |
+| Session continuity / BLE gap audit | C12 |
+| Raw-derived envelope computation method | C13 |
+| Contact-quality metric definition | C14 |
+| Confidence score | C15 |
+| User feedback / electrode prompt | C16 |
+| Real-time vs. offline | C17 |
+| Application domains | C18 |
+
+---
+
+## 19. FIGURES
+
+Figures are drafted in `patent/06_figures/`. Each file contains ASCII diagrams, caption, and patent notes.
+
+### Figure 1 — System Architecture
+**File:** `patent/06_figures/fig1_system_architecture.md`
+
+Shows wearable sensor unit (EMG RAW + ENV outputs, IMU), microcontroller, BLE/wired link, and host/mobile processing unit. The host runs the signal quality evaluator (RAW + ENV + IMU + session timeline → trustworthiness classifier) feeding into the quality-gated EMG analytics layer.
+
+```
+EMG Sensor (RAW + ENV) ─┐
+                         ├──► MCU ──► BLE/Wired ──► Signal Quality Evaluator ──► Gated EMG Analytics
+IMU ────────────────────┘
+```
+
+### Figure 2 — Overall Method Flow
+**File:** `patent/06_figures/fig2_method_flow.md`
+
+Step-by-step flowchart: acquire → preprocess RAW → compute RAW features → compute signal-quality metrics → determine IMU context → audit session continuity → classify trustworthiness (9 states) → modify downstream interpretation (8 actions) → output.
+
+```
+Acquire RAW, ENV, IMU, session state
+        ↓
+Preprocess RAW EMG
+        ↓
+Compute RAW-derived RMS, envelope, MDF, MNF
+        ↓
+Compute signal-quality metrics (RAW/ENV ratio, correlation, variance, contact quality)
+        ↓
+Determine IMU motion context
+        ↓
+Audit session continuity
+        ↓
+Classify signal trustworthiness
+        ↓
+Accept / reject / delay / down-weight / segment / suppress / annotate EMG interpretation
+        ↓
+Output: fatigue metrics + confidence score + failure flags
+```
+
+### Figure 3 — RAW/ENV Consistency Validation
+**File:** `patent/06_figures/fig3_raw_env_consistency.md`
+
+Five-case diagnostic table (Normal, Settling, ENV Saturation, RAW Flatline/Ghost, Contact Loss) with RAW/ENV ratio timeline and scatter diagrams. Shows distinct cluster signatures for each failure mode in the RAW/ENV feature space.
+
+### Figure 4 — IMU-Conditioned EMG Validity Matrix
+**File:** `patent/06_figures/fig4_imu_decision_matrix.md`
+
+Decision matrix mapping IMU/session context × EMG observation to interpretation and action. Includes schematic MDF timeline for log0305 showing stable IMU across all three phases (settling / stable / fatigue-consistent). Contrast diagram: conventional EMG/IMU feature fusion vs. this invention's use of IMU as an independent validity context channel.
+
+### Figure 5 — Quality-Gated Baseline Selection
+**File:** `patent/06_figures/fig5_baseline_gating.md`
+
+Six-condition baseline gate flowchart. Empirical warmup-skip sensitivity diagram: baselines at 10 / 15 / 20 min yield MDF results of −2.6% / −26.2% / +28.1%, demonstrating that baseline quality determines fatigue interpretation. Schematic showing how a settling-contaminated baseline inverts apparent fatigue direction.
+
+### Figure 6 — Session Continuity Audit
+**File:** `patent/06_figures/fig6_session_gap_audit.md`
+
+log0303 session timeline showing 66-minute BLE gap between Segment 1 (13.5 min, 111 swings) and Segment 2. Naive analysis: 28.7% apparent MDF drop (artifact). Continuity-aware analysis: Segment 1 alone shows 4.9% (no meaningful fatigue). Continuity audit logic flowchart with segment-ID assignment.
+
+### Figure 7 — Ghost Signal / Hardware Failure Diagnostic
+**File:** `patent/06_figures/fig7_ghost_signal_diagnostic.md`
+
+Three-part diagnostic signature: near-zero RAW variance, RAW/ENV Pearson r ≈ 1.0, post-filter RAW flatline. Before/after repair comparison: r = 0.998 (pogo-pin failure) → r = −0.013 (after solder bypass). Three-condition detection flowchart.
 
 ---
 
