@@ -19,10 +19,6 @@
     {
       "name": "Athelet app",
       "path": "../btLeApp/app"
-    },
-    {
-      "name": "AI tracker",
-      "path": "../aitracker"
     }
   ],
   
@@ -112,6 +108,7 @@
     "python.analysis.exclude": [
       "**/*.csv",
       "**/*.json"
-    ]
+    ],
+    "java.configuration.updateBuildConfiguration": "interactive"
   }
 }
