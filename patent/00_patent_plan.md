@@ -860,13 +860,13 @@ patent_raw_env_imu_signal_quality_deprecated.md
 ### Critical Path (complete before filing)
 
 - [ ] **Fill in paper publication dates** — when ICPICS and CNIB acceptance notices arrive, update the two TBD dates in `02_public_disclosure_timeline.md`. These dates set the hard filing deadline.
-- [ ] **Confirm OSU IP policy** — confirm Dr. YanMing Di's advisory-only involvement does not trigger an OSU IP claim (email Dr. Di or OSU tech transfer).
-- [ ] **Confirm Westview High School IP policy** — confirm school has no claim on Ryan's personal research project.
+- [x] **Confirm OSU IP policy** — resolved: Dr. YanMing Di's advisory-only role does not trigger OSU ownership; no inventive conception, no OSU resources used.
+- [x] **Confirm Westview High School IP policy** — resolved: extracurricular personal research on Ryan's own equipment; high schools do not claim student personal project IP.
 - [ ] **Attorney review** — provide counsel with `01_invention_disclosure.md`, `05_provisional_draft.pdf`, and `03_inventor_contribution_matrix.md` for inventorship determination and claim review before filing.
 
 ### At Filing Time
 
-- [ ] **Guardian signature** — Larry Wang signs USPTO oath/declaration on Ryan's behalf (Ryan is a minor inventor).
+- [ ] **Guardian signature** — Confirm with USPTO Patent Center instructions who must sign the provisional cover sheet submission for a minor inventor; arrange accordingly at filing time.
 - [ ] **File via USPTO Patent Center** — upload `05_provisional_draft.pdf`, cover sheet (PTO/SB/16), pay filing fee (~$320 micro entity / ~$800 small entity).
 - [ ] **Save filing receipt** — record application number, filing date, and exact submitted PDF filename.
 - [ ] **Record 12-month nonprovisional deadline** — calendar the date 12 months from filing; nonprovisional must be filed by then to claim provisional priority.

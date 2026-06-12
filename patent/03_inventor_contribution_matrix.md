@@ -3,7 +3,7 @@
 
 > **Legal note:** Inventorship is a legal determination made by a registered patent attorney, not by this document. This matrix records who did what for counsel's review. Incorrect inventorship can invalidate a US patent. Review with counsel before filing.
 
-> **Minor participant:** Ryan Wang is a high school student and may be a minor at filing time. A parent or guardian must sign the USPTO oath/declaration on his behalf.
+> **Minor participant:** Ryan Wang is a high school student and may be a minor at filing time. Confirm with USPTO Patent Center instructions who must sign the provisional cover sheet for a minor inventor.
 
 ---
 
@@ -40,8 +40,8 @@ Ryan conceived all of the claimed inventive ideas: the RAW/ENV/IMU signal-qualit
 
 | Question | Status |
 |----------|--------|
-| School IP policy (Westview High School) | Confirm — student personal research projects are typically not claimed by high schools, but verify |
-| OSU IP policy (Dr. YanMing Di) | Confirm — advisory-only involvement by a faculty member typically does not trigger OSU ownership, but verify |
+| School IP policy (Westview High School) | **Resolved — no claim.** Ryan's project is extracurricular personal research on his own equipment, outside school curriculum. High schools do not claim IP on student personal projects. No action required. |
+| OSU IP policy (Dr. YanMing Di) | **Resolved — no claim.** Dr. Di's advisory/statistical role does not trigger OSU ownership. He contributed no inventive conception; the work used no OSU lab, equipment, or grant funding. No action required. |
 | Employer IP policy (Larry Wang) | Confirm — implementation support as a family member, not under employment for this project |
 | Joint ownership with any party | None expected given roles above |
 
@@ -49,9 +49,9 @@ Ryan conceived all of the claimed inventive ideas: the RAW/ENV/IMU signal-qualit
 
 ## 5. Action Items Before Filing
 
-- [ ] Confirm Ryan Wang's age at expected filing date; arrange guardian (Larry Wang) to sign USPTO oath/declaration
-- [ ] Confirm Westview High School has no IP claim on student personal research
-- [ ] Confirm OSU has no IP claim based on Dr. YanMing Di's advisory role
+- [ ] Confirm Ryan Wang's age at expected filing date; confirm with USPTO Patent Center instructions who must sign the provisional cover sheet for a minor inventor; arrange accordingly
+- [x] Confirm Westview High School has no IP claim on student personal research — **resolved: extracurricular personal project, no school resources used, no claim**
+- [x] Confirm OSU has no IP claim based on Dr. YanMing Di's advisory role — **resolved: advisory only, no inventive conception, no OSU resources used, no claim**
 - [ ] Provide this matrix to counsel for formal inventorship determination
 
 ---

@@ -390,14 +390,15 @@ def parse_author_lines(text: str):
     """
     authors = []
     line_re = re.compile(r"^\s*\*\*([^*]+)\*\*\s*[—–-]\s*(.+?)\s*$")
-    for line in text.split("\n"):
-        m = line_re.match(line)
+    email_re = re.compile(r"^\s*[\w.+-]+@[\w.-]+\.\w+\s*$")
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        m = line_re.match(lines[i])
         if m:
             name = m.group(1).strip()
             rest = m.group(2).strip()
             # Heuristic: split affiliation by commas
-            # "Westview High School, San Diego, CA, USA"
-            # → org='Westview High School', city='San Diego, CA', country='USA'
             parts = [p.strip() for p in rest.split(",")]
             if len(parts) >= 3:
                 org = parts[0]
@@ -416,12 +417,22 @@ def parse_author_lines(text: str):
                 dept = parts[0]
                 org = parts[1] if len(parts) > 1 else ""
                 city_country = ", ".join(parts[2:]) if len(parts) > 2 else ""
+            # Check if the next non-blank line is an email address
+            email = ""
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            if j < len(lines) and email_re.match(lines[j]):
+                email = lines[j].strip()
+                i = j  # advance past the email line
             authors.append({
                 "name": name,
                 "dept": dept,
                 "org": org,
                 "city_country": city_country,
+                "email": email,
             })
+        i += 1
     return authors
 
 

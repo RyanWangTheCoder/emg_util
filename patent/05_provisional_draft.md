@@ -288,6 +288,8 @@ n_env_saturated = count(env_hw >= saturation_threshold)
 pct_env_saturated = n_env_saturated / n_events
 ```
 
+In one embodiment, `saturation_threshold` is set to 95% of the sensor's maximum ADC output range. A session with `pct_env_saturated` exceeding 10% may be flagged for reduced confidence; a session exceeding 20% may suppress envelope-derived quality metrics entirely. In experimental field sessions, observed values ranged from 1.4% (low-load session, log0305) to 14.2% (high-load session, log0303).
+
 Uses include:
 
 - detecting hardware-envelope clipping;
@@ -305,6 +307,8 @@ or:
 ```text
 raw_rms < minimum_activity_threshold during movement events
 ```
+
+In one embodiment, `flatline_threshold` is set to 1% of the expected raw EMG variance during active muscle contraction (e.g., variance < 1e-5 V² for a 12-bit ADC system sampling at 2 kHz). `minimum_activity_threshold` may be set to 2% of the session 90th-percentile RMS. A ghost-channel failure example exhibited near-zero raw variance with Pearson r = 0.998 between raw and ENV; post-repair r dropped to −0.013.
 
 Uses include:
 
@@ -425,6 +429,8 @@ acc_dyn > acc_threshold
 jerk > jerk_threshold
 ```
 
+In one embodiment, representative thresholds for a wrist/forearm tennis application are: `gyro_threshold` = 300 deg/s peak magnitude (corresponding to high-intensity swing events), `acc_dyn` = dynamic acceleration component exceeding 3g, and `jerk` = rate-of-change of acceleration exceeding 50 m/s³. These values are implementation-specific and may be adapted to application, body placement, and sensor gain. The key principle is that any of these conditions coinciding with an EMG spectral or amplitude outlier elevates the likelihood of motion artifact rather than physiological change.
+
 or when an EMG outlier occurs near an IMU impact or shock event.
 
 ---
@@ -521,6 +527,18 @@ movement_confounded
 session_gap
 ```
 
+In one embodiment, a scalar confidence score is derived as a weighted combination of signal-quality indicators:
+
+```text
+confidence = w1 * (1 - pct_env_saturated)
+           + w2 * (contact_quality >= cq_threshold ? 1 : 0)
+           + w3 * (raw_variance >= flatline_threshold ? 1 : 0)
+           + w4 * (imu_intensity_stable ? 1 : 0)
+           + w5 * (no_session_gap ? 1 : 0)
+```
+
+where weights w1–w5 sum to 1.0 and may be set equal (0.2 each) or tuned per application. A confidence score below 0.5 may suppress fatigue output; below 0.3 may reject the window entirely. These thresholds are examples and may be adapted.
+
 ### 11.6 Alert
 
 In real-time systems, the system may alert the user:
@@ -609,9 +627,13 @@ and filtered_raw_rms < flatline_threshold:
     classify as ghost_signal_or_raw_channel_failure
 ```
 
+In one embodiment, `high_corr_threshold` = 0.95 (Pearson r), `low_variance_threshold` = 1% of expected active EMG variance, and `filtered_raw_rms` below 2% of session p90_rms after bandpass filtering. An experimentally observed ghost-channel failure showed r = 0.998 and near-zero variance; after hardware repair (solder bypass of failed pogo-pin routing), correlation dropped to r = −0.013.
+
 ### 13.5 Session Gap Artifact
 
 Signals across long recording gaps are analyzed as separate sessions to prevent false fatigue trends. If a BLE reconnection or session discontinuity is detected, the system avoids comparing baseline and final features across the gap as though they were continuous physiological data.
+
+In one embodiment, a gap exceeding 60 seconds in the reconstructed absolute timestamp (`abs_us`) timeline is classified as a session discontinuity requiring segment-isolated analysis. In an experimental example, a 66-minute BLE reconnection gap produced an apparent full-session MDF drop of 28.7% when analyzed naively; segment-isolated analysis of the first continuous segment alone showed a 4.9% change, preventing a false fatigue conclusion.
 
 ### 13.6 IMU-Conditioned Interpretation
 
@@ -1006,17 +1028,26 @@ Important issues to review with counsel:
 
 ---
 
-## 23. NEXT DRAFTING TASKS
+## 23. DRAFTING STATUS
 
-- [ ] Create an attorney-facing one-page invention disclosure.
-- [ ] Add system diagrams.
-- [ ] Add example figures from existing paper outputs.
-- [ ] Draft provisional specification sections in full prose.
-- [ ] Draft 10–20 claim-style concepts.
-- [ ] Build a public-disclosure timeline.
-- [ ] List inventors and contributor roles.
-- [ ] Identify closest prior art references.
-- [ ] Decide whether to file before conference / journal submission.
+All pre-filing drafting tasks are complete as of 2026-06-01.
+
+### Completed
+
+- [x] One-page invention disclosure — `01_invention_disclosure.md`
+- [x] System diagrams and figures 1–7 — `06_figures/`
+- [x] Full prose specification — this document
+- [x] 18 claim-style concepts (3 independents + 15 dependents) — §17
+- [x] Public disclosure timeline — `02_public_disclosure_timeline.md`
+- [x] Inventor/contributor matrix — `03_inventor_contribution_matrix.md`
+- [x] Prior art search notes — `04_prior_art_search_notes.md`
+- [x] Filing strategy determined — file provisional before ICPICS/CNIB publish (~2026-07)
+
+### Remaining before filing
+
+- [ ] Obtain ICPICS and CNIB publication dates — fill into `02_public_disclosure_timeline.md`
+- [ ] File provisional via USPTO Patent Center — upload this PDF, complete cover sheet, pay micro-entity fee (~$320)
+- [ ] Record filing receipt in `07_filing_receipt.md`
 
 ---
 

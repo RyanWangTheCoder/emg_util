@@ -69,6 +69,7 @@ patent/
   04_prior_art_search_notes.md            ← prior art by claim family
   05_provisional_draft.md                 ← full provisional specification
   05_provisional_draft.pdf               ← generated PDF (365 KB)
+  07_filing_receipt.md                    ← fill in after filing: app number, date, deadlines
   deprecated_raw_env_imu_signal_quality.md
   worklog.md                              ← this file
   06_figures/

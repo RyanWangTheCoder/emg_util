@@ -10,7 +10,9 @@ header-includes:
 # A Robust Self-Describing BLE Platform for Real-Time Wearable EMG–IMU Sensing
 
 **Ryan Wang** — Westview High School, San Diego, CA, USA
+ryanwang2020@gmail.com
 **Dr. YanMing Di** — Professor, Department of Statistics, Oregon State University, Corvallis, OR, USA
+Yanming.Di@oregonstate.edu
 
 *2026*
 

@@ -32,7 +32,7 @@ def label_above(ax, x, y, w, text, fontsize=10, weight="bold", color="#222"):
             fontsize=fontsize, fontweight=weight, color=color)
 
 
-def arrow(ax, x0, y0, x1, y1, label="", label_offset_y=0.06, color="#444"):
+def arrow(ax, x0, y0, x1, y1, label="", label_offset_y=0.06, label_offset_x=0.0, color="#444"):
     a = FancyArrowPatch(
         (x0, y0), (x1, y1),
         arrowstyle="-|>", mutation_scale=14,
@@ -40,13 +40,13 @@ def arrow(ax, x0, y0, x1, y1, label="", label_offset_y=0.06, color="#444"):
     )
     ax.add_patch(a)
     if label:
-        ax.text((x0 + x1) / 2, (y0 + y1) / 2 + label_offset_y, label,
+        ax.text((x0 + x1) / 2 + label_offset_x, (y0 + y1) / 2 + label_offset_y, label,
                 ha="center", va="bottom", fontsize=9, color=color)
 
 
 def main():
-    fig, ax = plt.subplots(figsize=(10, 4.6))
-    ax.set_xlim(0, 12)
+    fig, ax = plt.subplots(figsize=(11, 4.6))
+    ax.set_xlim(0, 14)
     ax.set_ylim(0, 5.6)
     ax.set_aspect("equal")
     ax.axis("off")
@@ -64,7 +64,7 @@ def main():
         face="#cfe5f7", edge="#3a78c0")
 
     # ----- ESP32 outer box -----
-    esp_x, esp_y, esp_w, esp_h = 3.6, 0.9, 5.2, 4.0
+    esp_x, esp_y, esp_w, esp_h = 3.3, 0.9, 6.4, 4.0
     p = FancyBboxPatch(
         (esp_x, esp_y), esp_w, esp_h,
         boxstyle="round,pad=0.03,rounding_size=0.10",
@@ -76,7 +76,7 @@ def main():
             ha="center", va="center", fontsize=11, fontweight="bold", color="#1f3a76")
 
     # Core 1 (sensor CPU) — left half
-    c1_x, c1_y, c1_w, c1_h = esp_x + 0.25, esp_y + 0.55, 2.25, 2.7
+    c1_x, c1_y, c1_w, c1_h = esp_x + 0.25, esp_y + 0.55, 2.35, 2.7
     label_above(ax, c1_x, c1_y + c1_h + 0.05, c1_w, "Core 1 — Sensor CPU", fontsize=10)
     box(ax, c1_x, c1_y + c1_h - 1.05, c1_w, 1.0,
         ["emgDrainTask", "ADC DMA 40 kHz → 2 kHz"],
@@ -86,7 +86,7 @@ def main():
         face="#cfe5f7", edge="#3a78c0", fontsize=9)
 
     # Core 0 (BLE CPU) — right half
-    c0_x, c0_y, c0_w, c0_h = esp_x + 2.7, esp_y + 0.55, 2.25, 2.7
+    c0_x, c0_y, c0_w, c0_h = esp_x + 3.8, esp_y + 0.55, 2.35, 2.7
     label_above(ax, c0_x, c0_y + c0_h + 0.05, c0_w, "Core 0 — BLE CPU", fontsize=10)
     box(ax, c0_x, c0_y + c0_h - 1.05, c0_w, 1.0,
         ["BLE TX", "NUS notify"],
@@ -96,23 +96,24 @@ def main():
         face="#fde2c5", edge="#c97a2b", fontsize=9)
 
     # ----- Host (right column) -----
-    box(ax, 9.6, 2.4, 2.2, 1.2,
+    box(ax, 11.2, 2.4, 2.2, 1.2,
         ["PC host", "btCentral.py", "CSV + UDP mirror"],
         face="#dceedb", edge="#3a8a4a")
 
     # ----- Arrows (kept clear of borders) -----
     # MyoWare → emgDrainTask (ADC DMA)
-    arrow(ax, 2.2, 4.0, c1_x, c1_y + c1_h - 0.55, label="ADC DMA")
+    arrow(ax, 2.2, 4.0, c1_x, c1_y + c1_h - 0.55, label="ADC DMA", label_offset_y=0.18, label_offset_x=0.0)
     # ICM → imuTask (I2C)
-    arrow(ax, 2.2, 2.2, c1_x, c1_y + c1_h - 1.75, label="I²C 400 kHz")
-    # emgDrainTask → BLE TX
-    arrow(ax, c1_x + c1_w, c1_y + c1_h - 0.55, c0_x, c0_y + c0_h - 0.55, label="ring buf")
+    arrow(ax, 2.2, 2.2, c1_x, c1_y + c1_h - 1.75, label="I²C 400 kHz", label_offset_y=0.14, label_offset_x=-0.1)
+    # emgDrainTask → BLE TX (ring buf label above arrow, in the gap)
+    arrow(ax, c1_x + c1_w, c1_y + c1_h - 0.55, c0_x, c0_y + c0_h - 0.55,
+          label="ring buf", label_offset_y=0.10)
     # imuTask → BLE TX
     arrow(ax, c1_x + c1_w, c1_y + c1_h - 1.75, c0_x, c0_y + c0_h - 0.65, label="")
     # BLE TX → PC host
-    arrow(ax, c0_x + c0_w, c0_y + c0_h - 0.55, 9.6, 3.0, label="BLE NUS")
+    arrow(ax, c0_x + c0_w, c0_y + c0_h - 0.55, 11.2, 3.0, label="BLE NUS", label_offset_y=0.18)
     # Host watchdog ← PC (PING)
-    arrow(ax, 9.6, 2.7, c0_x + c0_w, c0_y + c0_h - 1.75, label="PING", color="#c97a2b")
+    arrow(ax, 11.2, 2.7, c0_x + c0_w, c0_y + c0_h - 1.75, label="PING", color="#c97a2b")
 
     plt.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)
