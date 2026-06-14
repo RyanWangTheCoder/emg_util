@@ -42,14 +42,14 @@ Ryan conceived all of the claimed inventive ideas: the RAW/ENV/IMU signal-qualit
 |----------|--------|
 | School IP policy (Westview High School) | **Resolved — no claim.** Ryan's project is extracurricular personal research on his own equipment, outside school curriculum. High schools do not claim IP on student personal projects. No action required. |
 | OSU IP policy (Dr. YanMing Di) | **Resolved — no claim.** Dr. Di's advisory/statistical role does not trigger OSU ownership. He contributed no inventive conception; the work used no OSU lab, equipment, or grant funding. No action required. |
-| Employer IP policy (Larry Wang) | Confirm — implementation support as a family member, not under employment for this project |
+| Employer IP policy (Larry Wang) | **Checkpoint for counsel.** Larry's role is hardware assembly and implementation support as a family member, not as an employee acting within the scope of employment for this project. No employer IP claim is expected, but confirm with counsel before filing that no employment agreement covers this personal family research project. |
 | Joint ownership with any party | None expected given roles above |
 
 ---
 
 ## 5. Action Items Before Filing
 
-- [ ] Confirm Ryan Wang's age at expected filing date; confirm with USPTO Patent Center instructions who must sign the provisional cover sheet for a minor inventor; arrange accordingly
+- [x] Confirm Ryan Wang's age at expected filing date; confirm with USPTO Patent Center instructions who must sign the provisional cover sheet for a minor inventor; arrange accordingly — **resolved: ID.me requires 18+; Ryan cannot create a USPTO account. Larry Wang files using his own Patent Center account. Ryan listed as inventor on cover sheet; Larry as correspondence contact. Oath/declaration not required for provisional.**
 - [x] Confirm Westview High School has no IP claim on student personal research — **resolved: extracurricular personal project, no school resources used, no claim**
 - [x] Confirm OSU has no IP claim based on Dr. YanMing Di's advisory role — **resolved: advisory only, no inventive conception, no OSU resources used, no claim**
 - [ ] Provide this matrix to counsel for formal inventorship determination

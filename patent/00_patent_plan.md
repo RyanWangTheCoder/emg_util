@@ -1,5 +1,7 @@
 # Patent Action Plan — RAW/ENV/IMU Signal-Quality Validation
 
+> **Current file set (as of 2026-06-01):** All working files are in `patent/` and use numbered prefixes: `01_invention_disclosure.md`, `02_public_disclosure_timeline.md`, `03_inventor_contribution_matrix.md`, `04_prior_art_search_notes.md`, `05_provisional_draft.md` / `.pdf`, `06_figures/`, `07_filing_receipt.md`. Earlier filename references elsewhere in this document (e.g., `patent_provisional_draft.md`, `inventor_contribution_table.md`) are historical planning examples and do not reflect the current folder.
+
 This is an inventor action plan for preparing a focused provisional patent application around wearable EMG signal-quality validation. It is not legal advice. Because this work may involve a minor participant, university collaborators, prior/public disclosures, and employer IP policies, review the filing strategy with a registered patent attorney or the relevant invention-disclosure process before filing.
 
 ---

@@ -10,7 +10,7 @@
 
 The present invention relates to wearable biosignal sensing and analysis, and more particularly to **systems and methods for validating signal quality in surface electromyography (sEMG) using combined electromyography and inertial sensing in dynamic field environments**.
 
-In some embodiments, the invention relates to validating and improving wearable electromyography signal quality using simultaneously acquired:
+In some embodiments, the invention relates to validating and improving wearable electromyography signal quality using concurrently acquired or time-aligned data streams, including:
 
 1. a high-rate raw EMG channel;
 2. a hardware-derived or low-rate EMG envelope channel; and
@@ -42,7 +42,13 @@ Accordingly, there is a need for a wearable EMG framework that evaluates whether
 
 ---
 
-## 3. SUMMARY OF THE INVENTION
+## 3. DEFINITIONS AND NON-LIMITING TERMINOLOGY
+
+As used herein, **RAW** refers to a raw or substantially unprocessed electromyography waveform suitable for amplitude or spectral analysis. **ENV** refers to a hardware-derived, sensor-provided, analog-derived, digitized, or processor-derived envelope or amplitude channel corresponding to electromyography activity. **IMU context** refers to acceleration, gyroscope, jerk, movement intensity, impact, stability, stillness, or related motion information derived from an inertial measurement unit. A **trustworthiness state** refers to a classification, score, flag, label, or other output used to modify downstream interpretation of electromyography-derived metrics. These definitions are non-limiting; alternative terms with equivalent meanings may be used.
+
+---
+
+## 4. SUMMARY OF THE INVENTION
 
 The present invention introduces a **reliability-gated framework for wearable EMG analysis**, in which EMG-derived metrics are conditioned on validated signal quality.
 
@@ -71,7 +77,7 @@ In some embodiments, the system derives a software envelope from the raw EMG sig
 
 ---
 
-## 4. SYSTEM ARCHITECTURE
+## 5. SYSTEM ARCHITECTURE
 
 In one embodiment, the system comprises:
 
@@ -83,7 +89,7 @@ In one embodiment, the system comprises:
 - a data communication interface, wired or wireless;
 - a host or mobile device for analysis, display, alerting, or storage.
 
-### 4.1 Functional Components
+### 5.1 Functional Components
 
 Functional components may include:
 
@@ -97,7 +103,7 @@ Functional components may include:
 8. output modulation module for downstream interpretation;
 9. alert or feedback module.
 
-### 4.2 Representative Hardware Embodiment
+### 5.2 Representative Hardware Embodiment
 
 A representative embodiment may include:
 
@@ -122,9 +128,9 @@ The invention is not limited to these components. Other EMG sensors, analog fron
 
 ---
 
-## 5. DATA STREAMS
+## 6. DATA STREAMS
 
-### 5.1 Raw EMG Stream
+### 6.1 Raw EMG Stream
 
 The raw EMG stream may be sampled at a relatively high rate suitable for spectral analysis, for example:
 
@@ -145,7 +151,7 @@ The raw EMG stream may be used to compute:
 - software envelope;
 - fatigue or activation metrics.
 
-### 5.2 Hardware Envelope Stream
+### 6.2 Hardware Envelope Stream
 
 The hardware envelope stream may be produced by an analog rectifier/low-pass circuit, a sensor module, or an embedded processor. It may have a lower bandwidth than the raw EMG signal.
 
@@ -159,7 +165,7 @@ The hardware envelope stream may be used to compute:
 - envelope-to-raw ratio;
 - envelope consistency over time.
 
-### 5.3 IMU Stream
+### 6.3 IMU Stream
 
 The IMU stream may include:
 
@@ -184,7 +190,7 @@ The IMU stream provides an independent motion-context channel. It may be used fo
 
 ---
 
-## 6. RAW-DERIVED ENVELOPE AND FEATURE COMPUTATION
+## 7. RAW-DERIVED ENVELOPE AND FEATURE COMPUTATION
 
 In some embodiments, the system computes a software-derived envelope from RAW EMG by:
 
@@ -232,7 +238,7 @@ The software-derived envelope and raw-derived features are compared to the hardw
 
 ---
 
-## 7. SIGNAL-QUALITY METRICS
+## 8. SIGNAL-QUALITY METRICS
 
 Signal quality is evaluated using one or more metrics, including:
 
@@ -246,7 +252,7 @@ Signal quality is evaluated using one or more metrics, including:
 - IMU-derived motion intensity or transient events;
 - session continuity indicators based on timestamps or sequence data.
 
-### 7.1 Amplitude Ratio
+### 8.1 Amplitude Ratio
 
 ```text
 raw_env_ratio = raw_rms / env_mean
@@ -265,7 +271,7 @@ Uses include:
 - detecting mismatch between raw and envelope behavior;
 - detecting periods where envelope is no longer a reliable contact proxy.
 
-### 7.2 Correlation
+### 8.2 Correlation
 
 ```text
 corr(raw_rms, env_mean)
@@ -281,7 +287,7 @@ Uses include:
 
 A very high raw-to-envelope correlation combined with very low raw variance may indicate that the raw channel is not measuring independent muscle activity but is instead tracking the envelope or another analog channel.
 
-### 7.3 Saturation Count
+### 8.3 Saturation Count
 
 ```text
 n_env_saturated = count(env_hw >= saturation_threshold)
@@ -296,7 +302,7 @@ Uses include:
 - reducing confidence in envelope-derived contact or activation metrics;
 - flagging sessions where envelope data cannot be used as a reliable quality proxy.
 
-### 7.4 Raw Flatline Detection
+### 8.4 Raw Flatline Detection
 
 ```text
 raw_variance < flatline_threshold
@@ -317,7 +323,7 @@ Uses include:
 - detecting post-filter flatline;
 - detecting dead channels.
 
-### 7.5 Raw Variance / Dynamic Range
+### 8.5 Raw Variance / Dynamic Range
 
 ```text
 raw_sd = standard_deviation(raw within window)
@@ -330,7 +336,7 @@ Uses include:
 - detecting contact failure;
 - detecting insufficient signal amplitude.
 
-### 7.6 Contact Quality Score
+### 8.6 Contact Quality Score
 
 A relative contact quality score may be computed:
 
@@ -353,7 +359,7 @@ Uses include:
 
 ---
 
-## 8. FAILURE MODE IDENTIFICATION
+## 9. FAILURE MODE IDENTIFICATION
 
 The system identifies signal-quality states or failure modes, including:
 
@@ -371,7 +377,7 @@ The classification may be assigned to a sample window, movement event, swing, re
 
 ---
 
-## 9. IMU-CONDITIONED VALIDITY LOGIC
+## 10. IMU-CONDITIONED VALIDITY LOGIC
 
 IMU measurements provide independent context for interpreting EMG features.
 
@@ -385,7 +391,7 @@ In some embodiments:
 
 The IMU is used as a context channel rather than merely as a fused feature for classification.
 
-### 9.1 Diagnostic Matrix
+### 10.1 Diagnostic Matrix
 
 | IMU / Session Context | EMG Observation | Likely Interpretation | System Action |
 |---|---|---|---|
@@ -397,7 +403,7 @@ The IMU is used as a context channel rather than merely as a fused feature for c
 | BLE/session discontinuity | EMG baseline shift across segments | Cross-session artifact | Analyze segments separately |
 | Stable IMU but RAW/ENV mismatch | Sensor/contact artifact | Warn user or reduce confidence |
 
-### 9.2 Movement Stability Test
+### 10.2 Movement Stability Test
 
 Movement intensity may be represented by:
 
@@ -419,7 +425,7 @@ slope(imu_intensity vs time)
 
 If EMG changes while IMU intensity remains stable, the EMG change is less likely to be caused by reduced gross movement intensity.
 
-### 9.3 High-Motion Artifact Detection
+### 10.3 High-Motion Artifact Detection
 
 The system may identify a high artifact-risk window when:
 
@@ -435,7 +441,7 @@ or when an EMG outlier occurs near an IMU impact or shock event.
 
 ---
 
-## 10. BASELINE SELECTION AND FATIGUE GATING
+## 11. BASELINE SELECTION AND FATIGUE GATING
 
 The system establishes EMG baseline values only from signals satisfying quality constraints.
 
@@ -453,7 +459,7 @@ The system may delay baseline initialization until sufficient high-quality segme
 
 Downstream fatigue interpretation is gated based on signal validity.
 
-### 10.1 Representative Baseline Selection Method
+### 11.1 Representative Baseline Selection Method
 
 A representative baseline selection method comprises:
 
@@ -491,27 +497,27 @@ This prevents poor contact or noise-dominated early windows from corrupting down
 
 ---
 
-## 11. QUALITY-GATED FATIGUE OR ACTIVATION MONITORING
+## 12. QUALITY-GATED FATIGUE OR ACTIVATION MONITORING
 
 Once signal quality is assessed, downstream metrics may be modified.
 
-### 11.1 Accept
+### 12.1 Accept
 
 If RAW/ENV consistency is acceptable, IMU context is stable, and no artifacts are detected, the system accepts EMG-derived features.
 
-### 11.2 Delay
+### 12.2 Delay
 
 If contact quality indicates settling, the system delays baseline initialization or fatigue monitoring.
 
-### 11.3 Reject
+### 12.3 Reject
 
 If raw flatline, high saturation, ghost-channel coupling, or severe motion artifact is detected, the system rejects affected windows.
 
-### 11.4 Down-Weight
+### 12.4 Down-Weight
 
 If quality is marginal, the system down-weights the window in trend estimation.
 
-### 11.5 Annotate
+### 12.5 Annotate
 
 The system can output a confidence score or artifact label, such as:
 
@@ -539,7 +545,7 @@ confidence = w1 * (1 - pct_env_saturated)
 
 where weights w1–w5 sum to 1.0 and may be set equal (0.2 each) or tuned per application. A confidence score below 0.5 may suppress fatigue output; below 0.3 may reject the window entirely. These thresholds are examples and may be adapted.
 
-### 11.6 Alert
+### 12.6 Alert
 
 In real-time systems, the system may alert the user:
 
@@ -552,7 +558,7 @@ In real-time systems, the system may alert the user:
 
 ---
 
-## 12. SESSION CONTINUITY MANAGEMENT
+## 13. SESSION CONTINUITY MANAGEMENT
 
 In wireless or segmented recording systems, interruptions may occur.
 
@@ -567,9 +573,9 @@ In some embodiments, the system reconstructs an absolute or common timebase from
 
 ---
 
-## 13. EXEMPLARY EMBODIMENTS
+## 14. EXEMPLARY EMBODIMENTS
 
-### 13.1 RAW/ENV Consistency Validation
+### 14.1 RAW/ENV Consistency Validation
 
 A raw-derived envelope is compared against hardware ENV to detect:
 
@@ -593,7 +599,7 @@ Example outcomes from project data:
 | log0305 | 1.4% | 0% | Reliable primary session |
 | log0303 | 14.2% | 0% | High ENV saturation; reduced confidence |
 
-### 13.2 Electrode Settling Detection
+### 14.2 Electrode Settling Detection
 
 Early low-frequency EMG or low-amplitude EMG that later recovers under stable IMU motion is interpreted as contact settling rather than fatigue.
 
@@ -604,11 +610,11 @@ The system can identify settling when:
 - IMU swing intensity remains stable or does not explain the EMG anomaly;
 - EMG features recover later.
 
-### 13.3 Motion Artifact Detection
+### 14.3 Motion Artifact Detection
 
 EMG outliers coinciding with IMU shocks, high acceleration, high jerk, or high gyroscope magnitude are classified as motion artifacts and may be rejected or down-weighted.
 
-### 13.4 Ghost Signal Detection
+### 14.4 Ghost Signal Detection
 
 A RAW channel exhibiting:
 
@@ -629,19 +635,21 @@ and filtered_raw_rms < flatline_threshold:
 
 In one embodiment, `high_corr_threshold` = 0.95 (Pearson r), `low_variance_threshold` = 1% of expected active EMG variance, and `filtered_raw_rms` below 2% of session p90_rms after bandpass filtering. An experimentally observed ghost-channel failure showed r = 0.998 and near-zero variance; after hardware repair (solder bypass of failed pogo-pin routing), correlation dropped to r = −0.013.
 
-### 13.5 Session Gap Artifact
+### 14.5 Session Gap Artifact
 
 Signals across long recording gaps are analyzed as separate sessions to prevent false fatigue trends. If a BLE reconnection or session discontinuity is detected, the system avoids comparing baseline and final features across the gap as though they were continuous physiological data.
 
 In one embodiment, a gap exceeding 60 seconds in the reconstructed absolute timestamp (`abs_us`) timeline is classified as a session discontinuity requiring segment-isolated analysis. In an experimental example, a 66-minute BLE reconnection gap produced an apparent full-session MDF drop of 28.7% when analyzed naively; segment-isolated analysis of the first continuous segment alone showed a 4.9% change, preventing a false fatigue conclusion.
 
-### 13.6 IMU-Conditioned Interpretation
+Session discontinuities may include BLE reconnection gaps, wired transport interruptions, file-boundary discontinuities, timestamp resets, device resets, dropped-packet intervals, upload gaps, clock-reconstruction boundaries, or any other discontinuity that may affect the interpretation of longitudinal EMG metrics across time.
+
+### 14.6 IMU-Conditioned Interpretation
 
 If IMU peak gyroscope magnitude remains stable over a session while EMG median frequency declines after contact quality stabilizes, the decline may be accepted as fatigue-consistent. If IMU intensity declines, the EMG change is annotated as movement-confounded.
 
 ---
 
-## 14. OUTPUT AND ACTIONS
+## 15. OUTPUT AND ACTIONS
 
 Based on signal validity, the system may:
 
@@ -658,7 +666,7 @@ Based on signal validity, the system may:
 
 ---
 
-## 15. ADVANTAGES
+## 16. ADVANTAGES
 
 The invention provides:
 
@@ -672,7 +680,7 @@ The invention provides:
 - compatibility with low-cost wearable systems;
 - applicability across multiple domains.
 
-### 15.1 Compared with Raw EMG Alone
+### 16.1 Compared with Raw EMG Alone
 
 Raw EMG alone cannot easily distinguish:
 
@@ -684,21 +692,21 @@ Raw EMG alone cannot easily distinguish:
 
 The proposed system uses hardware envelope and IMU context to disambiguate these cases.
 
-### 15.2 Compared with Hardware Envelope Alone
+### 16.2 Compared with Hardware Envelope Alone
 
 Hardware envelope alone lacks spectral information needed for many fatigue biomarkers. It can also saturate or obscure high-frequency raw EMG behavior. The proposed system uses envelope as a quality/context channel while preserving raw EMG for detailed analysis.
 
-### 15.3 Compared with Generic EMG+IMU Fusion
+### 16.3 Compared with Generic EMG+IMU Fusion
 
 Many EMG+IMU systems fuse both modalities as feature sources for activity or fatigue classification. The proposed system uses IMU as an independent validity channel to determine when EMG features are trustworthy.
 
-### 15.4 Compared with Fixed Warmup
+### 16.4 Compared with Fixed Warmup
 
 Fixed warmup intervals may fail when electrode settling duration varies. The proposed system can delay baseline selection until quality metrics indicate adequate signal validity.
 
 ---
 
-## 16. VARIATIONS AND APPLICATIONS
+## 17. VARIATIONS AND APPLICATIONS
 
 The invention may be applied to:
 
@@ -723,7 +731,7 @@ Potential commercial or application areas include:
 
 ---
 
-## 17. CLAIM CONCEPTS (NON-LIMITING)
+## 18. CLAIM CONCEPTS (NON-LIMITING)
 
 These are technical brainstorming drafts, not attorney-reviewed legal claims. Three independent concepts (C1–C3) and fifteen dependent concepts (C4–C18) are included to support broad claim coverage.
 
@@ -734,7 +742,7 @@ These are technical brainstorming drafts, not attorney-reviewed legal claims. Th
 A method comprising:
 
 1. receiving, by one or more processors, raw electromyography samples from a wearable electromyography sensor;
-2. receiving hardware envelope samples acquired simultaneously from the same wearable electromyography sensor;
+2. receiving hardware envelope samples acquired concurrently with, time-aligned with, or corresponding to a common monitoring interval as the raw electromyography samples, from the same wearable electromyography sensor, the same electrode pair, an associated acquisition path, or a sensor monitoring a common muscle region;
 3. receiving inertial measurement samples from a wearable inertial sensor;
 4. computing a raw-derived amplitude or envelope feature from the raw electromyography samples;
 5. generating one or more signal-quality metrics by comparing the raw-derived amplitude or envelope feature with the hardware envelope samples;
@@ -748,7 +756,7 @@ A method comprising:
 
 A wearable sensing system comprising:
 
-- an electromyography sensor configured to output raw electromyography data and hardware envelope data simultaneously;
+- an electromyography sensor configured to output raw electromyography data and hardware envelope data concurrently, time-aligned, or corresponding to common monitoring intervals;
 - an inertial measurement unit configured to output motion data; and
 - one or more processors configured to:
   - derive a raw-based amplitude or envelope feature from the raw electromyography data;
@@ -869,7 +877,7 @@ The method of C1, wherein the electromyography-derived fatigue or activation met
 
 ---
 
-## 18. DEPENDENT CLAIM FEATURE NOTES
+## 19. DEPENDENT CLAIM FEATURE NOTES
 
 The dependent concepts above (C4–C18) cover the following feature areas for attorney claim drafting:
 
@@ -893,76 +901,678 @@ The dependent concepts above (C4–C18) cover the following feature areas for at
 
 ---
 
-## 19. FIGURES
-
-Figures are drafted in `patent/06_figures/`. Each file contains ASCII diagrams, caption, and patent notes.
+## 20. FIGURES
 
 ### Figure 1 — System Architecture
-**File:** `patent/06_figures/fig1_system_architecture.md`
 
-Shows wearable sensor unit (EMG RAW + ENV outputs, IMU), microcontroller, BLE/wired link, and host/mobile processing unit. The host runs the signal quality evaluator (RAW + ENV + IMU + session timeline → trustworthiness classifier) feeding into the quality-gated EMG analytics layer.
+## Purpose
+Shows that the invention includes both hardware acquisition and host/mobile software decision logic. Establishes the three input channels (RAW, ENV, IMU) and the processing pipeline leading to gated EMG output.
 
-```
-EMG Sensor (RAW + ENV) ─┐
-                         ├──► MCU ──► BLE/Wired ──► Signal Quality Evaluator ──► Gated EMG Analytics
-IMU ────────────────────┘
-```
-
-### Figure 2 — Overall Method Flow
-**File:** `patent/06_figures/fig2_method_flow.md`
-
-Step-by-step flowchart: acquire → preprocess RAW → compute RAW features → compute signal-quality metrics → determine IMU context → audit session continuity → classify trustworthiness (9 states) → modify downstream interpretation (8 actions) → output.
+## Diagram
 
 ```
-Acquire RAW, ENV, IMU, session state
-        ↓
-Preprocess RAW EMG
-        ↓
-Compute RAW-derived RMS, envelope, MDF, MNF
-        ↓
-Compute signal-quality metrics (RAW/ENV ratio, correlation, variance, contact quality)
-        ↓
-Determine IMU motion context
-        ↓
-Audit session continuity
-        ↓
-Classify signal trustworthiness
-        ↓
-Accept / reject / delay / down-weight / segment / suppress / annotate EMG interpretation
-        ↓
-Output: fatigue metrics + confidence score + failure flags
+┌─────────────────────────────────────────────────────────────────┐
+│                    WEARABLE SENSOR UNIT                         │
+│                                                                 │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐  │
+│  │     EMG SENSOR           │    │     IMU SENSOR           │  │
+│  │  (e.g., MyoWare 2.0)     │    │  (e.g., LSM6DS3)         │  │
+│  │                          │    │                          │  │
+│  │  RAW output ─────────────┼────┼──► RAW channel (2 kHz)   │  │
+│  │  ENV output ─────────────┼────┼──► ENV channel (2 kHz)   │  │
+│  │                          │    │  Accel + Gyro (200 Hz) ◄─┼──┤
+│  └──────────────────────────┘    └──────────────────────────┘  │
+│                                                                 │
+│              ┌──────────────────────────────────┐              │
+│              │   MICROCONTROLLER / MCU           │              │
+│              │   - DMA ADC sampling              │              │
+│              │   - Per-sample timestamping       │              │
+│              │   - BLE TLV packetization         │              │
+│              │   - Session continuity tracking   │              │
+│              └──────────────┬───────────────────┘              │
+└─────────────────────────────┼───────────────────────────────────┘
+                              │  BLE / Wired Link
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              HOST / MOBILE PROCESSING UNIT                      │
+│                                                                 │
+│   RAW EMG ──────────────────────────────────────────────────┐  │
+│                                                             │  │
+│   ENV ──────────────────────────────────────────────────┐   │  │
+│                                                         │   │  │
+│   IMU ──────────────────────────────────────────────┐   │   │  │
+│                                                     │   │   │  │
+│   Session Timeline ─────────────────────────────┐   │   │   │  │
+│                                                 │   │   │   │  │
+│                    ┌────────────────────────────▼───▼───▼───▼─┐│
+│                    │     SIGNAL QUALITY EVALUATOR              ││
+│                    │                                           ││
+│                    │  1. RAW preprocessing                     ││
+│                    │  2. RAW-derived envelope computation      ││
+│                    │  3. RAW/ENV consistency check             ││
+│                    │  4. IMU motion context analysis           ││
+│                    │  5. Session continuity audit              ││
+│                    │  6. Signal trustworthiness classification ││
+│                    └───────────────────┬───────────────────────┘│
+│                                        │                        │
+│                    ┌───────────────────▼───────────────────────┐│
+│                    │     QUALITY-GATED EMG ANALYTICS            ││
+│                    │                                           ││
+│                    │  - Baseline selection                     ││
+│                    │  - MDF / MNF / RMS computation            ││
+│                    │  - Fatigue / activation interpretation    ││
+│                    │  - Confidence score / user alert          ││
+│                    └───────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Figure 3 — RAW/ENV Consistency Validation
-**File:** `patent/06_figures/fig3_raw_env_consistency.md`
+## Caption
 
-Five-case diagnostic table (Normal, Settling, ENV Saturation, RAW Flatline/Ghost, Contact Loss) with RAW/ENV ratio timeline and scatter diagrams. Shows distinct cluster signatures for each failure mode in the RAW/ENV feature space.
+**Figure 1.** System architecture showing dual-output EMG sensor (RAW and ENV channels), IMU sensor, and microcontroller on the wearable unit, connected via BLE or wired link to a host or mobile processing unit. The host runs the signal quality evaluator, which combines RAW, ENV, IMU, and session-timeline inputs to classify trustworthiness before passing data to the quality-gated EMG analytics layer.
 
-### Figure 4 — IMU-Conditioned EMG Validity Matrix
-**File:** `patent/06_figures/fig4_imu_decision_matrix.md`
+## Notes for Patent
 
-Decision matrix mapping IMU/session context × EMG observation to interpretation and action. Includes schematic MDF timeline for log0305 showing stable IMU across all three phases (settling / stable / fatigue-consistent). Contrast diagram: conventional EMG/IMU feature fusion vs. this invention's use of IMU as an independent validity context channel.
-
-### Figure 5 — Quality-Gated Baseline Selection
-**File:** `patent/06_figures/fig5_baseline_gating.md`
-
-Six-condition baseline gate flowchart. Empirical warmup-skip sensitivity diagram: baselines at 10 / 15 / 20 min yield MDF results of −2.6% / −26.2% / +28.1%, demonstrating that baseline quality determines fatigue interpretation. Schematic showing how a settling-contaminated baseline inverts apparent fatigue direction.
-
-### Figure 6 — Session Continuity Audit
-**File:** `patent/06_figures/fig6_session_gap_audit.md`
-
-log0303 session timeline showing 66-minute BLE gap between Segment 1 (13.5 min, 111 swings) and Segment 2. Naive analysis: 28.7% apparent MDF drop (artifact). Continuity-aware analysis: Segment 1 alone shows 4.9% (no meaningful fatigue). Continuity audit logic flowchart with segment-ID assignment.
-
-### Figure 7 — Ghost Signal / Hardware Failure Diagnostic
-**File:** `patent/06_figures/fig7_ghost_signal_diagnostic.md`
-
-Three-part diagnostic signature: near-zero RAW variance, RAW/ENV Pearson r ≈ 1.0, post-filter RAW flatline. Before/after repair comparison: r = 0.998 (pogo-pin failure) → r = −0.013 (after solder bypass). Three-condition detection flowchart.
+- The processing split between MCU and host is not limiting — all logic may run on-device, on a mobile phone, or in the cloud.
+- The RAW and ENV channels originate from the same EMG sensor, providing paired signals for consistency checking.
+- IMU is an independent sensor used as a validity context channel, not as a feature-fusion input to fatigue classification.
 
 ---
 
-## 20. EXPERIMENTAL SUPPORT TO INCLUDE
+### Figure 2 — Overall Method Flow
 
-### 20.1 log0305
+## Purpose
+Defines the core method and makes the trustworthiness gate explicit as an ordered sequence of steps. Supports the independent method claim concept.
+
+## Diagram
+
+```
+        ┌─────────────────────────────────────────────┐
+        │  ACQUIRE simultaneously:                    │
+        │    • RAW EMG samples (high rate, e.g. 2 kHz)│
+        │    • ENV samples (hardware envelope)        │
+        │    • IMU samples (accel + gyro, e.g. 200 Hz)│
+        │    • Session timestamp / connection state   │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  PREPROCESS RAW EMG                         │
+        │    • DC removal                             │
+        │    • Bandpass filtering (e.g. 20–450 Hz)    │
+        │    • Artifact blanking (optional)           │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  COMPUTE RAW-DERIVED FEATURES               │
+        │    • RMS amplitude                          │
+        │    • Software envelope (rectify + LPF)      │
+        │    • Spectral features: MDF, MNF            │
+        │    • RAW variance                           │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  COMPUTE SIGNAL-QUALITY METRICS             │
+        │    • RAW/ENV ratio                          │
+        │    • RAW/ENV correlation                    │
+        │    • ENV saturation count / %               │
+        │    • RAW variance (flatline detection)      │
+        │    • Contact quality = RMS / session_p90    │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  DETERMINE IMU MOTION CONTEXT               │
+        │    • Swing / activity intensity             │
+        │    • Transient shock or vibration           │
+        │    • Trend: stable / declining / absent     │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  AUDIT SESSION CONTINUITY                   │
+        │    • Detect BLE gaps / device resets        │
+        │    • Assign segment IDs                     │
+        │    • Flag cross-gap comparisons             │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  CLASSIFY SIGNAL TRUSTWORTHINESS            │
+        │                                             │
+        │  ┌──────────────────────────────────────┐  │
+        │  │  VALID_EMG                           │  │
+        │  │  ELECTRODE_SETTLING                  │  │
+        │  │  LOW_SNR / CONTACT_LOSS              │  │
+        │  │  ENV_SATURATION                      │  │
+        │  │  RAW_FLATLINE                        │  │
+        │  │  GHOST_CHANNEL_COUPLING              │  │
+        │  │  MOTION_ARTIFACT                     │  │
+        │  │  REDUCED_MOTION_CONFOUND             │  │
+        │  │  SESSION_GAP_CONFOUND                │  │
+        │  └──────────────────────────────────────┘  │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  MODIFY DOWNSTREAM EMG INTERPRETATION       │
+        │                                             │
+        │  ┌──────────────────────────────────────┐  │
+        │  │  ACCEPT segment for analysis         │  │
+        │  │  REJECT segment                      │  │
+        │  │  DELAY_BASELINE initialization       │  │
+        │  │  DOWN_WEIGHT unreliable window       │  │
+        │  │  SEGMENT_SEPARATELY across gap       │  │
+        │  │  SUPPRESS_FATIGUE_OUTPUT             │  │
+        │  │  SHOW_CONFIDENCE_WARNING             │  │
+        │  │  PROMPT_ELECTRODE_ADJUSTMENT         │  │
+        │  └──────────────────────────────────────┘  │
+        └─────────────────────┬───────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  OUTPUT                                     │
+        │    • Fatigue / activation metrics           │
+        │    • Confidence score                       │
+        │    • Failure flags / artifact labels        │
+        │    • User feedback / alerts                 │
+        └─────────────────────────────────────────────┘
+```
+
+## Caption
+
+**Figure 2.** Overall method flow for reliability-gated wearable EMG monitoring. RAW EMG, hardware ENV, IMU, and session-timeline data are acquired simultaneously. After preprocessing and feature computation, signal-quality metrics and IMU motion context are combined with session continuity state to classify signal trustworthiness. The trustworthiness classification then modifies downstream EMG interpretation by accepting, rejecting, delaying, down-weighting, segmenting, suppressing, or annotating fatigue and activation metrics.
+
+## Notes for Patent
+
+- Every step in this flow corresponds to a method claim element.
+- The classification step (states) and action step (actions) are the core of the invention — signal quality is not merely detected but actively used to modify physiological interpretation.
+- The flow is implementable in real time on embedded hardware, on a mobile device, or offline during post-processing.
+
+---
+
+### Figure 3 — RAW/ENV Consistency Validation
+
+## Purpose
+Supports the RAW/ENV comparison novelty — the use of hardware ENV as a signal-quality channel, not as the primary EMG signal. Shows the five diagnostic cases that distinguish valid EMG from failure modes.
+
+## Diagram A — Case Table
+
+```
+┌─────────────────┬──────────────────────┬──────────────────────┬──────────────────────┬─────────────────────────────┬─────────────────────────────┐
+│      CASE       │    RAW BEHAVIOR      │    ENV BEHAVIOR      │  RAW/ENV CORRELATION │      INTERPRETATION         │           ACTION            │
+├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ Normal /        │ Oscillating AC       │ Smooth, tracks       │ Moderate positive    │ Valid EMG — hardware and    │ ACCEPT window               │
+│ Valid EMG       │ waveform, adequate   │ RAW amplitude        │ (expected coupling)  │ signal path consistent      │                             │
+│                 │ variance             │ appropriately        │                      │                             │                             │
+├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ Electrode       │ Low amplitude,       │ Low or recovering    │ Moderate             │ Electrode-skin interface    │ DELAY_BASELINE;             │
+│ Settling        │ gradually rising     │ amplitude            │                      │ not yet hydrated / stable;  │ annotate as settling        │
+│                 │ over 15–20 min       │                      │                      │ SNR improving               │                             │
+├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ Hardware ENV    │ High amplitude or    │ Clipped / flat at    │ Decoupled: RAW       │ ENV hardware circuit is     │ FLAG ENV saturation;        │
+│ Saturation      │ normal oscillation   │ maximum rail         │ varies, ENV does not │ saturated; ENV no longer    │ reduce ENV trust;           │
+│                 │                      │                      │                      │ tracks RAW faithfully       │ rely on RAW-derived only    │
+├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ RAW Channel     │ Near-zero variance;  │ Normal or changing   │ Very high (RAW       │ RAW input floating or       │ REJECT RAW-derived metrics; │
+│ Flatline /      │ flat after bandpass  │ amplitude            │ passively tracks     │ short-circuited; RAW signal │ FLAG hardware failure;      │
+│ Ghost Signal    │ filtering            │                      │ ENV through coupling)│ contains no muscle content  │ PROMPT_ELECTRODE_ADJUSTMENT │
+├─────────────────┼──────────────────────┼──────────────────────┼──────────────────────┼─────────────────────────────┼─────────────────────────────┤
+│ Contact Loss /  │ Low amplitude,       │ Low amplitude,       │ Variable             │ Poor electrode-skin         │ DOWN_WEIGHT or REJECT;      │
+│ Low SNR         │ noise-dominated      │ noise-dominated      │                      │ contact; low SNR            │ SHOW_CONFIDENCE_WARNING     │
+└─────────────────┴──────────────────────┴──────────────────────┴──────────────────────┴─────────────────────────────┴─────────────────────────────┘
+```
+
+## Diagram B — RAW/ENV Ratio Over Time (Schematic)
+
+```
+RAW/ENV
+ratio
+  │
+  │    Normal band
+  │  ┌──────────────────────────────────────────────────────┐
+1.0 ─┤                                                      │
+  │  │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~│── ACCEPT
+  │  └──────────────────────────────────────────────────────┘
+  │
+  │  ENV saturation region (ratio > threshold)
+  │  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ── FLAG ENV
+  │
+0.0 ─┤  Ghost signal / flatline region (ratio ≈ 0 or abnormal)
+  │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ── REJECT
+  │
+  └──────────────────────────────────────────────────────────► time
+     t=0          Settling zone         Post-settling
+```
+
+## Diagram C — RAW/ENV Scatter (Schematic)
+
+```
+ENV
+amplitude
+  │
+  │                              ● ● ●
+  │                         ● ● ●          ← Normal: ENV tracks RAW
+  │                    ● ● ●                  (moderate correlation)
+  │               ● ●
+  │          ● ●
+  │     ● ●
+  │
+  │  ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■               ← Ghost signal: ENV varies,
+  │                                            RAW near-zero (vertical cluster)
+  │
+  │        ▲ ▲ ▲ ▲ ▲ ▲ ▲ ▲ ▲               ← ENV saturation: ENV flat,
+  │ ───────────────────────────               RAW varies (horizontal cluster)
+  │
+  └──────────────────────────────────────► RAW amplitude
+```
+
+## Caption
+
+**Figure 3.** RAW/ENV consistency validation. (A) Case table showing five diagnostic scenarios and the corresponding actions taken by the system. (B) Schematic RAW/ENV ratio over time, with normal, saturation, and ghost-signal regions indicated. (C) Schematic RAW/ENV amplitude scatter, illustrating distinct cluster signatures for normal operation, ghost-channel coupling, and ENV saturation.
+
+## Notes for Patent
+
+- Diagram B and C show that each failure mode has a geometrically distinct signature in the RAW/ENV feature space — this is the basis for the classification step.
+- The ghost-signal case (very high RAW/ENV correlation + near-zero RAW variance) was confirmed empirically with Pearson r = 0.998 before hardware repair, dropping to r = −0.013 after solder bypass (log0303 pogo-pin failure).
+- ENV saturation was observed at 14.2% of windows in log0303 vs. 1.4% in log0305.
+
+---
+
+### Figure 4 — IMU-Conditioned EMG Validity Matrix
+
+## Purpose
+Distinguishes this invention from generic EMG/IMU feature fusion. The IMU is used as an independent validity context channel — its role is to determine whether an observed EMG change is physiologically meaningful or explained by a non-physiological cause (reduced effort, motion artifact, session discontinuity).
+
+## Diagram A — Decision Matrix
+
+```
+┌───────────────────────────────┬────────────────────────────┬──────────────────────────────────┬─────────────────────────────────┐
+│   IMU / SESSION CONTEXT       │   EMG OBSERVATION          │       INTERPRETATION             │         ACTION                  │
+├───────────────────────────────┼────────────────────────────┼──────────────────────────────────┼─────────────────────────────────┤
+│ Stable movement intensity     │ Early low MDF/MNF,         │ Electrode settling — interface   │ DELAY_BASELINE;                 │
+│ (consistent swing kinematics) │ gradually recovering       │ not yet stable; not physiological│ annotate settling period        │
+│                               │ over 15–20 min             │                                  │                                 │
+├───────────────────────────────┼────────────────────────────┼──────────────────────────────────┼─────────────────────────────────┤
+│ Stable movement intensity     │ Gradual MDF/MNF decline    │ Fatigue-consistent change —      │ ACCEPT;                         │
+│ (consistent swing kinematics) │ after post-settling        │ spectral shift not explained by  │ report as fatigue-consistent    │
+│                               │ baseline                   │ reduced effort or contact change │                                 │
+├───────────────────────────────┼────────────────────────────┼──────────────────────────────────┼─────────────────────────────────┤
+│ Declining movement intensity  │ MDF/MNF decline            │ Reduced-effort confound —        │ DOWN_WEIGHT or                  │
+│ (lower swing magnitude        │                            │ spectral shift may reflect lower │ SUPPRESS_FATIGUE_OUTPUT;        │
+│  over time)                   │                            │ activation, not true fatigue     │ annotate effort confound        │
+├───────────────────────────────┼────────────────────────────┼──────────────────────────────────┼─────────────────────────────────┤
+│ Transient high shock or       │ Isolated EMG amplitude     │ Motion artifact — transient      │ DOWN_WEIGHT or REJECT           │
+│ vibration event               │ spike or dropout           │ mechanical coupling to electrode │ affected window(s)              │
+├───────────────────────────────┼────────────────────────────┼──────────────────────────────────┼─────────────────────────────────┤
+│ Session discontinuity         │ Baseline shift or apparent │ Cross-segment artifact — gap     │ SEGMENT_SEPARATELY;             │
+│ (BLE gap / device reset)      │ MDF drop across gap        │ changes electrode contact state  │ SUPPRESS cross-gap fatigue      │
+│                               │                            │ independently of fatigue         │ comparison                      │
+└───────────────────────────────┴────────────────────────────┴──────────────────────────────────┴─────────────────────────────────┘
+```
+
+## Diagram B — IMU as Validity Channel (Schematic Timeline)
+
+```
+time →    0        10       20       30       40       50       60 min
+          │        │        │        │        │        │        │
+IMU       ├────────┼────────┼────────┼────────┼────────┼────────┤
+intensity │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+(stable)  │         (Pearson r = +0.01 vs time in log0305)      │
+          │
+MDF       ├────────┼────────┼────────┼────────┼────────┼────────┤
+          │ /‾‾‾\   ↑settling ends                    \         │
+          │/      \_____________________________stable  \───     │
+          │                                              fatigue │
+          │   Phase I      Phase II (stable)        Phase III    │
+          │  (settling)                              (fatigue)   │
+          │
+IMU       │  IMU stable throughout all three phases
+context:  │  → Phase I low MDF = settling, not effort reduction
+          │  → Phase III MDF decline = fatigue-consistent
+```
+
+## Diagram C — Contrast: IMU Context vs IMU Feature Fusion
+
+```
+CONVENTIONAL EMG/IMU FUSION          THIS INVENTION
+─────────────────────────────        ─────────────────────────────────────
+EMG features  ─────┐                 RAW EMG features  ─────┐
+                   ├──► classifier   ENV quality metrics ────┤
+IMU features  ─────┘    (activity /  IMU context        ─────┤──► trustworthiness
+                         fatigue)                            │    classifier
+                                     Session continuity ─────┘
+                                              │
+                                              ▼
+                                     Gate / modify fatigue output
+                                     (not: fuse into single feature vector)
+```
+
+## Caption
+
+**Figure 4.** IMU-conditioned EMG validity matrix. (A) Decision matrix mapping IMU/session context and EMG observation to interpretation and action. (B) Schematic timeline showing stable IMU intensity across all three phases of a 63-minute tennis session (log0305), supporting the interpretation that Phase I MDF suppression is electrode settling and Phase III MDF decline is fatigue-consistent. (C) Contrast between conventional EMG/IMU feature fusion and this invention's use of IMU as an independent validity context channel.
+
+## Notes for Patent
+
+- The IMU in this invention is not fused with EMG features to improve classification accuracy. Its role is orthogonal: it determines whether the EMG observation is interpretable as physiology, given the movement context.
+- In log0305, IMU swing-intensity Pearson r = +0.029, p = 0.468 across 626 swings — confirming stable biomechanics throughout the session. This is the empirical basis for the "stable IMU → settling / fatigue-consistent" interpretation.
+- The session-gap case (log0303) showed full-session apparent MDF drop of 28.7% vs. first-segment-only 4.9%.
+
+---
+
+### Figure 5 — Quality-Gated Baseline Selection
+
+## Purpose
+Supports the baseline-gating embodiment (Family B). Shows that baseline windows are accepted only when all quality conditions are satisfied — preventing settling-contaminated baselines that would invert or distort fatigue metrics.
+
+## Diagram A — Baseline Selection Flowchart
+
+```
+       ┌─────────────────────────────────────────────────────┐
+       │  CANDIDATE BASELINE WINDOWS                         │
+       │  (e.g., swings or epochs after warmup skip)         │
+       └──────────────────────┬──────────────────────────────┘
+                              │
+                              ▼
+       ┌─────────────────────────────────────────────────────┐
+       │  QUALITY GATE — check all conditions:               │
+       │                                                     │
+       │  1. RAW variance > flatline threshold?          Y/N │
+       │  2. ENV saturation < max threshold?             Y/N │
+       │  3. RAW/ENV ratio within normal band?           Y/N │
+       │  4. Contact quality > minimum threshold?        Y/N │
+       │     (RMS / session_p90_rms > Qmin)                  │
+       │  5. IMU movement context: stable intensity?     Y/N │
+       │  6. No session gap or BLE discontinuity?        Y/N │
+       └──────────┬───────────────────────────┬──────────────┘
+                  │ ALL pass                  │ ANY fail
+                  ▼                           ▼
+       ┌──────────────────────┐    ┌──────────────────────────┐
+       │  ACCEPTED BASELINE   │    │  REJECTED / DEFERRED     │
+       │  POOL                │    │                          │
+       │  (trusted windows)   │    │  - Mark as settling      │
+       └──────────┬───────────┘    │  - Mark as low-SNR       │
+                  │                │  - Mark as motion        │
+                  │                │  - Mark as gap           │
+                  │                └──────────────────────────┘
+                  ▼
+       ┌──────────────────────────────────────────────────────┐
+       │  ROBUST BASELINE ESTIMATION                          │
+       │  (median or percentile MDF/RMS across accepted pool) │
+       └──────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+       ┌──────────────────────────────────────────────────────┐
+       │  FATIGUE METRICS COMPUTED RELATIVE TO TRUSTED        │
+       │  BASELINE ONLY                                       │
+       │  (MDF drop %, MNF drop %, RMS trend)                 │
+       └──────────────────────────────────────────────────────┘
+```
+
+## Diagram B — Warmup-Skip Sensitivity (Empirical Example)
+
+```
+ MDF
+ Hz
+ 200 ─                                         ● baseline (w20, 199 Hz)
+     │
+ 160 ─                      ● baseline (v2, 166 Hz)
+     │
+ 140 ─  ● baseline (w10, 137 Hz)
+     │
+ 110 ─              ● baseline (w15, 112 Hz)   ← lower than w10: mid-transition
+     │
+     │   SETTLING ZONE     │   POST-SETTLING
+     │◄──────────────────► │◄───────────────
+     │
+     └──────┬──────┬───────┬──────────────────► warmup skip (min)
+            10    15      20
+
+ MDF drop result:
+   w10 skip: −2.6%   (false negative — baseline inside settling)
+   w15 skip: −26.2%  (inverted — baseline at mid-transition dip)
+   w20 skip: +28.1%  ✅ (post-settling — true fatigue revealed)
+```
+
+## Diagram C — Effect of Baseline Quality on Fatigue Interpretation
+
+```
+ Without quality-gated baseline:               With quality-gated baseline:
+
+ MDF                                           MDF
+  │  ╲                                          │                    ╲
+  │   ╲  apparent fatigue                       │  settling period    ╲ fatigue
+  │    ╲  (actually: baseline                   │  (rejected from      ╲ (real)
+  │     ╲  in settling zone)                    │   baseline pool)      ╲
+  │      ─────                                  │        ────────────────╲────
+  │                                             │        ↑ trusted baseline
+  └──────────────► time                         └───────────────────────► time
+```
+
+## Caption
+
+**Figure 5.** Quality-gated baseline selection. (A) Flowchart showing six quality checks applied to candidate baseline windows. Only windows passing all checks enter the accepted baseline pool. (B) Empirical warmup-skip sensitivity from log0305: baselines computed at 10, 15, and 20-minute warmup skips yield MDF results of −2.6%, −26.2%, and +28.1% respectively, demonstrating that baseline quality is a first-order determinant of fatigue interpretation. (C) Schematic showing how an unvalidated baseline (inside the settling zone) inverts the apparent fatigue direction.
+
+## Notes for Patent
+
+- The warmup-skip sensitivity numbers (−2.6% at 10 min, −26.2% at 15 min, +28.1% at 20 min) are from log0305 and are the central empirical finding of the CNIB paper.
+- The non-monotone sensitivity (15 min baseline lower than 10 min) demonstrates that a fixed time skip is an unreliable heuristic — a quality-aware adaptive skip is more robust.
+- `contact_quality(t) = RMS(t) / session_p90_rms` is the relative contact-quality metric used as one of the six gate conditions.
+
+---
+
+### Figure 6 — Session Continuity Audit
+
+## Purpose
+Supports the wireless/session discontinuity embodiment (Family C). Shows that treating a multi-segment session as continuous produces a false fatigue conclusion, and that segment-aware analysis gives the correct result.
+
+## Diagram A — Session Timeline with BLE Gap (log0303)
+
+```
+ abs_us timeline →
+
+ t = 0 min                t = 13.5 min                          t = 80 min       t = 87.9 min
+ │                        │                                     │                │
+ ├────────────────────────┤                                     ├────────────────┤
+ │  SEGMENT 1             │         BLE GAP (66 min)            │  SEGMENT 2     │
+ │  (first connection)    │◄───────────────────────────────────►│  (reconnect)   │
+ │  111 swings            │         no data                     │  ~56 swings    │
+ │  Contact state: fresh  │                                     │  Contact: ?    │
+ └────────────────────────┘                                     └────────────────┘
+                           ↑
+                    Reconnect event
+                    (hybrid abs_us
+                     timeline flags gap)
+
+
+ NAIVE ANALYSIS (ignores gap):
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │  Treats all swings as one continuous session                                 │
+ │  Baseline MDF: 210.9 Hz (from early swings in Segment 1)                    │
+ │  Final MDF:   151.2 Hz  (from late swings in Segment 2)                     │
+ │  Apparent MDF drop: 28.7%  ← ARTIFACT, not physiological fatigue            │
+ └──────────────────────────────────────────────────────────────────────────────┘
+
+ CONTINUITY-AWARE ANALYSIS (segments separately):
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │  Segment 1 only (13.5 min, 111 swings):                                      │
+ │  Baseline MDF: 210.9 Hz  →  Final MDF: 200.5 Hz                             │
+ │  MDF drop: 4.9%  ← no meaningful within-segment fatigue                     │
+ │                                                                              │
+ │  Segment 2: insufficient duration / different contact state                  │
+ │  → suppress cross-gap fatigue comparison                                     │
+ └──────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Diagram B — MDF Over Full Session Schematic
+
+```
+ MDF
+ Hz
+ 220 ─  ●●●●●●●                         (Segment 1 swings)
+     │         ●●●●●●●●
+ 200 ─                 ●●●●●●●
+     │                        ●●●
+     │
+     │                            ╔══════ BLE GAP (66 min) ══════╗
+     │                            ║  no data                     ║
+     │                            ╚══════════════════════════════╝
+     │
+ 160 ─                                                    ●●●●●● (Segment 2)
+     │                                               ●●●●●
+ 150 ─                                          ●●●●
+     │
+     │   ← naive: compares these two regions → 28.7% "fatigue"
+     │   ← correct: Seg 1 alone → 4.9% (no fatigue)
+     │
+     └────────────────────────────────────────────────────────► time
+          0        13.5 min                            80–88 min
+```
+
+## Diagram C — Continuity Audit Logic
+
+```
+       ┌─────────────────────────────────────────┐
+       │  For each sample / swing:               │
+       │    Check abs_us gap to previous         │
+       └────────────────┬────────────────────────┘
+                        │
+           ┌────────────▼────────────┐
+           │  Gap > threshold?       │
+           └────┬────────────┬───────┘
+                │ YES         │ NO
+                ▼             ▼
+       ┌─────────────┐  ┌──────────────────────────┐
+       │  New        │  │  Continue current segment │
+       │  segment ID │  └──────────────────────────┘
+       │  assigned   │
+       └──────┬──────┘
+              │
+              ▼
+       ┌──────────────────────────────────────────┐
+       │  Per-segment analysis:                   │
+       │    - Baseline computed within segment    │
+       │    - Fatigue metric within segment       │
+       │    - No cross-gap comparisons            │
+       └──────────────────────────────────────────┘
+```
+
+## Caption
+
+**Figure 6.** Session continuity audit. (A) Timeline of log0303 showing two BLE connection segments separated by a 66-minute gap. Naive analysis treating both segments as continuous produces a 28.7% apparent MDF drop (artifact). Continuity-aware analysis of Segment 1 alone shows 4.9% change (no meaningful fatigue). (B) Schematic MDF plot over the full session, illustrating the non-physiological apparent drop produced by the gap. (C) Continuity audit logic assigning segment IDs and preventing cross-gap fatigue comparisons.
+
+## Notes for Patent
+
+- The `abs_us` (absolute microsecond) hybrid timeline reconstructs session continuity across BLE dropouts and device resets by combining device-side timestamps with host-side clock stitching.
+- The 66-minute gap in log0303 is the experimental basis for Family C (session continuity management).
+- Cross-gap MDF comparison is a specific failure mode of naive longitudinal fatigue analysis and is the primary motivation for segment-aware processing.
+
+---
+
+### Figure 7 — Ghost Signal / Hardware Failure Diagnostic
+
+## Purpose
+Supports the pogo-pin ghost-signal embodiment (Family D). Shows the three-part diagnostic signature — high RAW/ENV correlation, near-zero RAW variance, and post-filter flatline — and the before/after repair comparison.
+
+## Diagram A — Failure Signature
+
+```
+GHOST-CHANNEL FAILURE STATE
+(RAW channel floating / pogo-pin open circuit)
+
+Signal behavior:
+┌──────────────────────────────────────────────────────────────────────┐
+│                                                                      │
+│  RAW (raw):  ─────────────────────────────────────────── (no AC)    │
+│              Low-amplitude, structureless, passively coupled to ENV  │
+│                                                                      │
+│  ENV:        ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲              │
+│              Normal muscle envelope activity                         │
+│                                                                      │
+│  RAW (post-bandpass filter):  ════════════════════════  FLATLINE     │
+│              Bandpass removes the DC-coupled ghost; nothing remains  │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+Diagnostic metrics:
+  • RAW variance:            near zero        (< flatline threshold)
+  • RAW/ENV Pearson r:       0.998            (pathologically high)
+  • Post-filter RAW std:     ~0               (flatline confirmed)
+  • RAW spectral content:    no EMG band power
+```
+
+## Diagram B — Before/After Repair Comparison
+
+```
+                     BEFORE REPAIR              AFTER REPAIR
+                  (pogo-pin open circuit)      (solder bypass)
+                 ┌───────────────────────┐   ┌───────────────────────┐
+ RAW waveform    │  ──────────────────── │   │  ╱╲  ╱╲  ╱╲  ╱╲  ╱╲  │
+                 │  (no AC content)      │   │  (normal EMG waveform) │
+                 └───────────────────────┘   └───────────────────────┘
+
+ RAW/ENV         │  r = 0.998            │   │  r = −0.013            │
+ correlation     │  (near-perfect)       │   │  (independent)         │
+
+ RAW variance    │  ≈ 0                  │   │  normal EMG level      │
+
+ Post-filter RAW │  ════ flatline ════   │   │  ╱╲ ╱╲ ╱╲ normal ╱╲   │
+
+ Interpretation  │  Ghost channel:       │   │  Valid RAW channel:    │
+                 │  RAW = passive copy   │   │  RAW has independent   │
+                 │  of ENV through       │   │  EMG AC content        │
+                 │  analog coupling      │   │                        │
+
+ Action          │  REJECT RAW metrics   │   │  ACCEPT RAW metrics    │
+                 │  FLAG hardware fault  │   │                        │
+```
+
+## Diagram C — Detection Flowchart
+
+```
+       ┌──────────────────────────────────────────────────────┐
+       │  For each analysis window:                           │
+       │    compute RAW variance, RAW/ENV correlation,        │
+       │    post-filter RAW standard deviation                │
+       └──────────────────┬───────────────────────────────────┘
+                          │
+          ┌───────────────▼────────────────┐
+          │  RAW variance < V_thresh       │
+          │  AND                           │
+          │  RAW/ENV correlation > R_thresh│
+          │  AND                           │
+          │  post-filter RAW std < F_thresh│
+          └───────┬──────────────┬─────────┘
+                  │ ALL TRUE      │ NOT ALL TRUE
+                  ▼               ▼
+       ┌──────────────────┐  ┌──────────────────────────────┐
+       │  GHOST_CHANNEL   │  │  Continue normal processing  │
+       │  _COUPLING state │  └──────────────────────────────┘
+       │                  │
+       │  Actions:        │
+       │  - REJECT RAW    │
+       │    spectral/RMS  │
+       │  - FLAG hardware │
+       │    failure       │
+       │  - PROMPT repair │
+       └──────────────────┘
+```
+
+## Caption
+
+**Figure 7.** Ghost-signal / hardware failure diagnostic. (A) Failure signature showing that a floating RAW input passively couples to ENV through analog paths, producing near-zero RAW variance, near-perfect RAW/ENV correlation, and a flatline after bandpass filtering. (B) Before/after repair comparison from the log0303 pogo-pin failure: RAW/ENV Pearson r drops from 0.998 to −0.013 after solder bypass, confirming independent RAW channel operation. (C) Three-condition detection flowchart for ghost-channel classification.
+
+## Notes for Patent
+
+- The empirical data (r = 0.998 before, r = −0.013 after) is from the ICPICS paper and log0303 analysis.
+- The three-condition gate (variance + correlation + post-filter std) is the implementable diagnostic core of Family D.
+- The physical cause in this embodiment was pogo-pin contact failure in the RAW signal routing path — but the diagnostic applies to any floating ADC input, multiplexer charge-sharing, or analog coupling failure.
+- The RAW flatline after bandpass filtering is the most reliable single indicator: it shows there is no independent AC muscle content in the RAW channel.
+
+## 21. EXPERIMENTAL SUPPORT TO INCLUDE
+
+### 21.1 log0305
 
 - Continuous 63.1-min tennis session.
 - 626 swings.
@@ -971,7 +1581,7 @@ Three-part diagnostic signature: near-zero RAW variance, RAW/ENV Pearson r ≈ 1
 - Stable IMU swing-intensity proxy.
 - Demonstrates reliable session after quality validation.
 
-### 20.2 log0303
+### 21.2 log0303
 
 - Two BLE segments separated by a large gap.
 - Higher ENV saturation: 14.2%.
@@ -979,7 +1589,7 @@ Three-part diagnostic signature: near-zero RAW variance, RAW/ENV Pearson r ≈ 1
 - Session discontinuity and contact-state change.
 - Demonstrates need for quality and continuity validation.
 
-### 20.3 Pogo-Pin Failure
+### 21.3 Pogo-Pin Failure
 
 - RAW channel failure caused ghost signal.
 - Diagnostic: high raw/env correlation, near-zero raw variance, post-filter flatline.
@@ -988,7 +1598,7 @@ Three-part diagnostic signature: near-zero RAW variance, RAW/ENV Pearson r ≈ 1
 
 ---
 
-## 21. KNOWN PRIOR-ART RISK AREAS
+## 22. KNOWN PRIOR-ART RISK AREAS
 
 Likely prior art includes:
 
@@ -1001,7 +1611,7 @@ Likely prior art includes:
 
 The strongest novelty should therefore emphasize:
 
-1. simultaneous raw EMG and hardware envelope comparison;
+1. concurrent, time-aligned, or common-interval raw EMG and hardware envelope comparison;
 2. use of hardware envelope as a signal-validity channel, not merely as the EMG signal itself;
 3. IMU as an independent EMG-validity context channel;
 4. classification/action logic that gates downstream EMG interpretation;
@@ -1009,7 +1619,7 @@ The strongest novelty should therefore emphasize:
 
 ---
 
-## 22. DISCLOSURE / FILING NOTES
+## 23. DISCLOSURE / FILING NOTES
 
 Important issues to review with counsel:
 
@@ -1028,7 +1638,9 @@ Important issues to review with counsel:
 
 ---
 
-## 23. DRAFTING STATUS
+## 24. ADMINISTRATIVE NOTES — NOT PART OF CLAIMED TECHNICAL SCOPE
+
+> **Internal working note — not part of the invention disclosure.** This section records filing-preparation status for internal tracking only and is not part of the claimed technical scope of the invention.
 
 All pre-filing drafting tasks are complete as of 2026-06-01.
 
@@ -1037,7 +1649,7 @@ All pre-filing drafting tasks are complete as of 2026-06-01.
 - [x] One-page invention disclosure — `01_invention_disclosure.md`
 - [x] System diagrams and figures 1–7 — `06_figures/`
 - [x] Full prose specification — this document
-- [x] 18 claim-style concepts (3 independents + 15 dependents) — §17
+- [x] 18 claim-style concepts (3 independents + 15 dependents) — §18
 - [x] Public disclosure timeline — `02_public_disclosure_timeline.md`
 - [x] Inventor/contributor matrix — `03_inventor_contribution_matrix.md`
 - [x] Prior art search notes — `04_prior_art_search_notes.md`
@@ -1046,18 +1658,20 @@ All pre-filing drafting tasks are complete as of 2026-06-01.
 ### Remaining before filing
 
 - [ ] Obtain ICPICS and CNIB publication dates — fill into `02_public_disclosure_timeline.md`
+- [ ] Open and verify `05_provisional_draft.pdf` — confirm title, all sections present, figures 1–7 readable, no stale draft-only wording
+- [ ] Confirm with USPTO Patent Center instructions who must sign/submit the provisional cover sheet for a minor inventor
 - [ ] File provisional via USPTO Patent Center — upload this PDF, complete cover sheet, pay micro-entity fee (~$320)
 - [ ] Record filing receipt in `07_filing_receipt.md`
 
 ---
 
-## 24. ONE-PARAGRAPH ATTORNEY SUMMARY
+## 25. ONE-PARAGRAPH ATTORNEY SUMMARY
 
-This invention provides systems and methods for validating wearable EMG signal quality by combining a high-rate raw EMG channel, a simultaneously acquired hardware envelope channel, and IMU-derived motion context. A processor derives raw EMG amplitude or software-envelope features, compares them with the hardware envelope to detect saturation, flatline, contact degradation, electrode settling, and ghost-channel coupling, and uses IMU data to distinguish valid muscle activity from reduced movement intensity, impact artifact, or motion-contaminated EMG. The resulting signal-quality classification gates downstream EMG interpretation, including baseline selection and fatigue monitoring, by accepting, rejecting, delaying, down-weighting, correcting, or annotating EMG-derived metrics with a confidence score. The approach addresses practical field-deployment failures in dynamic wearable EMG that are not resolved by conventional raw-only EMG processing or generic EMG/IMU feature fusion.
+This invention provides systems and methods for validating wearable EMG signal quality by combining a high-rate raw EMG channel, a concurrently acquired hardware envelope channel, and IMU-derived motion context. A processor derives raw EMG amplitude or software-envelope features, compares them with the hardware envelope to detect saturation, flatline, contact degradation, electrode settling, and ghost-channel coupling, and uses IMU data to distinguish valid muscle activity from reduced movement intensity, impact artifact, or motion-contaminated EMG. The resulting signal-quality classification gates downstream EMG interpretation, including baseline selection and fatigue monitoring, by accepting, rejecting, delaying, down-weighting, correcting, or annotating EMG-derived metrics with a confidence score. The approach addresses practical field-deployment failures in dynamic wearable EMG that are not resolved by conventional raw-only EMG processing or generic EMG/IMU feature fusion.
 
 ---
 
-## 25. CONCLUSION
+## 26. CONCLUSION
 
 The invention provides a **trustworthiness-first framework for wearable EMG systems**, in which physiological interpretation is conditioned on validated signal quality.
 

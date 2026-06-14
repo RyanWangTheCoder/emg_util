@@ -12,8 +12,11 @@
 | Filing date | TBD |
 | Confirmation number | TBD |
 | Entity status | Micro Entity |
-| Fee paid | $___  |
+| Fee paid | $___ |
 | Submitted PDF filename | `05_provisional_draft.pdf` |
+| Filed by (account holder) | Larry Wang (USPTO.gov / ID.me account) |
+| Inventor on cover sheet | Ryan Wang |
+| Correspondence contact | Larry Wang |
 
 ---
 
