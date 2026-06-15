@@ -308,6 +308,7 @@ it, session-level features computed from bad data will corrupt the regression mo
 - Protects AI model from learning electrode artifacts as "fatigue"
 
 ### Stage 2: Longitudinal Data Collection (weeks 16–30+)
+*Stage 2 setup (weeks 13–15): finalize pipeline, QC framework, and feature extractor — see "Immediate Action Items: Phase 2 Setup" below. Longitudinal collection begins week 16.*
 - Collect 40 valid minimum / 60 valid target / 80 valid stretch sessions with validated labels and quality control
 - Maintain logging discipline, weekly feature extraction
 - No model fitting until N=40 valid usable sessions
@@ -334,7 +335,7 @@ it, session-level features computed from bad data will corrupt the regression mo
 
 **Journal version (stronger, more distinctive — extends conference):**
 1. Full Stage 1 validation studies (at minimum: impedance settling + controlled fatigue calibration)
-2. 40–80 longitudinal sessions with complete quality-control reporting
+2. 40 valid minimum / 60 valid target / 80 valid stretch longitudinal sessions with complete quality-control reporting
 3. Stroke-aware load features with video-annotation validation subset
 4. Small replication cohort (N=2–4, biomarker/QC validation only) — strengthens generalizability claims
 5. Decision-oriented outputs: soft risk proxy, case studies of high-load weeks
@@ -1148,7 +1149,7 @@ readiness_labels.csv     — canonical label columns with target-shifted next_se
 ### What this paper explicitly does NOT claim
 - Injury prediction (no injury ground truth — use soreness/readiness decline proxies)
 - Cross-subject generalization (single subject by design — N-of-1 methodology is the contribution)
-- Deep learning superiority (elastic net / random forest for N=40–80; LSTM is future work)
+- Deep learning superiority (elastic net / random forest for 40 valid minimum / 60 valid target / 80 valid stretch sessions; LSTM is future work)
 - Classification accuracy as primary metric (Layer 1 RF serves Layer 2, not reviewed as standalone)
 
 ### Literature positioning
