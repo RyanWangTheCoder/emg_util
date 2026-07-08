@@ -16,6 +16,8 @@
 
 **Sibling repos:** `../arduino/py_scripts/` (capture), `../arduino/myoware_imu_v2/` (firmware), `../btLeApp/app/` (Android, embeds emg_util as submodule).
 
+**Upstream context:** For CSV schema, protocol, or data pipeline changes, consult `../arduino/py_scripts/memory-bank/` (BLE host recorder memory bank) and `../arduino/py_scripts/PROTOCOL.md`.
+
 ## Key Files & Entry Points
 | File | Purpose |
 |------|---------|
