@@ -1,156 +1,139 @@
 # CLAUDE.md — emg_util
 
 ## Project Overview
-- **Project**: `emg_util` — EMG+IMU Fatigue Monitoring (PC-side offline analysis + shared core library)
-- **Description**: Offline/research codebase for a MyoWare-2.0 + IMU wearable that monitors muscle fatigue during tennis. It ingests the EMG/IMU/vitals CSV logs captured by the wearable system and produces per-swing fatigue features (MDF/RMS trends), diagnostics, figures, and the papers/patents derived from them. This is **Tier 3** (offline) of a three-tier system and the **canonical source of truth** for all signal-processing algorithms.
-- **Language(s)**: Python 3.11 (numpy, pandas, scipy, matplotlib, scikit-learn, pyyaml, pytest; bleak for the capture-side tools)
+- **Project**: `emg_util` — EMG+IMU Fatigue Monitoring (offline analysis + canonical algorithm library)
+- **Description**: Ingests EMG/IMU/vitals CSV logs from wearable, produces per-swing fatigue features (MDF/RMS trends), diagnostics, figures, papers. **Tier 3 (offline)** of three-tier system; **canonical source of truth** for all signal-processing algorithms.
+- **Language(s)**: Python 3.11 (numpy, pandas, scipy, matplotlib, scikit-learn, pyyaml, pytest)
 - **Primary repo**: `git@github.com:wangxdflight/emg_util.git`
-- **Conda env**: `fft-env` (workspace interpreter `…/miniconda3/envs/fft-env/bin/python` — host-specific, do not hardcode elsewhere)
+- **Conda env**: `fft-env` (host-specific path; do not hardcode)
+- **Workspace**: `emg.code-workspace` (multi-folder: emg_util, arduino/py_scripts, arduino/myoware_imu_v2, btLeApp/app)
 
-## System Context (where emg_util sits)
-The full system has four sibling repos and three processing tiers. emg_util consumes data the others capture, and the others consume emg_util's algorithms.
+## System Context
+**Three-tier system:**
+- **Tier 1 (real-time, ~95% acc):** Android `SessionCaptureActivity` + `sensordata_plotter.py --fatigue`
+- **Tier 2 (post-capture, ~97%):** Android `offline_runner.py` decodes `frames_*.bin` → CSV
+- **Tier 3 (offline, ~98%):** `emg_util_yaml_runner.py` + Colab ← **THIS REPO**
 
-```
-Wearable (ESP32 + MyoWare 2.0 EMG + IMU + MAX30105 vitals)
-   │  Nordic UART Service (BLE), binary TLV frames, CRC16-CCITT
-   ▼
-Capture side  ──────────────────────────────────────────────
-  arduino/myoware_imu_v2/   ESP32 firmware (.ino)            ← FSR settings, pin map, protocol
-  arduino/py_scripts/       btCentral.py (PC BLE recorder → rotating CSV), sensordata_plotter.py (live UDP plot)
-  btLeApp/app/              Android app (Java + Chaquopy Python); embeds emg_util as a GIT SUBMODULE
-   │  emg_log_*.csv, imu_log_*.csv, vitals_log.csv (+ .meta.json)   |   frames_*.bin (Android)
-   ▼
-Analysis side ──────────────────────────────────────────────
-  emg_util/   ← THIS REPO (Tier 3 offline + canonical algorithm library)
-```
+**Sibling repos:** `../arduino/py_scripts/` (capture), `../arduino/myoware_imu_v2/` (firmware), `../btLeApp/app/` (Android, embeds emg_util as submodule).
 
-- **Tier 1 (real-time, ~95% acc, <10 ms):** Android `SessionCaptureActivity` + `sensordata_plotter.py --fatigue`.
-- **Tier 2 (post-capture on-device, ~97%):** Android `offline_runner.py` decodes `frames_*.bin` → CSV, stitches.
-- **Tier 3 (offline PC/Cloud, ~98%):** `emg_util_yaml_runner.py` + `tennis_analysis_cloud.ipynb` (Colab). **← emg_util.**
+## Key Files & Entry Points
+| File | Purpose |
+|------|---------|
+| `emg_util.py` | Core library (DSP/features, pandas-based) |
+| `fatigue_monitor.py` | **Canonical** real-time fatigue inference (single source of truth) |
+| `emg_util_yaml_runner.py` | Main CLI entry point for offline analysis |
+| `capture_loader.py` | CSV I/O, time-alignment, IMU scaling |
+| `tests/run_regression_tests.py` | Full regression test suite |
+| `out0305_w20/` | **Canonical output** (warmup 20 min, use for all claims) |
+| `log0305/` | **Golden session** (stable BLE, <2% saturation) |
 
-Sibling repos live next to this one. On the current host: `../arduino/py_scripts`, `../arduino/myoware_imu_v2`, `../btLeApp/app`. **Paths written inside `*.md` docs are often stale Windows paths (`C:\wangx\ftc\…`)** — ignore them; resolve relatively. See `emg.code-workspace` for the canonical multi-folder layout.
+**See Directory Structure section below for complete file layout.**
 
-## Architecture & Key Files
-```
-emg_util.py              — CORE LIBRARY (pandas/SciPy). Pure importable, NO CLI. (docstring header stale: "emg_util_bt.py")
-emg_util_yaml_runner.py  — THE CLI entry point. analyze_tennis_session(log_dir, cfg, out_dir). (stale header: "an.py")
-emg_util_nopandas.py     — Android/Chaquopy port: dict-of-numpy-arrays, no pandas/matplotlib/CLI. Mirrors emg_util.py.
-fatigue_monitor.py       — CANONICAL FatigueMonitor + preprocess_emg(). pandas-free, scipy-OPTIONAL. Single source of truth.
-capture_loader.py        — I/O + time-alignment + IMU unit-scaling ONLY (discover_sessions, load_session_stitched). No DSP.
-capture_health.py        — EMG-only BAD-interval detection (zeros/flatline/gaps) to filter swings over bad electrode contact.
-imu_baseline.py          — ImuBaseline: adaptive swing threshold from session gyro stats (numpy-only, Android-copyable).
-imu_feature.py           — windowed IMU features + Postural Instability Score (research/demo; __main__ may be truncated).
-feature_ml.py            — standalone EMG fatigue ML demo (LogReg/kNN). Runs at import; needs emg_example.csv in cwd.
-fatigue_analysis.py / fatigue_analysis2.py / *.py — one-off study scripts (some have hardcoded paths — edit before running).
-config.yaml + config_fast/w15/w20/w20_impact.yaml — analysis configs (one schema, tuned variants).
-tests/test_regression.py (pandas) + test_regression_nopandas.py (Android) ; tests/run_regression_tests.py ; pytest.ini
-regression_testlogs/     — real session data (Feb 8 2026); tests auto-skip if absent.
-log0303/ log0305/        — captured sessions (canonical input data). out0305_w20/ = canonical fatigue result.
-Docs: HLD_Project.md (system-wide end-to-end), HLD_emg_util.md (this repo), RULES.md, COMMANDS.md,
-      SWING_DETECTION.md, REGRESSION_TEST.md, CHANGELOG.md,
-      RESEARCH_REPORT.md (Paper 1, implemented), RESEARCH_ROADMAP.md (forward-looking, NOT measured results), todo.md
-Paper/figure pipeline: paper_figures.py, journal_draft.md, mdpi_template/, references.bib, build_*_docx.py
-```
+## Rules for Claude (enforced)
+### ALWAYS
+- **Read docs first:** `docs/HLD_emg_util.md` → `docs/HLD_Project.md` → `docs/RULES.md` → `docs/COMMANDS.md`
+- **Discuss before coding** — propose → align → implement
+- **Single source of truth:** edit `preprocess_emg()` / `FatigueMonitor` **only** in `fatigue_monitor.py`
+- **Dual-file parity:** changes to `emg_util.py` must be **manually ported** to `emg_util_nopandas.py` (Android)
+- **Backward compatibility:** add optional params; never remove/reorder without approval
+- **Update CHANGELOG.md on EVERY commit** (root cause + fix + affected paths)
+- **Add regression test** for every bug fix / feature / algorithm change
+- **Test with real data:** use `data/log0305` (golden) for baseline; `data/log0303` only for edge cases
 
-## Domain Knowledge / Terminology
-- **EMG / sEMG** — (surface) electromyography, the muscle electrical signal.
-- **RAW** — MyoWare hardware-bandpassed (20–500 Hz) AC EMG, the **only** column used for frequency analysis. ADC 12-bit (0–4095), biased ~**1843** counts (NOT 2048).
-- **ENV** — MyoWare hardware envelope (rectified + LPF ~3.6 Hz). Activation/quality proxy only; **unusable for MDF/MNF**. `ENV_sw` = software envelope = `abs(RAW − DC)` → Butterworth LPF.
-- **REF** — reference channel; disabled in firmware (`REF_CONNECTED=false`), not used in analysis.
-- **MDF** — **Median Frequency** of EMG PSD. **Primary fatigue marker — drops with fatigue** (~150–200 Hz fresh → lower).
-- **MNF** — Mean (power-weighted) Frequency.
-- **RMS / MAV / WL / ZC / SSC / IEMG** — time-domain EMG features (RMS rises with fatigue; ZC/SSC thr=0.01).
-- **IMU** — accelerometer (`ax,ay,az`) + gyroscope (`gx,gy,gz`). **Chip is ambiguous in docs (ICM-20948 vs LSM6DS3) — verify against firmware before quoting.**
-- **dps** — degrees/sec (gyro). **g** — gravity unit (accel). **acc_dyn** = `|acc_mag − 1g|` (gravity-removed effort proxy; the reliable IMU fatigue signal while gyro was saturating).
-- **FSR** — full-scale range. **LSB→physical**: acc `{2:16384, 4:8192, 8:4096, 16:2048}` LSB/g; gyro `{250:131.0, 500:65.5, 1000:32.8, 2000:16.4}` LSB/dps.
-- **swing** — one detected stroke (gyro-magnitude peak). **bout** — group of swings between rest gaps.
-- **dev_us** — device µs timestamp (accurate within a BLE connection; resets to 0 on ESP32 reboot; raw 32-bit wraps ~71.6 min, host-extended to 64-bit).
-- **host_rx_ms** — PC/phone wall-clock receive time (monotonic; bridges reconnect gaps).
-- **abs_us** — reconstructed absolute timeline (hybrid: `dev_us` within a connection + `host_rx_ms` gap-bridging across reconnects). Built by `load_session_stitched()`. **Use abs_us for swing detection/debounce**, never raw host_rx_ms (~49% inflated) or raw dev_us (resets).
-- **Chaquopy** — Python-on-Android runtime running `emg_util_nopandas.py` / `fatigue_monitor.py` on-device.
-- **Sampling rates (hardware-fixed):** EMG **2000 Hz** (40 kHz ADC ÷ 10× oversample, 12-bit), IMU **200 Hz**, vitals (SpO2/HR) ~every 30 s.
+### NEVER
+- Do **not** add `__init__.py` (Android imports rely on plain directory)
+- Do **not** add CLI/`__main__` to `emg_util.py` (must stay pure library)
+- Do **not** deduplicate `emg_util.py`↔`emg_util_nopandas.py` (intentional duplication)
+- Do **not** hardcode absolute paths (user works across multiple SSH remotes)
+- Do **not** cite RESEARCH_ROADMAP.md numbers as results (illustrative targets only)
+- Do **not** modify CSV columns without updating `capture_loader.py`, `PROTOCOL.md`, `btCentral.py`
 
-## Key Algorithm Parameters (must stay consistent across PC/Android/plotter)
-- **`preprocess_emg()`** (canonical, in `fatigue_monitor.py`): `detrend` → 4th-order Butterworth bandpass **50–450 Hz** (low cutoff raised 20→50 Hz on 2026-02-25 to reject 20–50 Hz motion artifact) → 60 Hz + 120 Hz `iirnotch` (Q=30). SciPy-optional: falls back to DC-removal-only when SciPy absent (MDF then differs).
-- **Envelope**: rectify + 2nd-order Butterworth LPF **3.6 Hz**.
-- **MDF/MNF**: Welch PSD, `nperseg=min(1024,len)`, `noverlap=min(512,…)`, Hann; numpy-FFT/Hamming fallback when SciPy absent.
-- **Swing detection** (`detect_swing_windows_from_imu`): fixed gyro-magnitude threshold **300 dps** (≈p88; NOT z-score), `min_gap_ms`/debounce **2000 ms** (merges back-swing+forward-swing), window `pre_ms=250 / post_ms=450`, `mdf_pad_ms=300` → push_swing window **2600 samples = 1300 ms @ 2000 Hz**. `already_in_dps=True` by default (data pre-scaled by loader). All paths (Android, plotter, runner, core) aligned to 300 dps / 2000 ms as of 2026-03-07.
-- **Baseline**: `warmup_skip_min` (skip electrode-settling) → RMS quality filter (keep swings with `rms ≥ 0.25 × session p90 RMS`) → **baseline MDF = 75th percentile** of valid swings (fresh muscle = highest MDF; RMS baseline uses median). `baseline_swings=20`.
-- **Fatigue**: `mdf_drop_pct = (baseline − current)/baseline × 100` (positive = fatigue). Real-time levels: warming_up / fresh (<12%) / moderate (12–20%) / high (>20%).
-- **ML** (mostly proposed): RandomForest, **Leave-One-Session-Out** CV only (never random split), within-subject median/IQR normalization, macro-F1 primary metric, prioritize 'high'-class recall.
-
-## Data Formats
-- **Capture CSV (btCentral / PC):** `emg_log_<session_id>_<open_id>_<idx>.csv` cols `dev_us,emg_seq,env,raw,ref,frame_seq,host_rx_ms`; `imu_log_…csv` cols `dev_us,…,ax,ay,az,gx,gy,gz,acc_fsr_g,gyro_fsr_dps,host_rx_ms`; `vitals_log.csv` (append-only). Each CSV has a sibling `*.meta.json`. `session_id`/`open_id` = `YYYYMMDD_HHMMSS` (open_id may add `_mmm`). **All files in one folder = ONE tennis session**; rotation (`_000,_001,…`) is file-management, not session boundaries.
-- **Android decoded CSV:** `emg_decoded.csv` (`timestamp_us,seq,channel,value,sample_rate` — long format), `imu_decoded.csv`, `vitals_decoded.csv`; from `frames_*.bin` (14-byte header + TLV + CRC16).
-- **In-memory schemas:** `EMG_IMU_COLS = [ts_ms,env,raw,ref,ax,ay,az,gx,gy,gz]`; `VITALS_COLS = [ts_ms,spo2,hr_bpm,age_ms,flags,brightness]`.
-- **Outputs** (per `out_dir`): `swing_windows.csv`, `swing_features.csv`, `bout_summary.csv`, `baseline.json`, `session_summary.json`, `fatigue_summary.csv`, `capture_segments.csv`, `emg_bad_intervals.csv`, `emg_imu_correlation.json`, `fatigue_trend.png`, `imu_activity_overlay.png`.
+## Quick Navigation
+| Need | Where |
+|------|-------|
+| Understand architecture | `docs/HLD_Project.md` (system) → `docs/HLD_emg_util.md` (this repo) |
+| Learn algorithms | `fatigue_monitor.py` (canonical) → `emg_util.py` (full DSP) → `docs/SWING_DETECTION.md` |
+| Find a function | `emg_util.py` (DSP) or `fatigue_monitor.py` (real-time) or `capture_loader.py` (I/O) |
+| Modify CSV schema | `capture_loader.py` → `btCentral.py` → `PROTOCOL.md` → `emg_util_yaml_runner.py` |
+| Change parameters | `config*.yaml` → `emg_util_yaml_runner.py` → `fatigue_monitor.py` |
+| Debug fatigue calc | `emg_util_yaml_runner.py` → `emg_util.analyze_fatigue()` → `fatigue_monitor.py` |
+| Check test failures | `tests/run_regression_tests.py` → `test_regression.py` or `test_regression_nopandas.py` |
+| Understand results | `outputs/out0305_w20/` (canonical) → `analysis/paper_figures.py` → `papers/paper_cnib.md` / `papers/icpics_draft.md` |
 
 ## Common Commands
 ```bash
-# Offline analysis (the main pipeline) — log_dir is the WHOLE capture folder (all connections stitched)
-python emg_util_yaml_runner.py --config config.yaml --log-dir <logs_dir> [--out-dir <out>]
-python emg_util_yaml_runner.py --config config_fast.yaml --log-dir <logs> --out-dir <out>   # medium mode, no plots
+# Offline analysis (main pipeline)
+python emg_util_yaml_runner.py --config config_w20.yaml --log-dir data/log0305 --out-dir outputs/out0305_w20
 
-# Real-time / offline viewer + fatigue replay (sensordata_plotter.py also lives in py_scripts/)
-python sensordata_plotter.py --mode live --infer-sr --fatigue --fatigue-warmup-min 5.0
-python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-       --emg-file <emg.csv> --imu-file <imu.csv> --fatigue-baseline-swings 5
+# Real-time plotter + offline replay
+python sensordata_plotter.py --mode live --infer-sr --fatigue
+python sensordata_plotter.py --mode offline --fatigue --emg-file <emg.csv> --imu-file <imu.csv>
 
-# Tests — run from emg_util/ (or add it to PYTHONPATH)
-python tests/run_regression_tests.py            # full suite (pre-commit recommended)
+# Tests
+python tests/run_regression_tests.py            # full suite
 pytest tests/test_regression.py -v              # pandas/PC
-pytest tests/test_regression_nopandas.py -v     # Android pandas-free
-pytest tests/ -m "fast" / -m "signal_processing" / -k "ENV"   # markers in pytest.ini (--strict-markers)
-python tests/run_regression_tests.py --generate-baseline      # ONLY for intentional algorithm changes
+pytest tests/test_regression_nopandas.py -v     # Android
 
-# Paper / figure build
-python paper_figures.py
-pandoc journal_draft.md --template mdpi_template/mdpi_pandoc_template.tex --bibliography references.bib \
-       --natbib --shift-heading-level-by=-1 --wrap=preserve -o mdpi_template/journal_sensors_pandoc.tex
-
-pip install -r requirements.txt
+# Paper figures
+python analysis/paper_figures.py
 ```
-Configs are tuned variants of one schema: `config.yaml` (mode `both`, warmup 10) · `config_fast.yaml` (mode `medium`, plots off, **older schema**: legacy z-score swing detection, no `env_gating`, FSR 4/1000) · `config_w15/w20` (warmup 15/20, paper experiments — **`out0305_w20` is canonical**) · `config_w20_impact` (impact masking on). The full configs use fixed-300-dps swing detection and `env_gating`.
 
-## Rules for Claude (from RULES.md — enforced)
-### ALWAYS
-- **Read the docs first** (HLD_emg_util.md / HLD_Project.md / RULES.md / COMMANDS.md / relevant `*.md`) before changing code.
-- **Discuss and get explicit approval before writing code** — propose → align → then implement.
-- **Single source of truth:** edit `preprocess_emg()` / `FatigueMonitor` **only** in `fatigue_monitor.py` (both `emg_util.py` and `emg_util_nopandas.py` import it). Keep DSP/feature math in `emg_util.py`; keep CLI/logging/plotting/I-O in the runners.
-- **Dual-file parity:** changes to shared functions in `emg_util.py` must be **manually ported** to `emg_util_nopandas.py` (envelope, mnf_mdf, feat_*, robust_zscore, detect_swing_windows_from_imu, select_baseline_swings, compute_baseline_from_swing_features, apply_baseline_deltas, compute_swing_emg_features) and verified by `TestSwingDetectionCrossVersion`.
-- **Backward compatibility is mandatory** — add optional params/new functions; never remove/reorder params or change return types without approval + deprecation path. New config keys default to old behavior.
-- **Update `CHANGELOG.md` on EVERY commit** (root cause + fix + affected paths). Update HLD_emg_util.md (and HLD_Project.md if cross-component) / docstrings / COMMANDS.md when behavior or CLI changes.
-- **Add a regression test** for every bug fix / new feature / algorithm change; run the full suite before committing.
-- Propagate FSR/config changes to ALL of: `capture_loader.py`, `config*.yaml`, `tennis_analysis_cloud.ipynb`, and capture-side `btCentral.py`.
-- Run `./gradlew clean assembleDebug` (Android) when changing code the submodule consumes.
+**Config variants:** `config.yaml` (full) · `config_fast.yaml` (fast, legacy) · `config_w20.yaml` (canonical, warmup 20 min)
 
-### NEVER
-- Do **not** add `__init__.py` to this dir — Android imports rely on it being a plain directory on `sys.path`.
-- Do **not** add a CLI/`__main__` to `emg_util.py` (it must stay a pure library).
-- Do **not** "deduplicate" `emg_util.py`↔`emg_util_nopandas.py`, `sensordata_plotter.py`↔`realtime_bridge.py`, `emg_util_yaml_runner.py`↔`offline_runner.py`, or `btCentral.py`↔`btcentral_offline_decode.py` — the duplication is intentional. Ask first (RULES.md Rule 7).
-- Do **not** use `fatigue_monitor.py` for offline trend analysis (it's real-time per-swing only) — use `emg_util.analyze_fatigue()` / the runner's per-swing summary.
-- Do **not** hardcode absolute paths (user works across multiple SSH remotes / shells).
-- Do **not** cite RESEARCH_ROADMAP.md numbers (87–90% acc, AUC 0.94, "r=0.82 lactate") as results — they are illustrative targets.
-- Do **not** delete/overwrite code or add dependencies without explicit confirmation.
-- Commit message format: `[Component] Brief description` + detail bullets + `Documentation:`/`Tested:`/`Affects:`. Vague messages ("fix mdf") are forbidden.
+## Domain Knowledge (Quick Reference)
+- **RAW** — MyoWare hardware-bandpassed EMG (20–500 Hz). Only column for frequency analysis.
+- **MDF** — Median Frequency of EMG PSD. **Primary fatigue marker — drops with fatigue.**
+- **Swing** — One detected stroke (gyro-magnitude peak). **Threshold: 300 dps** (fixed).
+- **Baseline** — 75th percentile MDF of valid swings (fresh muscle = highest MDF).
+- **Fatigue** — `mdf_drop_pct = (baseline − current)/baseline × 100` (positive = fatigue).
+- **FSR** — Full-scale range. **Always trust the frame, not assumptions.** Acc 2→4→8 g, gyro 250→1000→2000 dps.
+- **Sampling rates:** EMG **2000 Hz**, IMU **200 Hz**, vitals ~every 30 s.
 
-## Gotchas & Constraints
-- **FSR history is messy:** acc 2→4→8 g, gyro 250→1000→2000 dps over time (gyro saturated at 250 dps; raised 2026-02-25). Configs disagree (full=8/2000, fast=4/1000). **Always trust the FSR code in the IMU_META_V2 frame / per-row `acc_fsr_g`/`gyro_fsr_dps` columns**, not a fixed assumption. Wrong FSR defaults scale gyro ~4× too small → zero swings detected.
-- **Gyro pre-2026-02-25 sessions are saturated** — use `imu_mean_acc_dyn` (not gyro) for effort/fatigue there.
-- **Noise-dominated baseline** is the recurring fatigue bug: poor early electrode contact → flat-spectrum MDF ~100 Hz; if baseline anchors there, real swings give *negative* `mdf_drop_pct`. The RMS filter + warmup-skip exist to prevent this. Electrode settling lasts ~17–20 min (hence `out0305_w20`).
-- **RAW must be physically connected:** a floating RAW pogo-pin makes the 50 Hz high-pass wipe the ghost signal to a flatline → all MDF/MNF/RMS invalid. Verify resting RAW ≈ 1843 (not flat, not saturated). RAW solders to ESP32 **GPIO 32** — the pad labeled "A4" is I2C SDA/GPIO 21 (no ADC), and the firmware `// A4` comment is wrong.
-- **`acc_dyn` peak = swing APEX, not ball contact** (median −4.7 ms from gyro peak) — impact-triggered analysis isn't grounded without an external trigger.
-- **Per-swing MDF is noisy** (CV ~38.7%) — average over 10–20 swings or multi-session trends; single-session adaptive endpoint detection fails.
-- **`env_mean` means different things**: real-time = `nanmean(abs(raw))`; offline = `emg_env_mean` from `envelope()`. Don't compare directly.
-- **BLE reconnect resets `dev_us`→0 and sends `seg=0`** — plotter/loader must re-anchor `t0` and clear buffers or the plot freezes / samples get dropped.
-- **Test counts in REGRESSION_TEST.md are internally inconsistent** (61/53/29/25) — count actual tests, don't trust a single number. `regression_baseline.json` generator (`run_regression_tests.py`) may use stale column names (`emg_raw`) / signatures — verify against current code.
-- **Two real sessions drive everything:** `log0305` (the "Golden Session", stable BLE, <2% saturation) and `log0303` (gap-confounded counter-example — **do not use for fatigue claims**).
-- **IRB / human-subjects context:** captured data comes from a 2-minor-participant pilot (Ryan Wang, Theodore Di) under an IRB packet; the engineering paper (`paper_cnib.md`) is intentionally separate from the IRB-authorized study. `*.md` are source of truth; `.docx`/`.pdf` are generated.
+**Full terminology:** see `docs/HLD_emg_util.md` (Domain Knowledge section).
 
-## Environment
-- **OS**: Linux · **Shell**: `/bin/tcsh` (note: some default-PATH commands need full paths) · **IDE**: VS Code Remote-SSH (`emg.code-workspace`)
-- **Interpreter**: conda env `fft-env` (host-specific path; don't assume it exists elsewhere)
+## Directory Structure (High-Level)
+```
+emg_util/
+├── Core Library (importable, no CLI) — stay at root
+│   ├── emg_util.py, emg_util_nopandas.py, fatigue_monitor.py, capture_loader.py,
+│   ├── capture_health.py, emg_util_yaml_runner.py, sensordata_plotter.py,
+│   ├── rest_recommendation.py, config*.yaml
+├── docs/                          (HLD_Project.md, HLD_emg_util.md, RULES.md, COMMANDS.md,
+│                                   SWING_DETECTION.md, COLAB_USAGE_GUIDE.md, etc.)
+├── analysis/                      (paper_figures.py, fatigue_analysis.py, n2_preimpact_mdf.py,
+│                                   gen_icpics_fig*.py, build_*_docx.py, tennis_analysis_cloud.ipynb)
+├── papers/                        (icpics_draft.*, paper_cnib.*, journal_*.md, abstract.md,
+│                                   mdpi_template/, paper_figures/, icpics_figures/, paper_figures_tif/,
+│                                   cnib_template.docm, icpics_Templates.*, references.bib, *.zip)
+├── irb/                           (IRB_*.md/.pdf/.docx, README_for_Prof_Di.txt, readme.pdf, profDi.zip)
+├── data/                          (log0303/, log0303_seg1/, log0305/, log0303.zip, log0305.zip)
+├── outputs/                       (out0303_seg1/, out0303_v2/, out0305/, out0305_v2/,
+│                                   out0305_w15/, out0305_w20/, out0305_w20_impact/)
+├── tests/                         (run_regression_tests.py, test_regression.py, test_regression_nopandas.py)
+├── tools/                         (log_check.py, motion_artifact_analysis.py, …)
+├── patent/                        (patent docs and worklog)
+├── ML/                            (ML research and CAST submission)
+└── Documents/                     (reference PDFs)
+```
+
+**Full directory structure:** see `docs/HLD_emg_util.md` (Directory Structure section).
+
+## Environment & Setup
+- **OS**: Linux (also Windows/macOS) · **Shell**: `/bin/tcsh` · **IDE**: VS Code Remote-SSH
+- **Python**: 3.11 (conda env `fft-env`)
+- **Setup:** `conda create -n fft-env python=3.11 && pip install -r requirements.txt`
+
+## Cross-Repo Dependencies
+When modifying shared data formats (CSV schema, FSR, protocol):
+1. Update `emg_util/capture_loader.py` (CSV schema)
+2. Update `arduino/py_scripts/btCentral.py` (CSV writer)
+3. Update `PROTOCOL.md` (both repos)
+4. Update `arduino/myoware_imu_v2/` firmware if needed
+5. Run `./gradlew clean assembleDebug` (Android submodule)
+
+**Never hardcode absolute paths** — user works across multiple SSH remotes.
 
 ## Context Management
-- Long sessions → summarize and use `/handoff`. Durable facts go in MEMORY.md, not here.
+- Long sessions → use `/handoff`. Durable facts go in MEMORY.md, not here.
 - This file is stable project rules; do not add session-specific notes.
+- For detailed info, see linked docs in `docs/` folder (HLD_emg_util.md, RULES.md, COMMANDS.md, etc.).

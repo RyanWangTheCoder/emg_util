@@ -1,0 +1,2 @@
+baseline_MDF,final_MDF,MDF_drop_pct,MNF_drop_pct,fatigue_onset_s,n_swings_post_warmup,warmup_skip_min,source,baseline_source
+199.219,143.179,28.13,17.286,1224.3,390,20.0,per_swing,baseline_json
