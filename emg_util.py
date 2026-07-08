@@ -1,6 +1,20 @@
 
 # -*- coding: utf-8 -*-
 """
+⚠️  DUAL-FILE PARITY REQUIREMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This file (emg_util.py) is the PANDAS version for PC/cloud analysis.
+Changes here MUST be manually ported to emg_util_nopandas.py for Android.
+
+See CLAUDE.md line 37: "Dual-file parity: changes to emg_util.py must be
+manually ported to emg_util_nopandas.py (Android)"
+
+After editing this file:
+  1. Port changes to emg_util_nopandas.py (remove pandas, use dicts/lists)
+  2. Run: pytest tests/test_regression_nopandas.py -v
+  3. Update CHANGELOG.md listing both files
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 emg_util_bt.py
 
 btCentral EMG/IMU/Vitals offline analysis + plotting + fatigue analysis.
