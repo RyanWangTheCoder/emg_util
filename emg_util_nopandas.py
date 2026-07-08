@@ -1,5 +1,20 @@
 # -*- coding: utf-8 -*-
-"""emg_util_nopandas.py
+"""
+⚠️  DUAL-FILE PARITY REQUIREMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This file (emg_util_nopandas.py) is the ANDROID version (no pandas).
+It must stay algorithmically identical to emg_util.py (pandas version).
+
+See CLAUDE.md line 37: "Dual-file parity: changes to emg_util.py must be
+manually ported to emg_util_nopandas.py (Android)"
+
+When emg_util.py changes:
+  1. Port the same logic here (remove pandas, use dicts/lists/numpy)
+  2. Run: pytest tests/test_regression_nopandas.py -v
+  3. Update CHANGELOG.md listing both files
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+emg_util_nopandas.py
 
 A pandas-free subset of your `emg_util.py`, designed to run under Chaquopy on Android.
 
