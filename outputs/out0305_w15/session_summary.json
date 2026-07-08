@@ -1,0 +1,12 @@
+{
+  "n_capture_files": 1,
+  "capture_ids": [
+    "20260305_192734"
+  ],
+  "total_duration_s": 3785.398,
+  "total_duration_min": 63.09,
+  "num_swings": 626,
+  "num_bouts": 50,
+  "reconnection_times_s": [],
+  "mode": "both"
+}

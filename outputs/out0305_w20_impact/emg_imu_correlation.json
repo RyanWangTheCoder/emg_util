@@ -1,0 +1,62 @@
+{
+  "method": "pearson",
+  "n_rows": 19038,
+  "columns": [
+    "EMG_RMS",
+    "EMG_ENV_mean",
+    "EMG_MNF_Hz",
+    "EMG_MDF_Hz",
+    "IMU_acc_rms",
+    "IMU_gyro_rms"
+  ],
+  "correlation": {
+    "EMG_RMS": {
+      "EMG_RMS": 1.0,
+      "EMG_ENV_mean": 0.974484933017125,
+      "EMG_MNF_Hz": 0.0897904063459937,
+      "EMG_MDF_Hz": 0.08963151510029167,
+      "IMU_acc_rms": -0.056539649818763436,
+      "IMU_gyro_rms": -0.06350721217074654
+    },
+    "EMG_ENV_mean": {
+      "EMG_RMS": 0.974484933017125,
+      "EMG_ENV_mean": 1.0,
+      "EMG_MNF_Hz": 0.12313497838310371,
+      "EMG_MDF_Hz": 0.11350333831602266,
+      "IMU_acc_rms": -0.051091268724225626,
+      "IMU_gyro_rms": -0.054595836009596846
+    },
+    "EMG_MNF_Hz": {
+      "EMG_RMS": 0.0897904063459937,
+      "EMG_ENV_mean": 0.12313497838310371,
+      "EMG_MNF_Hz": 1.0,
+      "EMG_MDF_Hz": 0.9356604425184334,
+      "IMU_acc_rms": -0.008548810318321333,
+      "IMU_gyro_rms": -0.008439611693234317
+    },
+    "EMG_MDF_Hz": {
+      "EMG_RMS": 0.08963151510029167,
+      "EMG_ENV_mean": 0.11350333831602266,
+      "EMG_MNF_Hz": 0.9356604425184334,
+      "EMG_MDF_Hz": 1.0,
+      "IMU_acc_rms": -0.010429152734219784,
+      "IMU_gyro_rms": -0.01652849718760643
+    },
+    "IMU_acc_rms": {
+      "EMG_RMS": -0.056539649818763436,
+      "EMG_ENV_mean": -0.051091268724225626,
+      "EMG_MNF_Hz": -0.008548810318321333,
+      "EMG_MDF_Hz": -0.010429152734219784,
+      "IMU_acc_rms": 1.0,
+      "IMU_gyro_rms": 0.9123694443204555
+    },
+    "IMU_gyro_rms": {
+      "EMG_RMS": -0.06350721217074654,
+      "EMG_ENV_mean": -0.054595836009596846,
+      "EMG_MNF_Hz": -0.008439611693234317,
+      "EMG_MDF_Hz": -0.01652849718760643,
+      "IMU_acc_rms": 0.9123694443204555,
+      "IMU_gyro_rms": 1.0
+    }
+  }
+}
