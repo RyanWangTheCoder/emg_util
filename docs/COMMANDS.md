@@ -2,7 +2,7 @@
 
 Quick reference for running Python scripts in the EMG utility package.
 
-**Base Directory:** `C:\wangx\ftc\emg_util`
+**Base Directory:** `emg_util/` (repo root; paths are relative to this directory)
 
 ---
 
@@ -98,13 +98,16 @@ Run complete EMG/IMU analysis pipeline with YAML configuration:
 
 ```bash
 # Standard analysis with default config
-python emg_util_yaml_runner.py --config config.yaml --log-dir ..\arduino\py_scripts\logs_new\
+python emg_util_yaml_runner.py --config config.yaml --log-dir data/log0305
 
 # Fast analysis (reduced features, no plots)
-python emg_util_yaml_runner.py --config config_fast.yaml --log-dir ..\arduino\py_scripts\logs_new\
+python emg_util_yaml_runner.py --config config_fast.yaml --log-dir data/log0305
+
+# Canonical analysis (warmup 20 min, use for all claims)
+python emg_util_yaml_runner.py --config config_w20.yaml --log-dir data/log0305 --out-dir outputs/out0305_w20
 
 # Custom output directory
-python emg_util_yaml_runner.py --config config.yaml --log-dir path\to\logs --out-dir path\to\output
+python emg_util_yaml_runner.py --config config.yaml --log-dir data/log0305 --out-dir outputs/my_analysis
 ```
 
 **Common Options:**
@@ -115,6 +118,9 @@ python emg_util_yaml_runner.py --config config.yaml --log-dir path\to\logs --out
 **Configuration Files:**
 - `config.yaml` - Full analysis with all features and plots
 - `config_fast.yaml` - Fast mode for quick analysis
+- `config_w15.yaml` - Warmup 15 min skip
+- `config_w20.yaml` - **Canonical** (warmup 20 min skip, use for all claims)
+- `config_w20_impact.yaml` - Warmup 20 min with impact detection
 
 ---
 
@@ -138,24 +144,24 @@ python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_2
 # Uses capture_loader for correct abs_us physical timeline (handles multi-connection sessions)
 # --max-points 1000 = 5s of IMU @ 200 Hz; EMG auto-scaled to 10000 rows @ 2000 Hz
 python sensordata_plotter.py --mode offline \
-    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
-    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv
+    --emg-file data/log0303/emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file data/log0303/imu_log_20260303_183639_20260303_185708_940_001.csv
 
 # EMG + IMU, first 5 seconds only (max-points = IMU rows; EMG auto-scaled)
 python sensordata_plotter.py --mode offline \
-    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
-    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv \
+    --emg-file data/log0303/emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file data/log0303/imu_log_20260303_183639_20260303_185708_940_001.csv \
     --max-points 1000
 
 # EMG + IMU, tune swing detection (override defaults)
 python sensordata_plotter.py --mode offline \
-    --emg-file log0303\emg_log_20260303_183639_20260303_185708_920_001.csv \
-    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv \
+    --emg-file data/log0303/emg_log_20260303_183639_20260303_185708_920_001.csv \
+    --imu-file data/log0303/imu_log_20260303_183639_20260303_185708_940_001.csv \
     --swing-detect-mode gyro_and_acc --imu-thr-dps 150 --debounce-sec 2.0
 
 # IMU-only plot (swing detection only, no EMG)
 python sensordata_plotter.py --mode offline \
-    --imu-file log0303\imu_log_20260303_183639_20260303_185708_940_001.csv
+    --imu-file data/log0303/imu_log_20260303_183639_20260303_185708_940_001.csv
 ```
 
 ### Offline Fatigue Replay (CSV → Live Pipeline)
@@ -166,46 +172,46 @@ Requires both `--emg-file` and `--imu-file`. Produces the 4-subplot figure (RAW,
 ```bash
 # Instant replay — all data fed at once, animation scrolls to end, then stops
 python sensordata_plotter.py --mode offline --fatigue \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --fatigue-baseline-swings 5
 
 # Instant replay + freeze x-axis at end to show full session (recommended)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --fatigue-baseline-swings 5
 
 # Real-time replay at 1× speed (watch session unfold in real time)
 python sensordata_plotter.py --mode offline --fatigue --replay-speed 1.0 \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
    
 
 # Real-time replay at 4× speed
 python sensordata_plotter.py --mode offline --fatigue --replay-speed 4.0 --replay-no-scroll \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --fatigue-baseline-swings 5
 
 # Instant replay with hysteresis detector (advanced: impact detection)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --swing-detector hysteresis \
     --fatigue-baseline-swings 5
 
 # Real-time replay at 2× speed with hysteresis detector
 python sensordata_plotter.py --mode offline --fatigue --replay-speed 2.0 \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --swing-detector hysteresis \
     --fatigue-baseline-swings 5
 
 # With explicit emg_util path (if running from a different directory)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file path\to\emg_log.csv --imu-file path\to\imu_log.csv \
-    --emg-util-path C:\wangx\ftc\emg_util
+    --emg-file path/to/emg_log.csv --imu-file path/to/imu_log.csv \
+    --emg-util-path /path/to/emg_util
 ```
 
 **How it works:**
@@ -420,28 +426,28 @@ python sensordata_plotter.py --mode live --fatigue --fatigue-warmup-min 0
 ### Workflow 2: Offline Analysis
 
 ```bash
-# Step 1: Run full analysis pipeline
-python emg_util_yaml_runner.py --config config.yaml --log-dir logs_new\
+# Step 1: Run full analysis pipeline (canonical: warmup 20 min)
+python emg_util_yaml_runner.py --config config_w20.yaml --log-dir data/log0305 --out-dir outputs/out0305_w20
 
 # Step 2: Visual inspection of specific file
-python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095
+python sensordata_plotter.py --mode offline --emg-file data/log0305/emg_log_20260305_192734_20260305_192754_793_000.csv --emg-ymax 4095
 ```
 
-### Workflow 4: Offline Fatigue Replay of a Captured Session
+### Workflow 3: Offline Fatigue Replay of a Captured Session
 
 ```bash
 # Replay a 20-minute session with fatigue analysis (instant, full-session view)
 python sensordata_plotter.py --mode offline --fatigue --replay-no-scroll \
-    --emg-file log0303\emg_log_20260303_191258_20260303_193315_829_001.csv \
-    --imu-file log0303\imu_log_20260303_191258_20260303_193600_402_001.csv \
+    --emg-file data/log0303/emg_log_20260303_191258_20260303_193315_829_001.csv \
+    --imu-file data/log0303/imu_log_20260303_191258_20260303_193600_402_001.csv \
     --fatigue-baseline-swings 5
 ```
 
-### Workflow 3: Quick Saturation Check
+### Workflow 4: Quick Saturation Check
 
 ```bash
 # Check if EMG signal is saturating (clipping at ADC max)
-python sensordata_plotter.py --mode offline --emg-file emg_log_20260131_235524_20260131_235538_000 --emg-ymax 4095 --max-points 100000
+python sensordata_plotter.py --mode offline --emg-file data/log0305/emg_log_20260305_192734_20260305_192754_793_000.csv --emg-ymax 4095 --max-points 100000
 ```
 
 ---
@@ -473,11 +479,11 @@ Optimized for speed:
 
 **Issue: "Module not found" errors**
 ```bash
-# Ensure you're in the correct directory
-cd C:\wangx\ftc\emg_util
+# Ensure you're in the emg_util directory
+cd /path/to/emg_util
 
 # Or use absolute paths
-python C:\wangx\ftc\emg_util\sensordata_plotter.py --mode live
+python /path/to/emg_util/sensordata_plotter.py --mode live
 ```
 
 **Issue: UDP connection timeout in live mode**
@@ -490,7 +496,7 @@ python C:\wangx\ftc\emg_util\sensordata_plotter.py --mode live
 **Issue: Fatigue monitor not working**
 ```bash
 # Ensure emg_util path is correct
-python sensordata_plotter.py --mode live --fatigue --emg-util-path C:\wangx\ftc\emg_util
+python sensordata_plotter.py --mode live --fatigue --emg-util-path /path/to/emg_util
 
 # Check that fatigue_monitor.py exists in emg_util directory
 ```
