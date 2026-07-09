@@ -1,0 +1,11 @@
+{
+  "env": {
+    "PYTHON": "/local/mnt/workspace/wangx/miniconda3/envs/fft-env/bin/python"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(/local/mnt/workspace/wangx/miniconda3/envs/fft-env/bin/python *)"
+    ]
+  }
+}
